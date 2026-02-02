@@ -1,9 +1,16 @@
 #!/usr/bin/env python3
 """
-TRACE MCP Server v2.0 - Transparent Research AI Collaboration Environment
+TRACE MCP Server v2.1 - Transparent Research AI Collaboration Environment
 
 A Model Context Protocol server for tracking AI-human collaboration in research.
 Designed to support reproducibility, attribution, and audit trails for AI-assisted science.
+
+v2.1 Changes:
+- Smart TRACE Triggers: Behavioral triggers for automatic logging prompts
+- trace_knowledge_check tool: Validates events, detects types, checks duplicates
+- Pattern-based event type detection
+- Similarity checking to avoid duplicate entries
+- Suggested field generation for easier logging
 
 v2.0 Changes:
 - New authorship model: human_directed vs ai_suggested vs human_manual_edit
@@ -27,6 +34,7 @@ Requirements:
 import json
 import asyncio
 import os
+import re
 import hashlib
 import subprocess
 from pathlib import Path
@@ -323,6 +331,709 @@ def search_trace(trace: dict, query: str, categories: Optional[List[str]] = None
 
 
 # ============================================================
+# Smart Trigger System (v2.1)
+# ============================================================
+
+# Trigger patterns for different entry types
+TRIGGER_PATTERNS = {
+    "gotcha": {
+        "keywords": [
+            "unexpected", "surprising", "weird", "strange", "gotcha", "pitfall",
+            "silent", "silently", "fails", "failure", "bug", "issue", "problem",
+            "workaround", "hack", "actually", "turns out", "realized", "discovered",
+            "doesn't work", "didn't work", "won't work", "broken", "breaking",
+            "misleading", "confusing", "undocumented", "documentation says",
+            "contrary to", "despite", "even though", "however", "but actually",
+            "careful", "watch out", "beware", "caution", "warning", "trap"
+        ],
+        "patterns": [
+            r"(?:does|doesn't|won't|can't|shouldn't|wouldn't).*(?:expect|think|assume)",
+            r"(?:silently|quietly).*(?:fail|drop|ignore|skip)",
+            r"(?:docs?|documentation).*(?:wrong|incorrect|outdated|misleading)",
+            r"(?:must|need to|have to|should).*(?:before|after|first)",
+            r"(?:only|unless|except).*(?:works?|fails?)"
+        ],
+        "description": "Unexpected behavior, pitfalls, or workarounds"
+    },
+    "decision": {
+        "keywords": [
+            "decided", "decision", "chose", "chosen", "selected", "picked",
+            "went with", "going with", "opted", "opting", "prefer", "preferred",
+            "trade-off", "tradeoff", "instead of", "rather than", "over",
+            "because", "since", "therefore", "approach", "strategy",
+            "architecture", "design", "pattern", "convention", "standard"
+        ],
+        "patterns": [
+            r"(?:chose|decided|selected|picked|opted).*(?:over|instead|rather)",
+            r"(?:will|going to).*(?:use|implement|adopt)",
+            r"(?:trade-?off|balance|weigh).*(?:between|versus|vs)",
+            r"(?:approach|strategy|method).*(?:for|to)"
+        ],
+        "description": "Choices between approaches, trade-offs, architectural decisions"
+    },
+    "learning": {
+        "keywords": [
+            "learned", "learning", "discovered", "found out", "realized",
+            "understand", "understood", "figured out", "turns out",
+            "TIL", "insight", "aha", "interesting", "note to self",
+            "remember", "important to know", "key insight", "works because",
+            "the reason", "explains why", "makes sense now"
+        ],
+        "patterns": [
+            r"(?:learned|discovered|realized|found).*(?:that|how|why)",
+            r"(?:turns out|it seems|apparently).*(?:that|because)",
+            r"(?:now|finally).*(?:understand|know|see)",
+            r"(?:the|this).*(?:reason|explanation|cause).*(?:is|was)"
+        ],
+        "description": "New knowledge, insights, or understanding gained"
+    },
+    "idea": {
+        "keywords": [
+            "could", "might", "should", "would be nice", "what if",
+            "idea", "suggestion", "proposal", "opportunity", "potential",
+            "improve", "improvement", "optimize", "optimization", "enhance",
+            "better", "alternative", "another way", "consider", "maybe",
+            "future", "later", "eventually", "TODO", "FIXME", "refactor"
+        ],
+        "patterns": [
+            r"(?:could|might|should).*(?:improve|optimize|enhance|refactor)",
+            r"(?:would be|it.d be).*(?:nice|good|better|useful)",
+            r"(?:what if|how about|consider).*(?:we|using|adding)",
+            r"(?:future|later|eventually).*(?:could|should|might)"
+        ],
+        "description": "Improvement opportunities, optimizations, or alternative approaches"
+    },
+    "intervention": {
+        "keywords": [
+            "changed", "modified", "corrected", "fixed", "adjusted",
+            "override", "overrode", "replaced", "rewrote", "edited",
+            "instead", "rather", "different", "not quite", "almost",
+            "tweaked", "refined", "improved", "simplified", "removed"
+        ],
+        "patterns": [
+            r"(?:changed|modified|corrected|fixed).*(?:AI|generated|suggested)",
+            r"(?:AI|it).*(?:suggested|generated|produced).*(?:but|however)",
+            r"(?:had to|needed to).*(?:change|modify|fix|correct|adjust)",
+            r"(?:not quite|almost|close but).*(?:right|correct|what)"
+        ],
+        "description": "Human modifications to AI-generated output"
+    },
+    "code": {
+        "keywords": [
+            "created", "implemented", "wrote", "added", "built",
+            "function", "class", "module", "file", "feature",
+            "refactored", "optimized", "fixed", "updated", "modified",
+            "lines", "code", "script", "program"
+        ],
+        "patterns": [
+            r"(?:created|wrote|implemented|added).*(?:function|class|module|file)",
+            r"(?:\d+).*(?:lines|functions|classes)",
+            r"(?:new|updated|modified).*(?:file|code|implementation)"
+        ],
+        "description": "Code contributions or modifications"
+    },
+    "error": {
+        "keywords": [
+            "error", "exception", "crash", "bug", "failure",
+            "traceback", "stack trace", "raised", "thrown",
+            "TypeError", "ValueError", "RuntimeError", "AttributeError",
+            "null", "undefined", "NaN", "infinite loop", "timeout"
+        ],
+        "patterns": [
+            r"(?:error|exception|crash|failure).*(?:occurred|happened|raised)",
+            r"(?:TypeError|ValueError|RuntimeError|KeyError|AttributeError)",
+            r"(?:returned|got|received).*(?:null|None|undefined|NaN)"
+        ],
+        "description": "Errors, exceptions, or failures encountered"
+    }
+}
+
+
+def calculate_text_similarity(text1: str, text2: str) -> float:
+    """Calculate simple text similarity using word overlap (Jaccard similarity)."""
+    words1 = set(text1.lower().split())
+    words2 = set(text2.lower().split())
+
+    if not words1 or not words2:
+        return 0.0
+
+    intersection = words1.intersection(words2)
+    union = words1.union(words2)
+
+    return len(intersection) / len(union) if union else 0.0
+
+
+def detect_event_type(context: str) -> List[tuple]:
+    """
+    Detect likely event types from context.
+    Returns list of (event_type, confidence, reasoning) tuples sorted by confidence.
+    """
+    context_lower = context.lower()
+    results = []
+
+    for event_type, patterns in TRIGGER_PATTERNS.items():
+        score = 0
+        matched_keywords = []
+        matched_patterns = []
+
+        # Check keywords
+        for keyword in patterns["keywords"]:
+            if keyword.lower() in context_lower:
+                score += 1
+                matched_keywords.append(keyword)
+
+        # Check regex patterns
+        for pattern in patterns["patterns"]:
+            if re.search(pattern, context_lower):
+                score += 2  # Patterns are more specific, weight higher
+                matched_patterns.append(pattern)
+
+        if score > 0:
+            # Normalize score (rough approximation)
+            max_possible = len(patterns["keywords"]) + len(patterns["patterns"]) * 2
+            confidence = min(score / 5, 1.0)  # Cap at 1.0, threshold at 5 matches
+
+            if confidence >= 0.2:  # Only include if at least 20% confident
+                confidence_label = "high" if confidence >= 0.6 else "medium" if confidence >= 0.4 else "low"
+                reasoning = f"Matched keywords: {matched_keywords[:3]}" if matched_keywords else ""
+                results.append((event_type, confidence_label, reasoning, confidence))
+
+    # Sort by raw confidence score (descending)
+    results.sort(key=lambda x: x[3], reverse=True)
+
+    # Return without the raw score
+    return [(r[0], r[1], r[2]) for r in results]
+
+
+def find_similar_entries(trace: dict, context: str, event_type: str, threshold: float = 0.3) -> List[dict]:
+    """Find similar existing entries in TRACE data."""
+    similar = []
+
+    # Map event types to TRACE categories and their text fields
+    category_fields = {
+        "gotcha": ("gotchas", ["problem", "solution"]),
+        "decision": ("decisions", ["decision", "rationale"]),
+        "learning": ("learnings", ["learning", "evidence"]),
+        "idea": ("ideas", ["idea", "triggered_by"]),
+        "intervention": ("interventions", ["ai_output_summary", "human_action"]),
+        "code": ("code_contributions", ["description", "file_path"]),
+        "error": ("errors", ["description", "resolution_description"])
+    }
+
+    if event_type not in category_fields:
+        return []
+
+    category, fields = category_fields[event_type]
+    entries = trace.get(category, [])
+
+    for entry in entries:
+        # Build text to compare from relevant fields
+        entry_text_parts = []
+        for field in fields:
+            if field in entry and entry[field]:
+                entry_text_parts.append(str(entry[field]))
+
+        entry_text = " ".join(entry_text_parts)
+
+        if entry_text:
+            similarity = calculate_text_similarity(context, entry_text)
+            if similarity >= threshold:
+                similar.append({
+                    "id": entry.get("id", "unknown"),
+                    "similarity": round(similarity, 2),
+                    "entry_preview": entry_text[:200] + "..." if len(entry_text) > 200 else entry_text,
+                    "category": category
+                })
+
+    # Sort by similarity descending
+    similar.sort(key=lambda x: x["similarity"], reverse=True)
+
+    return similar[:5]  # Return top 5 matches
+
+
+def generate_suggested_fields(context: str, event_type: str) -> dict:
+    """Generate suggested field values for logging an entry."""
+    suggestions = {}
+
+    # Extract potential tags from context
+    common_tech_terms = [
+        "python", "javascript", "typescript", "react", "node", "api", "database",
+        "sql", "nosql", "redis", "docker", "kubernetes", "aws", "gcp", "azure",
+        "git", "testing", "pytest", "jest", "async", "sync", "cache", "auth",
+        "pandas", "numpy", "tensorflow", "pytorch", "ml", "ai", "data"
+    ]
+    context_lower = context.lower()
+    potential_tags = [term for term in common_tech_terms if term in context_lower]
+
+    if event_type == "gotcha":
+        # Try to split context into problem and solution
+        solution_indicators = ["solution:", "fix:", "workaround:", "instead", "should", "need to", "must"]
+        problem_part = context
+        solution_part = ""
+
+        for indicator in solution_indicators:
+            if indicator in context_lower:
+                idx = context_lower.find(indicator)
+                problem_part = context[:idx].strip()
+                solution_part = context[idx:].strip()
+                break
+
+        suggestions = {
+            "problem": problem_part if problem_part else context,
+            "solution": solution_part if solution_part else "TODO: Add solution",
+            "severity": "medium",
+            "tags": potential_tags[:5]
+        }
+
+    elif event_type == "decision":
+        suggestions = {
+            "decision": context,
+            "rationale": "TODO: Add rationale",
+            "proposed_by": "collaborative",
+            "tags": potential_tags[:5]
+        }
+
+    elif event_type == "learning":
+        suggestions = {
+            "learning": context,
+            "evidence": "TODO: Add evidence",
+            "confidence": "medium",
+            "discovered_by": "collaborative",
+            "tags": potential_tags[:5]
+        }
+
+    elif event_type == "idea":
+        # Detect idea type
+        idea_type = "approach"
+        if any(word in context_lower for word in ["optimize", "faster", "performance", "speed"]):
+            idea_type = "optimization"
+        elif any(word in context_lower for word in ["feature", "add", "new", "implement"]):
+            idea_type = "feature"
+        elif any(word in context_lower for word in ["refactor", "clean", "simplify"]):
+            idea_type = "design"
+
+        suggestions = {
+            "idea": context,
+            "idea_type": idea_type,
+            "source": "collaborative"
+        }
+
+    elif event_type == "intervention":
+        suggestions = {
+            "intervention_type": "refinement",
+            "ai_output_summary": "TODO: Describe AI output",
+            "human_action": context,
+            "significance": "minor"
+        }
+
+    elif event_type == "code":
+        suggestions = {
+            "file_path": "TODO: Add file path",
+            "contribution_type": "modification",
+            "description": context,
+            "direction_source": "human_directed"
+        }
+
+    elif event_type == "error":
+        # Try to detect severity
+        severity = "medium"
+        if any(word in context_lower for word in ["critical", "crash", "data loss", "security"]):
+            severity = "critical"
+        elif any(word in context_lower for word in ["major", "breaks", "blocking"]):
+            severity = "high"
+        elif any(word in context_lower for word in ["minor", "cosmetic", "typo"]):
+            severity = "low"
+
+        suggestions = {
+            "description": context,
+            "error_type": "logic",
+            "severity": severity,
+            "originated_from": "ai",
+            "detected_by": "human"
+        }
+
+    return suggestions
+
+
+def knowledge_check(trace: dict, context: str, event_type: Optional[str] = None,
+                    check_duplicates: bool = True) -> dict:
+    """
+    Main knowledge check function.
+    Analyzes context, detects event type, checks for duplicates, and returns recommendations.
+    """
+    result = {
+        "should_log": False,
+        "recommended_types": [],
+        "confidence": "low",
+        "reasoning": "",
+        "similar_entries": [],
+        "suggested_fields": {}
+    }
+
+    # Detect event types if not specified
+    if event_type and event_type != "auto":
+        detected_types = [(event_type, "high", "User specified")]
+    else:
+        detected_types = detect_event_type(context)
+
+    if not detected_types:
+        result["reasoning"] = "No trigger patterns matched. Context may not warrant logging."
+        return result
+
+    # Primary recommendation
+    primary_type, confidence, reasoning = detected_types[0]
+    result["confidence"] = confidence
+    result["reasoning"] = reasoning if reasoning else TRIGGER_PATTERNS.get(primary_type, {}).get("description", "")
+
+    # Check for duplicates
+    if check_duplicates:
+        similar = find_similar_entries(trace, context, primary_type)
+        result["similar_entries"] = similar
+
+        # If very similar entry exists, suggest not logging
+        if similar and similar[0]["similarity"] >= 0.7:
+            result["should_log"] = False
+            result["reasoning"] = f"Very similar entry already exists (ID: {similar[0]['id']}, similarity: {similar[0]['similarity']})"
+            return result
+
+    # Should log if we detected types and no close duplicates
+    result["should_log"] = True
+    result["recommended_types"] = [t[0] for t in detected_types[:3]]  # Top 3 types
+
+    # Generate suggested fields for primary type
+    result["suggested_fields"] = {
+        primary_type: generate_suggested_fields(context, primary_type)
+    }
+
+    # Also generate for secondary type if different
+    if len(detected_types) > 1:
+        secondary_type = detected_types[1][0]
+        result["suggested_fields"][secondary_type] = generate_suggested_fields(context, secondary_type)
+
+    return result
+
+
+# ============================================================
+# Checkpoint and Knowledge Persistence (v2.1)
+# ============================================================
+
+def analyze_session_for_checkpoint(trace: dict, session_id: str, files_touched: List[str] = None) -> dict:
+    """
+    Analyze a session to identify potential unlogged knowledge.
+    Returns checkpoint analysis with recommendations.
+    """
+    session = None
+    for s in trace.get("sessions", []):
+        if s["id"] == session_id:
+            session = s
+            break
+
+    if not session:
+        return {"error": f"Session {session_id} not found"}
+
+    # Get all entries from this session
+    session_learnings = [l for l in trace.get("learnings", []) if l.get("session_id") == session_id]
+    session_decisions = [d for d in trace.get("decisions", []) if d.get("session_id") == session_id]
+    session_gotchas = [g for g in trace.get("gotchas", []) if g.get("session_id") == session_id]
+    session_code = [c for c in trace.get("code_contributions", []) if c.get("session_id") == session_id]
+    session_suggestions = [s for s in trace.get("ai_suggestions", []) if s.get("session_id") == session_id]
+    session_ideas = [i for i in trace.get("ideas", []) if i.get("session_id") == session_id]
+    session_interventions = [i for i in trace.get("interventions", []) if i.get("session_id") == session_id]
+
+    # Find pending suggestions (proposed but not resolved)
+    pending_suggestions = [s for s in session_suggestions if s.get("outcome", {}).get("status") == "pending"]
+
+    # Calculate session duration
+    started = datetime.fromisoformat(session["started"])
+    duration_minutes = int((datetime.now() - started).total_seconds() / 60)
+
+    # Estimate unlogged items based on session activity
+    estimated_unlogged = {
+        "decisions": max(0, (duration_minutes // 20) - len(session_decisions)),  # Expect ~1 decision per 20 min
+        "learnings": max(0, (duration_minutes // 30) - len(session_learnings)),  # Expect ~1 learning per 30 min
+        "code_contributions": len(files_touched or []) - len(session_code) if files_touched else 0
+    }
+
+    # Generate prompts based on what's missing
+    prompts = []
+    recommendations = []
+
+    if pending_suggestions:
+        for sug in pending_suggestions:
+            prompts.append(f"Pending suggestion: {sug['suggestion']['description'][:60]}...")
+            recommendations.append(f"Resolve suggestion {sug['id']} (accept/reject/modify)")
+
+    if estimated_unlogged["decisions"] > 0:
+        prompts.append(f"~{estimated_unlogged['decisions']} decisions may be unlogged")
+        recommendations.append("Review recent work for architectural or approach decisions")
+
+    if estimated_unlogged["learnings"] > 0:
+        prompts.append(f"~{estimated_unlogged['learnings']} learnings may be unlogged")
+        recommendations.append("Consider what new knowledge was gained this session")
+
+    if files_touched and estimated_unlogged["code_contributions"] > 0:
+        unlogged_files = [f for f in files_touched if not any(c.get("file_path") == f for c in session_code)]
+        if unlogged_files:
+            prompts.append(f"Files not logged: {', '.join(unlogged_files[:3])}")
+            recommendations.append(f"Log code contributions for: {', '.join(unlogged_files[:3])}")
+
+    if duration_minutes > 45 and not session_gotchas:
+        prompts.append("No gotchas logged in 45+ minute session")
+        recommendations.append("Consider if any unexpected behaviors were encountered")
+
+    return {
+        "session_id": session_id,
+        "session_duration_minutes": duration_minutes,
+        "entries_logged": {
+            "learnings": len(session_learnings),
+            "decisions": len(session_decisions),
+            "gotchas": len(session_gotchas),
+            "code_contributions": len(session_code),
+            "ideas": len(session_ideas),
+            "interventions": len(session_interventions)
+        },
+        "pending_suggestions": len(pending_suggestions),
+        "estimated_unlogged": estimated_unlogged,
+        "prompts": prompts,
+        "recommendations": recommendations
+    }
+
+
+def refresh_context_for_topics(trace: dict, topics: List[str], include_recent: bool = True,
+                                max_items: int = 5, categories: List[str] = None) -> dict:
+    """
+    Find relevant past knowledge based on topics.
+    Returns categorized relevant entries.
+    """
+    if categories is None:
+        categories = ["gotchas", "decisions", "learnings", "patterns"]
+
+    results = {cat: [] for cat in categories}
+    topics_lower = [t.lower() for t in topics]
+
+    for category in categories:
+        entries = trace.get(category, [])
+
+        for entry in entries:
+            # Calculate relevance score
+            entry_text = json.dumps(entry).lower()
+            score = 0
+
+            # Check topic matches
+            for topic in topics_lower:
+                if topic in entry_text:
+                    score += 2
+
+            # Check tag matches
+            entry_tags = [t.lower() for t in entry.get("tags", [])]
+            for topic in topics_lower:
+                if any(topic in tag for tag in entry_tags):
+                    score += 3  # Tag matches are more relevant
+
+            if score > 0:
+                results[category].append({
+                    "entry": entry,
+                    "relevance_score": score
+                })
+
+        # Sort by relevance and limit
+        results[category].sort(key=lambda x: x["relevance_score"], reverse=True)
+        results[category] = results[category][:max_items]
+
+    # Add recent entries if requested
+    if include_recent:
+        recent_cutoff = datetime.now().isoformat()[:10]  # Today's date
+        for category in categories:
+            recent = [e for e in trace.get(category, [])
+                     if e.get("timestamp", "")[:10] == recent_cutoff
+                     and e not in [r["entry"] for r in results[category]]]
+            for entry in recent[:2]:  # Add up to 2 recent per category
+                results[category].append({
+                    "entry": entry,
+                    "relevance_score": 1,
+                    "recent": True
+                })
+
+    return results
+
+
+def consolidate_session_learnings(trace: dict, session_id: str, auto_link: bool = True) -> dict:
+    """
+    Consolidate and link related entries from a session.
+    Returns consolidation summary.
+    """
+    # Get all entries from this session
+    session_entries = {
+        "learnings": [l for l in trace.get("learnings", []) if l.get("session_id") == session_id],
+        "decisions": [d for d in trace.get("decisions", []) if d.get("session_id") == session_id],
+        "gotchas": [g for g in trace.get("gotchas", []) if g.get("session_id") == session_id],
+        "ideas": [i for i in trace.get("ideas", []) if i.get("session_id") == session_id],
+        "code_contributions": [c for c in trace.get("code_contributions", []) if c.get("session_id") == session_id]
+    }
+
+    total_entries = sum(len(v) for v in session_entries.values())
+    links_created = 0
+    clusters = []
+
+    if auto_link and total_entries > 1:
+        # Flatten all entries with their category
+        all_entries = []
+        for category, entries in session_entries.items():
+            for entry in entries:
+                all_entries.append({
+                    "category": category,
+                    "entry": entry,
+                    "id": entry.get("id", "unknown")
+                })
+
+        # Find related entries using text similarity
+        for i, entry1 in enumerate(all_entries):
+            entry1_text = json.dumps(entry1["entry"]).lower()
+
+            for j, entry2 in enumerate(all_entries[i+1:], i+1):
+                entry2_text = json.dumps(entry2["entry"]).lower()
+
+                similarity = calculate_text_similarity(entry1_text, entry2_text)
+
+                if similarity >= 0.25:  # Related threshold
+                    # Add link to both entries (in actual data)
+                    if "related_to" not in entry1["entry"]:
+                        entry1["entry"]["related_to"] = []
+                    if entry2["id"] not in entry1["entry"]["related_to"]:
+                        entry1["entry"]["related_to"].append(entry2["id"])
+                        links_created += 1
+
+                    if "related_to" not in entry2["entry"]:
+                        entry2["entry"]["related_to"] = []
+                    if entry1["id"] not in entry2["entry"]["related_to"]:
+                        entry2["entry"]["related_to"].append(entry1["id"])
+
+        # Identify clusters (groups of related entries)
+        visited = set()
+        for entry in all_entries:
+            if entry["id"] in visited:
+                continue
+
+            cluster = [entry["id"]]
+            visited.add(entry["id"])
+
+            # Find all related entries
+            to_check = entry["entry"].get("related_to", [])[:]
+            while to_check:
+                related_id = to_check.pop()
+                if related_id in visited:
+                    continue
+                visited.add(related_id)
+                cluster.append(related_id)
+
+                # Find the related entry and add its relations
+                for e in all_entries:
+                    if e["id"] == related_id:
+                        to_check.extend(e["entry"].get("related_to", []))
+                        break
+
+            if len(cluster) > 1:
+                clusters.append(cluster)
+
+    # Generate summary
+    summary = {
+        "session_id": session_id,
+        "total_entries": total_entries,
+        "by_category": {k: len(v) for k, v in session_entries.items()},
+        "links_created": links_created,
+        "clusters_found": len(clusters),
+        "clusters": clusters[:5],  # Top 5 clusters
+        "tags_used": []
+    }
+
+    # Collect all tags used
+    all_tags = set()
+    for entries in session_entries.values():
+        for entry in entries:
+            all_tags.update(entry.get("tags", []))
+    summary["tags_used"] = list(all_tags)[:20]
+
+    return summary
+
+
+def compute_knowledge_metrics(trace: dict) -> dict:
+    """Compute knowledge-specific metrics."""
+    learnings = trace.get("learnings", [])
+    decisions = trace.get("decisions", [])
+    gotchas = trace.get("gotchas", [])
+    ideas = trace.get("ideas", [])
+
+    # Count totals
+    total_entries = {
+        "learnings": len(learnings),
+        "gotchas": len(gotchas),
+        "decisions": len(decisions),
+        "ideas": len(ideas)
+    }
+
+    # Count by tag
+    all_tags = {}
+    for entries in [learnings, decisions, gotchas, ideas]:
+        for entry in entries:
+            for tag in entry.get("tags", []):
+                all_tags[tag] = all_tags.get(tag, 0) + 1
+
+    # Sort tags by frequency
+    by_tag = dict(sorted(all_tags.items(), key=lambda x: x[1], reverse=True)[:20])
+
+    # Calculate staleness (based on timestamp)
+    now = datetime.now()
+    fresh_30d = 0
+    aging_90d = 0
+    stale_180d = 0
+
+    for entries in [learnings, decisions, gotchas, ideas]:
+        for entry in entries:
+            ts = entry.get("timestamp", "")
+            if ts:
+                try:
+                    entry_date = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    age_days = (now - entry_date.replace(tzinfo=None)).days
+                    if age_days <= 30:
+                        fresh_30d += 1
+                    elif age_days <= 90:
+                        aging_90d += 1
+                    else:
+                        stale_180d += 1
+                except:
+                    pass
+
+    # Calculate linkage
+    entries_with_links = 0
+    total_links = 0
+    for entries in [learnings, decisions, gotchas, ideas]:
+        for entry in entries:
+            links = entry.get("related_to", [])
+            if links:
+                entries_with_links += 1
+                total_links += len(links)
+
+    total_knowledge = sum(total_entries.values())
+    orphan_entries = total_knowledge - entries_with_links
+
+    return {
+        "total_entries": total_entries,
+        "by_tag": by_tag,
+        "staleness": {
+            "fresh_30d": fresh_30d,
+            "aging_90d": aging_90d,
+            "stale_180d": stale_180d
+        },
+        "linkage": {
+            "entries_with_links": entries_with_links,
+            "orphan_entries": orphan_entries,
+            "total_links": total_links,
+            "avg_links_per_entry": round(total_links / total_knowledge, 2) if total_knowledge > 0 else 0
+        }
+    }
+
+
+# ============================================================
 # Git Integration
 # ============================================================
 
@@ -384,7 +1095,7 @@ def scan_git_for_human_edits(since: str = "1 week ago") -> List[dict]:
 # ============================================================
 
 def compute_metrics(trace: dict) -> dict:
-    """Compute all metrics from TRACE data (v2.0)."""
+    """Compute all metrics from TRACE data (v2.1)."""
     metrics = {
         "last_computed": datetime.now().isoformat(),
         "code_metrics": compute_code_metrics_v2(trace),
@@ -393,7 +1104,8 @@ def compute_metrics(trace: dict) -> dict:
         "idea_metrics": compute_idea_metrics(trace),
         "intervention_metrics": compute_intervention_metrics(trace),
         "session_metrics": compute_session_metrics(trace),
-        "validation_metrics": compute_validation_metrics(trace)
+        "validation_metrics": compute_validation_metrics(trace),
+        "knowledge_metrics": compute_knowledge_metrics(trace)
     }
     return metrics
 
@@ -1145,6 +1857,102 @@ async def list_tools() -> list[Tool]:
             }
         ),
 
+        # Smart Triggers (v2.1)
+        Tool(
+            name="trace_knowledge_check",
+            description="Check if an event should be logged and find similar existing entries. Use this to validate triggers and avoid duplicates.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "context": {
+                        "type": "string",
+                        "description": "Description of what happened or was discovered"
+                    },
+                    "event_type": {
+                        "type": "string",
+                        "enum": ["gotcha", "decision", "learning", "idea", "intervention", "code", "error", "auto"],
+                        "description": "Hint about the type of event (default: auto-detect)"
+                    },
+                    "check_duplicates": {
+                        "type": "boolean",
+                        "description": "Whether to check for similar existing entries (default: true)"
+                    }
+                },
+                "required": ["context"]
+            }
+        ),
+
+        # Checkpoints and Knowledge Persistence (v2.1)
+        Tool(
+            name="trace_checkpoint",
+            description="Run a session checkpoint to review progress and identify unlogged knowledge. Call periodically (every 30-45 min) or at milestones.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Current session ID"},
+                    "trigger": {
+                        "type": "string",
+                        "enum": ["time", "milestone", "context_switch", "break", "problem_solved", "session_end"],
+                        "description": "What triggered this checkpoint"
+                    },
+                    "notes": {"type": "string", "description": "Optional notes about current progress"},
+                    "files_touched": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Files modified since last checkpoint"
+                    }
+                },
+                "required": ["session_id", "trigger"]
+            }
+        ),
+        Tool(
+            name="trace_context_refresh",
+            description="Refresh context with relevant past knowledge at session start. Surfaces related gotchas, decisions, learnings based on topics.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "topics": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Topics/keywords to search for relevant past knowledge"
+                    },
+                    "include_recent": {
+                        "type": "boolean",
+                        "description": "Include recent entries regardless of topic match (default: true)"
+                    },
+                    "max_items": {
+                        "type": "integer",
+                        "description": "Maximum items to return per category (default: 5)"
+                    },
+                    "categories": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Categories to search (default: gotchas, decisions, learnings, patterns)"
+                    }
+                },
+                "required": ["topics"]
+            }
+        ),
+        Tool(
+            name="trace_consolidate_learnings",
+            description="Consolidate and link related entries from a session. Call at session end to organize knowledge.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Session to consolidate"},
+                    "auto_link": {
+                        "type": "boolean",
+                        "description": "Automatically detect and link related entries (default: true)"
+                    },
+                    "generate_summary": {
+                        "type": "boolean",
+                        "description": "Generate a knowledge summary for the session (default: true)"
+                    }
+                },
+                "required": ["session_id"]
+            }
+        ),
+
         # Metrics
         Tool(
             name="trace_get_metrics",
@@ -1154,7 +1962,7 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "category": {
                         "type": "string",
-                        "enum": ["all", "code", "suggestions", "errors", "ideas", "interventions", "sessions"],
+                        "enum": ["all", "code", "suggestions", "errors", "ideas", "interventions", "sessions", "knowledge"],
                         "description": "Which metrics to retrieve (default: all)"
                     }
                 }
@@ -1729,6 +2537,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 output = metrics.get("intervention_metrics", {})
             elif category == "sessions":
                 output = metrics.get("session_metrics", {})
+            elif category == "knowledge":
+                output = metrics.get("knowledge_metrics", {})
             else:
                 output = metrics
 
@@ -1739,6 +2549,175 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             trace["metrics_summary"] = metrics
             save_trace(trace)
             return [TextContent(type="text", text=f"Metrics computed and saved.\n\n{json.dumps(metrics, indent=2)}")]
+
+        # Smart Triggers (v2.1)
+        elif name == "trace_knowledge_check":
+            context = arguments["context"]
+            event_type = arguments.get("event_type", "auto")
+            check_duplicates = arguments.get("check_duplicates", True)
+
+            result = knowledge_check(trace, context, event_type, check_duplicates)
+
+            # Format output
+            output_lines = []
+            output_lines.append(f"Should log: {'Yes' if result['should_log'] else 'No'}")
+            output_lines.append(f"Confidence: {result['confidence']}")
+
+            if result['recommended_types']:
+                output_lines.append(f"Recommended types: {', '.join(result['recommended_types'])}")
+
+            if result['reasoning']:
+                output_lines.append(f"Reasoning: {result['reasoning']}")
+
+            if result['similar_entries']:
+                output_lines.append("\nSimilar existing entries:")
+                for entry in result['similar_entries'][:3]:
+                    output_lines.append(f"  - [{entry['id']}] (similarity: {entry['similarity']}) {entry['entry_preview'][:100]}...")
+
+            if result['should_log'] and result['suggested_fields']:
+                output_lines.append("\nSuggested fields:")
+                output_lines.append(json.dumps(result['suggested_fields'], indent=2))
+
+            return [TextContent(type="text", text="\n".join(output_lines))]
+
+        # Checkpoint (v2.1)
+        elif name == "trace_checkpoint":
+            session_id = arguments["session_id"]
+            trigger = arguments["trigger"]
+            notes = arguments.get("notes", "")
+            files_touched = arguments.get("files_touched", [])
+
+            # Analyze session
+            analysis = analyze_session_for_checkpoint(trace, session_id, files_touched)
+
+            if "error" in analysis:
+                return [TextContent(type="text", text=analysis["error"])]
+
+            # Create checkpoint entry
+            checkpoint_id = generate_id("CP", trace.get("checkpoints", []))
+            checkpoint = {
+                "id": checkpoint_id,
+                "session_id": session_id,
+                "timestamp": datetime.now().isoformat(),
+                "trigger": trigger,
+                "notes": notes,
+                "analysis": analysis
+            }
+
+            if "checkpoints" not in trace:
+                trace["checkpoints"] = []
+            trace["checkpoints"].append(checkpoint)
+            save_trace(trace)
+
+            # Format output
+            output_lines = [
+                f"Checkpoint {checkpoint_id} created",
+                f"Session: {session_id} ({analysis['session_duration_minutes']} minutes)",
+                f"Trigger: {trigger}",
+                "",
+                "Entries logged this session:",
+            ]
+
+            for category, count in analysis["entries_logged"].items():
+                if count > 0:
+                    output_lines.append(f"  - {category}: {count}")
+
+            if analysis["pending_suggestions"] > 0:
+                output_lines.append(f"\nPending suggestions: {analysis['pending_suggestions']}")
+
+            if analysis["prompts"]:
+                output_lines.append("\nItems to review:")
+                for prompt in analysis["prompts"]:
+                    output_lines.append(f"  - {prompt}")
+
+            if analysis["recommendations"]:
+                output_lines.append("\nRecommendations:")
+                for rec in analysis["recommendations"]:
+                    output_lines.append(f"  - {rec}")
+
+            return [TextContent(type="text", text="\n".join(output_lines))]
+
+        # Context Refresh (v2.1)
+        elif name == "trace_context_refresh":
+            topics = arguments["topics"]
+            include_recent = arguments.get("include_recent", True)
+            max_items = arguments.get("max_items", 5)
+            categories = arguments.get("categories", ["gotchas", "decisions", "learnings", "patterns"])
+
+            results = refresh_context_for_topics(trace, topics, include_recent, max_items, categories)
+
+            # Format output
+            output_lines = [
+                f"Context refresh for topics: {', '.join(topics)}",
+                ""
+            ]
+
+            total_found = 0
+            for category, items in results.items():
+                if items:
+                    output_lines.append(f"### {category.upper()} ({len(items)} relevant)")
+                    for item in items:
+                        entry = item["entry"]
+                        score = item["relevance_score"]
+                        recent_tag = " [RECENT]" if item.get("recent") else ""
+
+                        # Get preview text based on category
+                        if category == "gotchas":
+                            preview = entry.get("problem", "")[:80]
+                        elif category == "decisions":
+                            preview = entry.get("decision", "")[:80]
+                        elif category == "learnings":
+                            preview = entry.get("learning", "")[:80]
+                        else:
+                            preview = json.dumps(entry)[:80]
+
+                        output_lines.append(f"  [{entry.get('id', '?')}] (relevance: {score}){recent_tag}")
+                        output_lines.append(f"      {preview}...")
+                        total_found += 1
+
+                    output_lines.append("")
+
+            if total_found == 0:
+                output_lines.append("No relevant past knowledge found for these topics.")
+
+            return [TextContent(type="text", text="\n".join(output_lines))]
+
+        # Consolidate Learnings (v2.1)
+        elif name == "trace_consolidate_learnings":
+            session_id = arguments["session_id"]
+            auto_link = arguments.get("auto_link", True)
+            generate_summary = arguments.get("generate_summary", True)
+
+            result = consolidate_session_learnings(trace, session_id, auto_link)
+
+            if auto_link and result["links_created"] > 0:
+                save_trace(trace)
+
+            # Format output
+            output_lines = [
+                f"Consolidation complete for session {session_id}",
+                f"Total entries: {result['total_entries']}",
+                "",
+                "By category:"
+            ]
+
+            for category, count in result["by_category"].items():
+                if count > 0:
+                    output_lines.append(f"  - {category}: {count}")
+
+            if auto_link:
+                output_lines.append(f"\nLinks created: {result['links_created']}")
+                output_lines.append(f"Clusters found: {result['clusters_found']}")
+
+                if result["clusters"]:
+                    output_lines.append("\nRelated entry clusters:")
+                    for i, cluster in enumerate(result["clusters"], 1):
+                        output_lines.append(f"  Cluster {i}: {' <-> '.join(cluster)}")
+
+            if result["tags_used"]:
+                output_lines.append(f"\nTags used: {', '.join(result['tags_used'][:10])}")
+
+            return [TextContent(type="text", text="\n".join(output_lines))]
 
         # Attribution
         elif name == "trace_add_attribution":
