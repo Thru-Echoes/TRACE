@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "trace": {
+      "command": "python",
+      "args": ["mcp_server/server.py"],
+      "env": {
+        "TRACE_PATH": "./trace.json"
+      }
+    }
+  }
+}

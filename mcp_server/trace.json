@@ -1,0 +1,220 @@
+{
+  "schema_version": "TRACE-2.0",
+  "schema_name": "Transparent Research AI Collaboration Environment",
+
+  "metadata": {
+    "project": "[PROJECT NAME]",
+    "version": "2.0",
+    "created": "2026-02-02T00:00:00Z",
+    "last_updated": "2026-02-02T00:00:00Z",
+    "description": "[Brief project description]",
+    "maintainers": ["[Your Name]"],
+
+    "research_protocol": {
+      "enabled": true,
+      "study_id": "[Optional: Link to IRB or study protocol]",
+      "tracking_start_date": "2026-02-02",
+      "primary_researcher": "[Your Name]",
+      "institution": "[Your Institution]",
+      "ai_disclosure_policy": "All AI contributions logged via TRACE protocol v2.0"
+    },
+
+    "environment": {
+      "python_version": null,
+      "key_packages": {},
+      "platform": null,
+      "git_repo": null,
+      "current_commit": null
+    },
+
+    "ai_systems": [
+      {
+        "id": "AI001",
+        "name": "Claude Code",
+        "provider": "Anthropic",
+        "model": "claude-opus-4-5-20251101",
+        "access_method": "MCP",
+        "first_used": "2026-02-02",
+        "capabilities": ["code_generation", "code_review", "analysis", "writing"]
+      }
+    ],
+
+    "git_conventions": {
+      "human_edit_tag": "[HUMAN-EDIT]",
+      "auto_detect_manual_edits": true
+    },
+
+    "supported_content_types": {
+      "code": {
+        "description": "Source code files (scripts, programs)",
+        "tracked_metrics": ["lines"],
+        "file_extensions": [".py", ".js", ".ts", ".java", ".go", ".rs", ".cpp", ".c", ".h"]
+      },
+      "text": {
+        "description": "Text documents (papers, documentation)",
+        "tracked_metrics": ["lines", "words"],
+        "file_extensions": [".md", ".txt", ".tex", ".rst", ".adoc"]
+      },
+      "data": {
+        "description": "Data files (datasets, configurations)",
+        "tracked_metrics": ["lines", "rows"],
+        "file_extensions": [".csv", ".json", ".yaml", ".yml", ".xml"]
+      }
+    }
+  },
+
+  "context": {
+    "goals": "[What this project aims to achieve]",
+    "current_status": "[Where the project is now]",
+    "key_technologies": [],
+    "important_files": {},
+    "external_dependencies": [],
+    "research_questions": []
+  },
+
+  "sessions": [],
+
+  "ai_suggestions": [],
+
+  "code_contributions": [],
+
+  "human_manual_edits": [],
+
+  "interactions": [],
+
+  "ideas": [],
+
+  "errors": [],
+
+  "decisions": [],
+
+  "learnings": [],
+  "gotchas": [],
+  "patterns": [],
+  "experiments": [],
+  "validations": [],
+  "interventions": [],
+  "attributions": [],
+
+  "audit_log": [
+    {
+      "timestamp": "2026-02-02T00:00:00Z",
+      "operation": "trace_initialized",
+      "arguments_hash": null,
+      "user": null,
+      "trace_version": "2.0"
+    }
+  ],
+
+  "metrics_summary": {
+    "last_computed": null,
+
+    "code_metrics": {
+      "total_lines": {
+        "human_directed_ai_executed": 0,
+        "human_directed_human_executed": 0,
+        "ai_suggested_accepted": 0,
+        "ai_suggested_modified": 0,
+        "human_manual_edit": 0,
+        "collaborative": 0
+      },
+      "total_words": {
+        "human_directed_ai_executed": 0,
+        "human_directed_human_executed": 0,
+        "ai_suggested_accepted": 0,
+        "ai_suggested_modified": 0,
+        "human_manual_edit": 0,
+        "collaborative": 0
+      },
+      "total_rows": {
+        "human_directed_ai_executed": 0,
+        "human_directed_human_executed": 0,
+        "ai_suggested_accepted": 0,
+        "ai_suggested_modified": 0,
+        "human_manual_edit": 0,
+        "collaborative": 0
+      },
+      "by_source": {
+        "human_direction_percentage": null,
+        "ai_suggestion_percentage": null,
+        "human_manual_percentage": null
+      },
+      "by_source_words": {
+        "human_direction_percentage": null,
+        "ai_suggestion_percentage": null,
+        "human_manual_percentage": null
+      },
+      "by_source_rows": {
+        "human_direction_percentage": null,
+        "ai_suggestion_percentage": null,
+        "human_manual_percentage": null
+      },
+      "by_content_type": {
+        "code": 0,
+        "text": 0,
+        "data": 0
+      },
+      "git_integration": {
+        "manual_edit_commits_detected": 0,
+        "manual_edit_lines_added": 0,
+        "manual_edit_lines_removed": 0
+      }
+    },
+
+    "suggestion_metrics": {
+      "total_suggestions": 0,
+      "accepted_count": 0,
+      "rejected_count": 0,
+      "modified_count": 0,
+
+      "acceptance_rate": null,
+      "rejection_rate": null,
+      "modification_rate": null,
+
+      "lines_proposed_total": 0,
+      "lines_accepted_as_is": 0,
+      "lines_modified_by_human": 0,
+      "lines_rejected": 0,
+
+      "by_type": {}
+    },
+
+    "error_metrics": {
+      "ai_errors_caught_by_human": 0,
+      "human_errors_caught_by_ai": 0,
+      "ai_error_rate": null,
+      "human_error_catch_rate": null,
+      "total_errors": 0
+    },
+
+    "idea_metrics": {
+      "total_ai_ideas": 0,
+      "total_human_ideas": 0,
+      "ai_ideas_accepted": 0,
+      "ai_ideas_rejected": 0,
+      "ai_ideas_modified": 0,
+      "ai_idea_acceptance_rate": null
+    },
+
+    "intervention_metrics": {
+      "total_interventions": 0,
+      "corrections": 0,
+      "overrides": 0,
+      "rejections": 0,
+      "intervention_rate": null
+    },
+
+    "session_metrics": {
+      "total_sessions": 0,
+      "total_time_minutes": 0,
+      "avg_session_duration": null,
+      "avg_interactions_per_session": null
+    },
+
+    "validation_metrics": {
+      "total_validations": 0,
+      "pass_rate": null,
+      "coverage": null
+    }
+  }
+}

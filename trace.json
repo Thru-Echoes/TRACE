@@ -1,0 +1,538 @@
+{
+  "schema_version": "TRACE-1.0",
+  "schema_name": "Transparent Research AI Collaboration Environment",
+
+  "metadata": {
+    "project": "[PROJECT NAME]",
+    "version": "1.0",
+    "created": "2026-01-29T00:00:00Z",
+    "last_updated": "2026-01-29T00:00:00Z",
+    "description": "[Brief project description]",
+    "maintainers": ["[Your Name]"],
+
+    "research_protocol": {
+      "enabled": true,
+      "study_id": "[Optional: Link to IRB or study protocol]",
+      "tracking_start_date": "2026-01-29",
+      "primary_researcher": "[Your Name]",
+      "institution": "[Your Institution]",
+      "ai_disclosure_policy": "All AI contributions logged via TRACE protocol"
+    },
+
+    "environment": {
+      "python_version": null,
+      "key_packages": {},
+      "platform": null,
+      "git_repo": null,
+      "current_commit": null
+    },
+
+    "ai_systems": [
+      {
+        "id": "AI001",
+        "name": "Claude Code",
+        "provider": "Anthropic",
+        "model": "claude-opus-4-5-20251101",
+        "access_method": "MCP",
+        "first_used": "2026-01-29",
+        "capabilities": ["code_generation", "code_review", "analysis", "writing"]
+      }
+    ]
+  },
+
+  "context": {
+    "goals": "[What this project aims to achieve]",
+    "current_status": "[Where the project is now]",
+    "key_technologies": [],
+    "important_files": {},
+    "external_dependencies": [],
+    "research_questions": []
+  },
+
+  "sessions": [
+    {
+      "id": "S001",
+      "started": "2026-01-29T00:00:00Z",
+      "ended": null,
+      "duration_minutes": null,
+      "ai_system_id": "AI001",
+      "model_version": "claude-opus-4-5-20251101",
+      "purpose": "[What was worked on]",
+      "scientific_stage": "exploration",
+      "human_operator": "[researcher_id]",
+
+      "summary": {
+        "tasks_completed": [],
+        "files_created": [],
+        "files_modified": [],
+        "decisions_made": [],
+        "learnings_recorded": []
+      },
+
+      "reflection": {
+        "what_went_well": null,
+        "what_was_difficult": null,
+        "ai_helpfulness_rating": null,
+        "would_do_differently": null
+      }
+    }
+  ],
+
+  "interactions": [
+    {
+      "id": "INT001",
+      "session_id": "S001",
+      "timestamp": "2026-01-29T00:00:00Z",
+      "interaction_type": "code_generation",
+
+      "prompt": {
+        "summary": "[Brief description of what was asked]",
+        "hash": null,
+        "full_text_stored": false
+      },
+
+      "response": {
+        "summary": "[Brief description of AI response]",
+        "action_recommended": "[What AI suggested]"
+      },
+
+      "outcome": {
+        "human_action": "accepted",
+        "modification_description": null,
+        "rejection_reason": null
+      },
+
+      "artifacts": {
+        "files_created": [],
+        "files_modified": [],
+        "code_generated_lines": 0,
+        "code_modified_lines": 0
+      },
+
+      "scientific_stage": "analysis"
+    }
+  ],
+
+  "code_contributions": [
+    {
+      "id": "CC001",
+      "session_id": "S001",
+      "interaction_id": "INT001",
+      "timestamp": "2026-01-29T00:00:00Z",
+      "file_path": "[path/to/file.py]",
+      "git_commit": null,
+
+      "contribution_type": "creation",
+
+      "metrics": {
+        "lines_added": 0,
+        "lines_removed": 0,
+        "lines_modified": 0,
+        "functions_added": 0,
+        "classes_added": 0
+      },
+
+      "authorship": {
+        "ai_authored_lines": 0,
+        "human_authored_lines": 0,
+        "ai_improved_lines": 0,
+        "human_improved_ai_lines": 0,
+        "collaborative_lines": 0
+      },
+
+      "quality": {
+        "ai_errors_caught_by_human": 0,
+        "human_errors_caught_by_ai": 0,
+        "syntax_errors_prevented": 0,
+        "logic_errors_prevented": 0,
+        "style_improvements": 0
+      },
+
+      "description": "[What this code does]"
+    }
+  ],
+
+  "ideas": [
+    {
+      "id": "IDEA001",
+      "timestamp": "2026-01-29T00:00:00Z",
+      "session_id": "S001",
+      "interaction_id": null,
+
+      "idea": "[Description of the idea]",
+      "idea_type": "approach",
+      "domain": "methodology",
+
+      "origin": {
+        "source": "ai_suggested",
+        "triggered_by": "[What prompted this idea]",
+        "prior_context": "[What information was available]"
+      },
+
+      "evaluation": {
+        "status": "pending",
+        "evaluated_by": null,
+        "evaluation_date": null,
+        "evaluation_notes": null
+      },
+
+      "outcome": {
+        "adopted": null,
+        "rejection_reason": null,
+        "modification_description": null,
+        "impact_if_adopted": null
+      },
+
+      "related_to": {
+        "research_questions": [],
+        "decisions": [],
+        "experiments": []
+      }
+    }
+  ],
+
+  "errors": [
+    {
+      "id": "ERR001",
+      "timestamp": "2026-01-29T00:00:00Z",
+      "session_id": "S001",
+      "interaction_id": null,
+
+      "error_type": "logic",
+      "severity": "medium",
+      "description": "[What the error was]",
+
+      "source": {
+        "originated_from": "ai",
+        "file_path": null,
+        "line_numbers": null,
+        "code_snippet": null
+      },
+
+      "detection": {
+        "detected_by": "human",
+        "detection_method": "code_review",
+        "time_to_detect_minutes": null
+      },
+
+      "resolution": {
+        "resolved": true,
+        "resolved_by": "human",
+        "resolution_description": "[How it was fixed]",
+        "time_to_resolve_minutes": null,
+        "prevented_future_occurrence": false
+      },
+
+      "impact": {
+        "would_have_caused": "[Potential impact if undetected]",
+        "actual_impact": null
+      }
+    }
+  ],
+
+  "decisions": [
+    {
+      "id": "D001",
+      "timestamp": "2026-01-29T00:00:00Z",
+      "session_id": null,
+
+      "decision": "[What was decided]",
+      "rationale": "[Why this decision was made]",
+      "decision_type": "technical",
+
+      "alternatives": [
+        {
+          "option": "[Alternative option]",
+          "pros": [],
+          "cons": [],
+          "why_rejected": "[Reason for rejection]"
+        }
+      ],
+
+      "provenance": {
+        "proposed_by": "human",
+        "ai_contribution": "none",
+        "information_consulted": []
+      },
+
+      "confidence": {
+        "initial": 0.7,
+        "current": 0.7,
+        "history": []
+      },
+
+      "validation": {
+        "status": "untested",
+        "evidence": [],
+        "validated_date": null
+      },
+
+      "status": "active",
+      "revisit_if": null,
+      "tags": []
+    }
+  ],
+
+  "learnings": [
+    {
+      "id": "L001",
+      "timestamp": "2026-01-29T00:00:00Z",
+      "session_id": null,
+
+      "learning": "[What was learned]",
+      "evidence": "[Evidence supporting this learning]",
+      "learning_type": "empirical",
+
+      "provenance": {
+        "discovered_by": "human",
+        "ai_contribution": "none",
+        "discovery_method": "experiment",
+        "discovery_context": "[What were you doing when you learned this]"
+      },
+
+      "confidence": {
+        "level": "medium",
+        "value": 0.7
+      },
+
+      "reproducibility": {
+        "reproducible": null,
+        "reproduction_steps": null,
+        "reproduction_attempts": []
+      },
+
+      "generalizability": {
+        "scope": "project_specific",
+        "applies_to": [],
+        "limitations": []
+      },
+
+      "tags": []
+    }
+  ],
+
+  "gotchas": [
+    {
+      "id": "G001",
+      "timestamp": "2026-01-29T00:00:00Z",
+      "session_id": null,
+
+      "problem": "[The pitfall or problem encountered]",
+      "solution": "[How to solve or avoid this problem]",
+      "severity": "medium",
+
+      "provenance": {
+        "discovered_by": "human",
+        "ai_contribution": "none",
+        "discovery_context": "[How this was discovered]"
+      },
+
+      "impact": {
+        "time_cost_if_hit_minutes": null,
+        "frequency": "rare",
+        "affected_components": []
+      },
+
+      "prevention": {
+        "preventable": true,
+        "automated_check_possible": false,
+        "check_implementation": null
+      },
+
+      "tags": []
+    }
+  ],
+
+  "patterns": [
+    {
+      "id": "P001",
+      "timestamp": "2026-01-29T00:00:00Z",
+
+      "name": "[Pattern name]",
+      "description": "[What this pattern does]",
+      "pattern_type": "code",
+      "template": "[Code template or workflow steps]",
+      "use_when": "[When to use this pattern]",
+
+      "provenance": {
+        "created_by": "human",
+        "ai_contribution": "none"
+      },
+
+      "usage": {
+        "times_used": 0,
+        "usage_log": [],
+        "success_rate": null
+      },
+
+      "tags": []
+    }
+  ],
+
+  "experiments": [
+    {
+      "id": "E001",
+      "timestamp": "2026-01-29T00:00:00Z",
+
+      "name": "[Experiment name]",
+      "description": "[What this experiment tests]",
+      "status": "planned",
+
+      "design": {
+        "hypothesis": null,
+        "methodology": null,
+        "variables": {
+          "independent": [],
+          "dependent": [],
+          "controlled": []
+        }
+      },
+
+      "execution": {
+        "started": null,
+        "completed": null,
+        "runtime_minutes": null,
+        "random_seed": null,
+        "environment": {}
+      },
+
+      "results": {
+        "summary": null,
+        "metrics": {},
+        "artifacts": []
+      },
+
+      "provenance": {
+        "designed_by": "human",
+        "ai_contribution": "none",
+        "code_contribution_ids": []
+      },
+
+      "tags": []
+    }
+  ],
+
+  "validations": [
+    {
+      "id": "V001",
+      "timestamp": "2026-01-29T00:00:00Z",
+      "session_id": null,
+
+      "target_type": "code_contribution",
+      "target_id": "CC001",
+
+      "method": "code_review",
+      "validator": "human",
+      "validator_id": null,
+
+      "result": "passed",
+      "confidence": 0.9,
+      "notes": null,
+      "evidence": null
+    }
+  ],
+
+  "interventions": [
+    {
+      "id": "H001",
+      "timestamp": "2026-01-29T00:00:00Z",
+      "session_id": "S001",
+      "interaction_id": "INT001",
+
+      "intervention_type": "correction",
+
+      "ai_output": {
+        "summary": "[What AI suggested/produced]",
+        "artifact_type": "code"
+      },
+
+      "human_action": {
+        "action": "modified",
+        "description": "[What human changed]",
+        "rationale": "[Why human made this change]"
+      },
+
+      "expertise_applied": ["domain_knowledge"],
+
+      "impact": {
+        "error_prevented": false,
+        "improvement_type": null,
+        "significance": "minor"
+      }
+    }
+  ],
+
+  "attributions": [
+    {
+      "id": "A001",
+      "artifact_type": "code",
+      "artifact_id": "CC001",
+      "artifact_description": "[What was created]",
+
+      "ai_contribution": {
+        "percentage_estimate": 50,
+        "contribution_types": ["code_generation", "suggestions"],
+        "model_used": "claude-opus-4-5-20251101"
+      },
+
+      "human_contribution": {
+        "percentage_estimate": 50,
+        "contribution_types": ["design", "validation", "refinement"]
+      },
+
+      "citation_text": "[How to cite this artifact]",
+      "related_session_ids": ["S001"]
+    }
+  ],
+
+  "metrics_summary": {
+    "last_computed": null,
+
+    "code_metrics": {
+      "total_lines_by_ai": 0,
+      "total_lines_by_human": 0,
+      "total_lines_improved_by_ai": 0,
+      "total_lines_improved_by_human": 0,
+      "total_collaborative_lines": 0,
+      "ai_code_acceptance_rate": null,
+      "ai_code_modification_rate": null
+    },
+
+    "error_metrics": {
+      "ai_errors_caught_by_human": 0,
+      "human_errors_caught_by_ai": 0,
+      "ai_error_rate": null,
+      "human_error_catch_rate": null
+    },
+
+    "idea_metrics": {
+      "total_ai_ideas": 0,
+      "total_human_ideas": 0,
+      "ai_ideas_accepted": 0,
+      "ai_ideas_rejected": 0,
+      "ai_ideas_modified": 0,
+      "ai_idea_acceptance_rate": null
+    },
+
+    "intervention_metrics": {
+      "total_interventions": 0,
+      "corrections": 0,
+      "overrides": 0,
+      "rejections": 0,
+      "intervention_rate": null
+    },
+
+    "session_metrics": {
+      "total_sessions": 0,
+      "total_time_minutes": 0,
+      "avg_session_duration": null,
+      "avg_interactions_per_session": null
+    },
+
+    "validation_metrics": {
+      "total_validations": 0,
+      "pass_rate": null,
+      "coverage": null
+    }
+  }
+}
