@@ -15,27 +15,28 @@ Or import as module:
     report = analyzer.generate_full_report()
 """
 
-import json
 import argparse
 import csv
-from pathlib import Path
-from datetime import datetime
+import json
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+from datetime import datetime
+from pathlib import Path
+from typing import Any
 
 
 @dataclass
 class MetricsReport:
     """Container for computed metrics."""
+
     computed_at: str = field(default_factory=lambda: datetime.now().isoformat())
-    code_metrics: Dict[str, Any] = field(default_factory=dict)
-    error_metrics: Dict[str, Any] = field(default_factory=dict)
-    idea_metrics: Dict[str, Any] = field(default_factory=dict)
-    intervention_metrics: Dict[str, Any] = field(default_factory=dict)
-    session_metrics: Dict[str, Any] = field(default_factory=dict)
-    validation_metrics: Dict[str, Any] = field(default_factory=dict)
-    attribution_summary: Dict[str, Any] = field(default_factory=dict)
+    code_metrics: dict[str, Any] = field(default_factory=dict)
+    error_metrics: dict[str, Any] = field(default_factory=dict)
+    idea_metrics: dict[str, Any] = field(default_factory=dict)
+    intervention_metrics: dict[str, Any] = field(default_factory=dict)
+    session_metrics: dict[str, Any] = field(default_factory=dict)
+    validation_metrics: dict[str, Any] = field(default_factory=dict)
+    attribution_summary: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -46,7 +47,7 @@ class MetricsReport:
             "intervention_metrics": self.intervention_metrics,
             "session_metrics": self.session_metrics,
             "validation_metrics": self.validation_metrics,
-            "attribution_summary": self.attribution_summary
+            "attribution_summary": self.attribution_summary,
         }
 
 
@@ -59,7 +60,7 @@ class TRACEAnalyzer:
 
     def _load_trace(self) -> dict:
         """Load TRACE data from file."""
-        with open(self.trace_path, 'r', encoding='utf-8') as f:
+        with open(self.trace_path, encoding="utf-8") as f:
             return json.load(f)
 
     # =========================================================
@@ -105,10 +106,7 @@ class TRACEAnalyzer:
             "human_authorship_ratio": total_human / total_lines if total_lines > 0 else None,
             "by_file_extension": dict(by_extension),
             "by_contribution_type": dict(by_type),
-            "quality": {
-                "ai_errors_caught_by_human": total_ai_errors,
-                "human_errors_caught_by_ai": total_human_errors
-            }
+            "quality": {"ai_errors_caught_by_human": total_ai_errors, "human_errors_caught_by_ai": total_human_errors},
         }
 
     # =========================================================
@@ -124,17 +122,12 @@ class TRACEAnalyzer:
         human_errors = [e for e in errors if e.get("source", {}).get("originated_from") == "human"]
 
         # By detector
-        ai_caught_by_human = sum(1 for e in ai_errors
-            if e.get("detection", {}).get("detected_by") == "human")
-        ai_caught_by_ai = sum(1 for e in ai_errors
-            if e.get("detection", {}).get("detected_by") == "ai")
-        ai_caught_by_test = sum(1 for e in ai_errors
-            if e.get("detection", {}).get("detected_by") == "automated_test")
+        ai_caught_by_human = sum(1 for e in ai_errors if e.get("detection", {}).get("detected_by") == "human")
+        ai_caught_by_ai = sum(1 for e in ai_errors if e.get("detection", {}).get("detected_by") == "ai")
+        ai_caught_by_test = sum(1 for e in ai_errors if e.get("detection", {}).get("detected_by") == "automated_test")
 
-        human_caught_by_ai = sum(1 for e in human_errors
-            if e.get("detection", {}).get("detected_by") == "ai")
-        human_caught_by_human = sum(1 for e in human_errors
-            if e.get("detection", {}).get("detected_by") == "human")
+        human_caught_by_ai = sum(1 for e in human_errors if e.get("detection", {}).get("detected_by") == "ai")
+        human_caught_by_human = sum(1 for e in human_errors if e.get("detection", {}).get("detected_by") == "human")
 
         # By type
         by_type = Counter(e.get("error_type", "unknown") for e in errors)
@@ -159,7 +152,7 @@ class TRACEAnalyzer:
             "ai_catch_rate_for_human": human_caught_by_ai / len(human_errors) if human_errors else None,
             "by_error_type": dict(by_type),
             "by_severity": dict(by_severity),
-            "resolution_rate": resolved / len(errors) if errors else None
+            "resolution_rate": resolved / len(errors) if errors else None,
         }
 
     # =========================================================
@@ -176,8 +169,8 @@ class TRACEAnalyzer:
         collab_ideas = [i for i in ideas if i.get("origin", {}).get("source") == "collaborative"]
 
         # AI idea outcomes
-        ai_accepted = sum(1 for i in ai_ideas if i.get("outcome", {}).get("adopted") == True)
-        ai_rejected = sum(1 for i in ai_ideas if i.get("outcome", {}).get("adopted") == False)
+        ai_accepted = sum(1 for i in ai_ideas if i.get("outcome", {}).get("adopted") is True)
+        ai_rejected = sum(1 for i in ai_ideas if i.get("outcome", {}).get("adopted") is False)
         ai_modified = sum(1 for i in ai_ideas if i.get("outcome", {}).get("modification_description"))
         ai_pending = sum(1 for i in ai_ideas if i.get("evaluation", {}).get("status") == "pending")
 
@@ -185,8 +178,11 @@ class TRACEAnalyzer:
         by_type = Counter(i.get("idea_type", "unknown") for i in ideas)
 
         # Rejection reasons
-        rejection_reasons = [i.get("outcome", {}).get("rejection_reason")
-                           for i in ai_ideas if i.get("outcome", {}).get("rejection_reason")]
+        rejection_reasons = [
+            i.get("outcome", {}).get("rejection_reason")
+            for i in ai_ideas
+            if i.get("outcome", {}).get("rejection_reason")
+        ]
 
         return {
             "total_ideas": len(ideas),
@@ -202,7 +198,7 @@ class TRACEAnalyzer:
             "ai_idea_modification_rate": ai_modified / len(ai_ideas) if ai_ideas else None,
             "idea_contribution_ratio_ai": len(ai_ideas) / len(ideas) if ideas else None,
             "by_idea_type": dict(by_type),
-            "rejection_reasons": rejection_reasons
+            "rejection_reasons": rejection_reasons,
         }
 
     # =========================================================
@@ -235,7 +231,7 @@ class TRACEAnalyzer:
             "intervention_rate": len(interventions) / len(interactions) if interactions else None,
             "by_intervention_type": dict(by_type),
             "by_significance": dict(by_significance),
-            "expertise_applied": dict(expertise_counts)
+            "expertise_applied": dict(expertise_counts),
         }
 
     # =========================================================
@@ -253,8 +249,11 @@ class TRACEAnalyzer:
         by_stage = Counter(s.get("scientific_stage", "unknown") for s in sessions)
 
         # Helpfulness ratings
-        ratings = [s.get("reflection", {}).get("ai_helpfulness_rating")
-                  for s in sessions if s.get("reflection", {}).get("ai_helpfulness_rating")]
+        ratings = [
+            s.get("reflection", {}).get("ai_helpfulness_rating")
+            for s in sessions
+            if s.get("reflection", {}).get("ai_helpfulness_rating")
+        ]
 
         return {
             "total_sessions": len(sessions),
@@ -265,7 +264,7 @@ class TRACEAnalyzer:
             "avg_interactions_per_session": len(interactions) / len(sessions) if sessions else None,
             "by_scientific_stage": dict(by_stage),
             "ai_helpfulness_ratings": ratings,
-            "avg_ai_helpfulness": sum(ratings) / len(ratings) if ratings else None
+            "avg_ai_helpfulness": sum(ratings) / len(ratings) if ratings else None,
         }
 
     # =========================================================
@@ -285,7 +284,7 @@ class TRACEAnalyzer:
             "failed": by_result.get("failed", 0),
             "inconclusive": by_result.get("inconclusive", 0),
             "pass_rate": by_result.get("passed", 0) / len(validations) if validations else None,
-            "by_validation_method": dict(by_method)
+            "by_validation_method": dict(by_method),
         }
 
     # =========================================================
@@ -298,8 +297,11 @@ class TRACEAnalyzer:
         code_metrics = self.compute_code_metrics()
         idea_metrics = self.compute_idea_metrics()
 
-        ai_percentages = [a.get("ai_contribution", {}).get("percentage_estimate", 0)
-                        for a in attributions if a.get("ai_contribution", {}).get("percentage_estimate")]
+        ai_percentages = [
+            a.get("ai_contribution", {}).get("percentage_estimate", 0)
+            for a in attributions
+            if a.get("ai_contribution", {}).get("percentage_estimate")
+        ]
 
         return {
             "total_attributions": len(attributions),
@@ -310,8 +312,8 @@ class TRACEAnalyzer:
                 "total_ai_code_lines": code_metrics.get("total_lines_by_ai", 0),
                 "total_human_code_lines": code_metrics.get("total_lines_by_human", 0),
                 "total_ai_ideas": idea_metrics.get("total_ai_ideas", 0),
-                "total_human_ideas": idea_metrics.get("total_human_ideas", 0)
-            }
+                "total_human_ideas": idea_metrics.get("total_human_ideas", 0),
+            },
         }
 
     # =========================================================
@@ -505,7 +507,7 @@ class TRACEAnalyzer:
 """
         return md
 
-    def export_to_csv(self, output_dir: Path) -> List[str]:
+    def export_to_csv(self, output_dir: Path) -> list[str]:
         """Export all data to CSV files."""
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -520,7 +522,7 @@ class TRACEAnalyzer:
             ("errors", self.trace.get("errors", [])),
             ("interventions", self.trace.get("interventions", [])),
             ("decisions", self.trace.get("decisions", [])),
-            ("learnings", self.trace.get("learnings", []))
+            ("learnings", self.trace.get("learnings", [])),
         ]
 
         for name, data in categories:
@@ -534,13 +536,13 @@ class TRACEAnalyzer:
         # Export summary metrics
         report = self.generate_full_report()
         metrics_path = output_dir / "metrics_summary.json"
-        with open(metrics_path, 'w', encoding='utf-8') as f:
+        with open(metrics_path, "w", encoding="utf-8") as f:
             json.dump(report.to_dict(), f, indent=2)
         files_created.append(str(metrics_path))
 
         return files_created
 
-    def _write_csv(self, filepath: Path, data: List[dict]) -> None:
+    def _write_csv(self, filepath: Path, data: list[dict]) -> None:
         """Write list of dicts to CSV, flattening nested structures."""
         if not data:
             return
@@ -554,12 +556,12 @@ class TRACEAnalyzer:
             all_keys.update(d.keys())
         fieldnames = sorted(all_keys)
 
-        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+        with open(filepath, "w", newline="", encoding="utf-8") as f:
             writer = csv.DictWriter(f, fieldnames=fieldnames)
             writer.writeheader()
             writer.writerows(flat_data)
 
-    def _flatten_dict(self, d: dict, parent_key: str = '', sep: str = '.') -> dict:
+    def _flatten_dict(self, d: dict, parent_key: str = "", sep: str = ".") -> dict:
         """Flatten nested dictionary."""
         items = []
         for k, v in d.items():
@@ -572,13 +574,13 @@ class TRACEAnalyzer:
                 items.append((new_key, v))
         return dict(items)
 
-    def _fmt_pct(self, value: Optional[float]) -> str:
+    def _fmt_pct(self, value: float | None) -> str:
         """Format as percentage."""
         if value is None:
             return "N/A"
         return f"{value * 100:.1f}%"
 
-    def _fmt_num(self, value: Optional[float]) -> str:
+    def _fmt_num(self, value: float | None) -> str:
         """Format number."""
         if value is None:
             return "N/A"
@@ -597,12 +599,13 @@ class TRACEAnalyzer:
 def main():
     parser = argparse.ArgumentParser(description="Analyze TRACE data")
     parser.add_argument("trace_path", help="Path to trace.json")
-    parser.add_argument("--report", choices=["json", "markdown"],
-                       help="Generate full report")
-    parser.add_argument("--metrics", choices=["code", "errors", "ideas", "interventions", "sessions", "all"],
-                       help="Show specific metrics")
-    parser.add_argument("--export", choices=["csv"],
-                       help="Export data format")
+    parser.add_argument("--report", choices=["json", "markdown"], help="Generate full report")
+    parser.add_argument(
+        "--metrics",
+        choices=["code", "errors", "ideas", "interventions", "sessions", "all"],
+        help="Show specific metrics",
+    )
+    parser.add_argument("--export", choices=["csv"], help="Export data format")
     parser.add_argument("-o", "--output", help="Output path")
 
     args = parser.parse_args()
@@ -613,7 +616,7 @@ def main():
         if args.report == "markdown":
             output = analyzer.export_to_markdown()
             if args.output:
-                with open(args.output, 'w', encoding='utf-8') as f:
+                with open(args.output, "w", encoding="utf-8") as f:
                     f.write(output)
                 print(f"Report written to: {args.output}")
             else:
@@ -622,7 +625,7 @@ def main():
             report = analyzer.generate_full_report()
             output = json.dumps(report.to_dict(), indent=2)
             if args.output:
-                with open(args.output, 'w', encoding='utf-8') as f:
+                with open(args.output, "w", encoding="utf-8") as f:
                     f.write(output)
                 print(f"Report written to: {args.output}")
             else:

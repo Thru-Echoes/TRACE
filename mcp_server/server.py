@@ -1,24 +1,30 @@
 #!/usr/bin/env python3
 """
-TRACE MCP Server v2.1 - Transparent Research AI Collaboration Environment
+TRACE MCP Server v3.0 - Transparent Research AI Collaboration Environment
 
 A Model Context Protocol server for tracking AI-human collaboration in research.
-Designed to support reproducibility, attribution, and audit trails for AI-assisted science.
+Provides a standardized audit schema that is:
+- Applied across different scientific domains
+- Interoperable between different agent frameworks
+- Machine-readable for automated compliance checking
+- Aligned with MCP's existing logging hooks
+
+v3.0 Changes (MVP Refactor):
+- Formal JSON Schema (urn:trace:schema:core:v3)
+- Environment capture for reproducibility
+- Evaluation logging for tests/benchmarks
+- Modular architecture: core/ + ext/ (claude, knowledge, reports)
+- Simplified authorship model with direction/execution separation
 
 v2.1 Changes:
 - Smart TRACE Triggers: Behavioral triggers for automatic logging prompts
 - trace_knowledge_check tool: Validates events, detects types, checks duplicates
-- Pattern-based event type detection
-- Similarity checking to avoid duplicate entries
-- Suggested field generation for easier logging
 
 v2.0 Changes:
-- New authorship model: human_directed vs ai_suggested vs human_manual_edit
+- Authorship model: human_directed vs ai_suggested vs collaborative
 - Git integration for [HUMAN-EDIT] detection
 - AI suggestion tracking with accept/reject/modify outcomes
-- Line count tracking for all categories
-- Audit logging for all operations
-- Multi-project-type support: code (lines), text (lines+words), data (rows)
+- Multi-content-type support: code (lines), text (lines+words), data (rows)
 
 Usage:
     python server.py
@@ -31,23 +37,92 @@ Requirements:
     pip install mcp anthropic
 """
 
-import json
 import asyncio
+import hashlib
+import json
 import os
 import re
-import hashlib
 import subprocess
-from pathlib import Path
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from pathlib import Path
 
 try:
     from mcp.server import Server
     from mcp.server.stdio import stdio_server
-    from mcp.types import Tool, TextContent
+    from mcp.types import TextContent, Tool
 except ImportError:
     print("ERROR: MCP package not installed. Run: pip install mcp anthropic")
     exit(1)
+
+# Core Module imports (MVP)
+CORE_AVAILABLE = False
+EnvironmentCapture = None  # type: ignore
+EvaluationLogger = None  # type: ignore
+MetricsComputer = None  # type: ignore
+
+try:
+    from core import (
+        EnvironmentCapture,
+        EvaluationLogger,  # noqa: F401
+        MetricsComputer,  # noqa: F401
+        capture_environment,  # noqa: F401
+    )
+    from core.environment import generate_environment_id
+
+    CORE_AVAILABLE = True
+except ImportError:
+    pass
+
+# Extension Module imports
+EXT_CLAUDE_AVAILABLE = False
+EXT_KNOWLEDGE_AVAILABLE = False
+EXT_REPORTS_AVAILABLE = False
+
+try:
+    from ext.claude import ClaudeExtension
+
+    EXT_CLAUDE_AVAILABLE = True
+except ImportError:
+    ClaudeExtension = None  # type: ignore
+
+try:
+    from ext.knowledge import KnowledgeManager
+
+    EXT_KNOWLEDGE_AVAILABLE = True
+except ImportError:
+    KnowledgeManager = None  # type: ignore
+
+try:
+    from ext.reports import ReportsExtension
+
+    EXT_REPORTS_AVAILABLE = True
+except ImportError:
+    ReportsExtension = None  # type: ignore
+
+# V&V Module imports
+VV_AVAILABLE = False
+SnapshotManager = None  # type: ignore
+VerificationEngine = None  # type: ignore
+GitReconciler = None  # type: ignore
+IntegrityChain = None  # type: ignore
+TextAnalyzer = None  # type: ignore
+TrustCalculator = None  # type: ignore
+ReportGenerator = None  # type: ignore
+
+try:
+    from vv import (
+        GitReconciler,
+        IntegrityChain,
+        ReportGenerator,
+        SnapshotManager,
+        TextAnalyzer,
+        TrustCalculator,  # noqa: F401
+        VerificationEngine,
+    )
+
+    VV_AVAILABLE = True
+except ImportError:
+    pass
 
 
 # ============================================================
@@ -60,18 +135,9 @@ server = Server("trace")
 
 # Content type definitions for different project types
 CONTENT_TYPES = {
-    "code": {
-        "metrics": ["lines", "functions", "classes", "files", "complexity"],
-        "primary_unit": "lines"
-    },
-    "text": {
-        "metrics": ["words", "lines", "paragraphs", "characters", "sections"],
-        "primary_unit": "words"
-    },
-    "data": {
-        "metrics": ["rows", "columns", "cells", "schemas", "transformations"],
-        "primary_unit": "rows"
-    }
+    "code": {"metrics": ["lines", "functions", "classes", "files", "complexity"], "primary_unit": "lines"},
+    "text": {"metrics": ["words", "lines", "paragraphs", "characters", "sections"], "primary_unit": "words"},
+    "data": {"metrics": ["rows", "columns", "cells", "schemas", "transformations"], "primary_unit": "rows"},
 }
 
 
@@ -79,15 +145,18 @@ CONTENT_TYPES = {
 # TRACE Operations
 # ============================================================
 
+
 def load_trace() -> dict:
     """Load TRACE data from file, creating default if not exists."""
     if TRACE_PATH.exists():
         try:
-            with open(TRACE_PATH, 'r', encoding='utf-8') as f:
+            with open(TRACE_PATH, encoding="utf-8") as f:
                 data = json.load(f)
-                # Migrate v1.0 to v2.0 if needed
+                # Migrate to latest version
                 if data.get("schema_version") == "TRACE-1.0":
                     data = migrate_v1_to_v2(data)
+                if data.get("schema_version") == "TRACE-2.0":
+                    data = migrate_v2_to_v3(data)
                 return data
         except json.JSONDecodeError as e:
             print(f"WARNING: Invalid JSON in TRACE file: {e}")
@@ -116,25 +185,17 @@ def migrate_v1_to_v2(trace: dict) -> dict:
         cc["authorship"] = {
             "human_directed": {
                 "ai_executed_lines": old_authorship.get("ai_authored_lines", 0),
-                "human_executed_lines": old_authorship.get("human_authored_lines", 0)
+                "human_executed_lines": old_authorship.get("human_authored_lines", 0),
             },
             "ai_suggested": {
                 "accepted_lines": 0,
                 "rejected_lines": 0,
                 "modified_lines": old_authorship.get("human_improved_ai_lines", 0),
                 "modification_description": None,
-                "related_suggestion_id": None
+                "related_suggestion_id": None,
             },
-            "human_manual_edit": {
-                "lines_added": 0,
-                "lines_removed": 0,
-                "lines_modified": 0,
-                "git_commits": []
-            },
-            "collaborative": {
-                "lines": old_authorship.get("collaborative_lines", 0),
-                "description": None
-            }
+            "human_manual_edit": {"lines_added": 0, "lines_removed": 0, "lines_modified": 0, "git_commits": []},
+            "collaborative": {"lines": old_authorship.get("collaborative_lines", 0), "description": None},
         }
 
     # Update metrics structure
@@ -151,16 +212,76 @@ def migrate_v1_to_v2(trace: dict) -> dict:
             "lines_accepted_as_is": 0,
             "lines_modified_by_human": 0,
             "lines_rejected": 0,
-            "by_type": {}
+            "by_type": {},
         }
 
     return trace
 
 
+def migrate_v2_to_v3(trace: dict) -> dict:
+    """Migrate TRACE v2.0 schema to v3.0."""
+    trace["schema_version"] = "TRACE-3.0"
+    trace["schema_uri"] = "urn:trace:schema:core:v3"
+
+    # Add v3.0 collections if missing
+    if "environments" not in trace:
+        trace["environments"] = []
+    if "evaluations" not in trace:
+        trace["evaluations"] = []
+
+    # Create aliases for v3.0 naming (contributions/suggestions)
+    # These point to the same data for backwards compatibility
+    if "contributions" not in trace:
+        trace["contributions"] = trace.get("code_contributions", [])
+    if "suggestions" not in trace:
+        trace["suggestions"] = trace.get("ai_suggestions", [])
+
+    # Initialize extensions structure
+    if "_extensions" not in trace:
+        trace["_extensions"] = {}
+
+    # Move knowledge items to extensions
+    knowledge_ext = trace["_extensions"].setdefault(
+        "knowledge",
+        {
+            "decisions": [],
+            "learnings": [],
+            "gotchas": [],
+            "ideas": [],
+        },
+    )
+
+    # Move existing decisions/learnings/gotchas/ideas to extensions
+    for key in ["decisions", "learnings", "gotchas", "ideas"]:
+        if key in trace and trace[key]:
+            knowledge_ext[key] = trace[key]
+
+    # Initialize claude extension
+    trace["_extensions"].setdefault(
+        "claude",
+        {
+            "checkpoints": [],
+            "knowledge_checks": [],
+        },
+    )
+
+    # Initialize reports extension
+    trace["_extensions"].setdefault(
+        "reports",
+        {
+            "trust_reports": [],
+            "text_analyses": [],
+        },
+    )
+
+    return trace
+
+
 def create_default_trace() -> dict:
-    """Create a default TRACE v2.0 structure."""
+    """Create a default TRACE v3.0 structure."""
     return {
-        "schema_version": "TRACE-2.0",
+        "schema_version": "TRACE-3.0",
+        "schema_uri": "urn:trace:schema:core:v3",
         "schema_name": "Transparent Research AI Collaboration Environment",
         "metadata": {
             "project": "Unknown Project",
@@ -172,16 +293,9 @@ def create_default_trace() -> dict:
             "research_protocol": {"enabled": True},
             "environment": {},
             "ai_systems": [],
-            "git_conventions": {
-                "human_edit_tag": HUMAN_EDIT_TAG,
-                "auto_detect_manual_edits": True
-            }
+            "git_conventions": {"human_edit_tag": HUMAN_EDIT_TAG, "auto_detect_manual_edits": True},
         },
-        "context": {
-            "goals": "",
-            "current_status": "",
-            "key_technologies": []
-        },
+        "context": {"goals": "", "current_status": "", "key_technologies": []},
         "sessions": [],
         "ai_suggestions": [],
         "human_manual_edits": [],
@@ -207,7 +321,7 @@ def create_default_trace() -> dict:
                     "ai_suggested_accepted": 0,
                     "ai_suggested_modified": 0,
                     "human_manual_edit": 0,
-                    "collaborative": 0
+                    "collaborative": 0,
                 },
                 "total_words": {
                     "human_directed_ai_executed": 0,
@@ -215,7 +329,7 @@ def create_default_trace() -> dict:
                     "ai_suggested_accepted": 0,
                     "ai_suggested_modified": 0,
                     "human_manual_edit": 0,
-                    "collaborative": 0
+                    "collaborative": 0,
                 },
                 "total_rows": {
                     "human_directed_ai_executed": 0,
@@ -223,33 +337,29 @@ def create_default_trace() -> dict:
                     "ai_suggested_accepted": 0,
                     "ai_suggested_modified": 0,
                     "human_manual_edit": 0,
-                    "collaborative": 0
+                    "collaborative": 0,
                 },
                 "by_source": {
                     "human_direction_percentage": None,
                     "ai_suggestion_percentage": None,
-                    "human_manual_percentage": None
+                    "human_manual_percentage": None,
                 },
                 "by_source_words": {
                     "human_direction_percentage": None,
                     "ai_suggestion_percentage": None,
-                    "human_manual_percentage": None
+                    "human_manual_percentage": None,
                 },
                 "by_source_rows": {
                     "human_direction_percentage": None,
                     "ai_suggestion_percentage": None,
-                    "human_manual_percentage": None
+                    "human_manual_percentage": None,
                 },
-                "by_content_type": {
-                    "code": 0,
-                    "text": 0,
-                    "data": 0
-                },
+                "by_content_type": {"code": 0, "text": 0, "data": 0},
                 "git_integration": {
                     "manual_edit_commits_detected": 0,
                     "manual_edit_lines_added": 0,
-                    "manual_edit_lines_removed": 0
-                }
+                    "manual_edit_lines_removed": 0,
+                },
             },
             "suggestion_metrics": {
                 "total_suggestions": 0,
@@ -263,14 +373,35 @@ def create_default_trace() -> dict:
                 "lines_accepted_as_is": 0,
                 "lines_modified_by_human": 0,
                 "lines_rejected": 0,
-                "by_type": {}
+                "by_type": {},
             },
             "error_metrics": {},
             "idea_metrics": {},
             "intervention_metrics": {},
             "session_metrics": {},
-            "validation_metrics": {}
-        }
+            "validation_metrics": {},
+        },
+        # v3.0 additions
+        "environments": [],  # Execution environments for reproducibility
+        "evaluations": [],  # Test/benchmark results
+        "contributions": [],  # Alias for code_contributions (v3.0 naming)
+        "suggestions": [],  # Alias for ai_suggestions (v3.0 naming)
+        "_extensions": {  # Extension data (not part of core schema)
+            "knowledge": {
+                "decisions": [],
+                "learnings": [],
+                "gotchas": [],
+                "ideas": [],
+            },
+            "claude": {
+                "checkpoints": [],
+                "knowledge_checks": [],
+            },
+            "reports": {
+                "trust_reports": [],
+                "text_analyses": [],
+            },
+        },
     }
 
 
@@ -278,7 +409,7 @@ def save_trace(trace: dict) -> None:
     """Save TRACE data to file with updated timestamp."""
     trace["metadata"]["last_updated"] = datetime.now().isoformat()
     TRACE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(TRACE_PATH, 'w', encoding='utf-8') as f:
+    with open(TRACE_PATH, "w", encoding="utf-8") as f:
         json.dump(trace, f, indent=2, ensure_ascii=False)
 
 
@@ -291,18 +422,20 @@ def generate_id(prefix: str, existing_items: list) -> str:
     return f"{prefix}{counter:03d}"
 
 
-def log_audit(trace: dict, operation: str, arguments_hash: Optional[str] = None) -> None:
+def log_audit(trace: dict, operation: str, arguments_hash: str | None = None) -> None:
     """Log an audit entry for the operation."""
     if "audit_log" not in trace:
         trace["audit_log"] = []
 
-    trace["audit_log"].append({
-        "timestamp": datetime.now().isoformat(),
-        "operation": operation,
-        "arguments_hash": arguments_hash,
-        "user": None,
-        "trace_version": "2.0"
-    })
+    trace["audit_log"].append(
+        {
+            "timestamp": datetime.now().isoformat(),
+            "operation": operation,
+            "arguments_hash": arguments_hash,
+            "user": None,
+            "trace_version": "2.0",
+        }
+    )
 
 
 def hash_arguments(arguments: dict) -> str:
@@ -310,14 +443,21 @@ def hash_arguments(arguments: dict) -> str:
     return hashlib.sha256(json.dumps(arguments, sort_keys=True).encode()).hexdigest()[:16]
 
 
-def search_trace(trace: dict, query: str, categories: Optional[List[str]] = None) -> List[dict]:
+def search_trace(trace: dict, query: str, categories: list[str] | None = None) -> list[dict]:
     """Search TRACE data for matching entries."""
     query_lower = query.lower()
     results = []
     search_categories = categories or [
-        "decisions", "learnings", "gotchas", "patterns",
-        "experiments", "ideas", "errors", "code_contributions",
-        "ai_suggestions", "human_manual_edits"
+        "decisions",
+        "learnings",
+        "gotchas",
+        "patterns",
+        "experiments",
+        "ideas",
+        "errors",
+        "code_contributions",
+        "ai_suggestions",
+        "human_manual_edits",
     ]
 
     for category in search_categories:
@@ -338,114 +478,250 @@ def search_trace(trace: dict, query: str, categories: Optional[List[str]] = None
 TRIGGER_PATTERNS = {
     "gotcha": {
         "keywords": [
-            "unexpected", "surprising", "weird", "strange", "gotcha", "pitfall",
-            "silent", "silently", "fails", "failure", "bug", "issue", "problem",
-            "workaround", "hack", "actually", "turns out", "realized", "discovered",
-            "doesn't work", "didn't work", "won't work", "broken", "breaking",
-            "misleading", "confusing", "undocumented", "documentation says",
-            "contrary to", "despite", "even though", "however", "but actually",
-            "careful", "watch out", "beware", "caution", "warning", "trap"
+            "unexpected",
+            "surprising",
+            "weird",
+            "strange",
+            "gotcha",
+            "pitfall",
+            "silent",
+            "silently",
+            "fails",
+            "failure",
+            "bug",
+            "issue",
+            "problem",
+            "workaround",
+            "hack",
+            "actually",
+            "turns out",
+            "realized",
+            "discovered",
+            "doesn't work",
+            "didn't work",
+            "won't work",
+            "broken",
+            "breaking",
+            "misleading",
+            "confusing",
+            "undocumented",
+            "documentation says",
+            "contrary to",
+            "despite",
+            "even though",
+            "however",
+            "but actually",
+            "careful",
+            "watch out",
+            "beware",
+            "caution",
+            "warning",
+            "trap",
         ],
         "patterns": [
             r"(?:does|doesn't|won't|can't|shouldn't|wouldn't).*(?:expect|think|assume)",
             r"(?:silently|quietly).*(?:fail|drop|ignore|skip)",
             r"(?:docs?|documentation).*(?:wrong|incorrect|outdated|misleading)",
             r"(?:must|need to|have to|should).*(?:before|after|first)",
-            r"(?:only|unless|except).*(?:works?|fails?)"
+            r"(?:only|unless|except).*(?:works?|fails?)",
         ],
-        "description": "Unexpected behavior, pitfalls, or workarounds"
+        "description": "Unexpected behavior, pitfalls, or workarounds",
     },
     "decision": {
         "keywords": [
-            "decided", "decision", "chose", "chosen", "selected", "picked",
-            "went with", "going with", "opted", "opting", "prefer", "preferred",
-            "trade-off", "tradeoff", "instead of", "rather than", "over",
-            "because", "since", "therefore", "approach", "strategy",
-            "architecture", "design", "pattern", "convention", "standard"
+            "decided",
+            "decision",
+            "chose",
+            "chosen",
+            "selected",
+            "picked",
+            "went with",
+            "going with",
+            "opted",
+            "opting",
+            "prefer",
+            "preferred",
+            "trade-off",
+            "tradeoff",
+            "instead of",
+            "rather than",
+            "over",
+            "because",
+            "since",
+            "therefore",
+            "approach",
+            "strategy",
+            "architecture",
+            "design",
+            "pattern",
+            "convention",
+            "standard",
         ],
         "patterns": [
             r"(?:chose|decided|selected|picked|opted).*(?:over|instead|rather)",
             r"(?:will|going to).*(?:use|implement|adopt)",
             r"(?:trade-?off|balance|weigh).*(?:between|versus|vs)",
-            r"(?:approach|strategy|method).*(?:for|to)"
+            r"(?:approach|strategy|method).*(?:for|to)",
         ],
-        "description": "Choices between approaches, trade-offs, architectural decisions"
+        "description": "Choices between approaches, trade-offs, architectural decisions",
     },
     "learning": {
         "keywords": [
-            "learned", "learning", "discovered", "found out", "realized",
-            "understand", "understood", "figured out", "turns out",
-            "TIL", "insight", "aha", "interesting", "note to self",
-            "remember", "important to know", "key insight", "works because",
-            "the reason", "explains why", "makes sense now"
+            "learned",
+            "learning",
+            "discovered",
+            "found out",
+            "realized",
+            "understand",
+            "understood",
+            "figured out",
+            "turns out",
+            "TIL",
+            "insight",
+            "aha",
+            "interesting",
+            "note to self",
+            "remember",
+            "important to know",
+            "key insight",
+            "works because",
+            "the reason",
+            "explains why",
+            "makes sense now",
         ],
         "patterns": [
             r"(?:learned|discovered|realized|found).*(?:that|how|why)",
             r"(?:turns out|it seems|apparently).*(?:that|because)",
             r"(?:now|finally).*(?:understand|know|see)",
-            r"(?:the|this).*(?:reason|explanation|cause).*(?:is|was)"
+            r"(?:the|this).*(?:reason|explanation|cause).*(?:is|was)",
         ],
-        "description": "New knowledge, insights, or understanding gained"
+        "description": "New knowledge, insights, or understanding gained",
     },
     "idea": {
         "keywords": [
-            "could", "might", "should", "would be nice", "what if",
-            "idea", "suggestion", "proposal", "opportunity", "potential",
-            "improve", "improvement", "optimize", "optimization", "enhance",
-            "better", "alternative", "another way", "consider", "maybe",
-            "future", "later", "eventually", "TODO", "FIXME", "refactor"
+            "could",
+            "might",
+            "should",
+            "would be nice",
+            "what if",
+            "idea",
+            "suggestion",
+            "proposal",
+            "opportunity",
+            "potential",
+            "improve",
+            "improvement",
+            "optimize",
+            "optimization",
+            "enhance",
+            "better",
+            "alternative",
+            "another way",
+            "consider",
+            "maybe",
+            "future",
+            "later",
+            "eventually",
+            "TODO",
+            "FIXME",
+            "refactor",
         ],
         "patterns": [
             r"(?:could|might|should).*(?:improve|optimize|enhance|refactor)",
             r"(?:would be|it.d be).*(?:nice|good|better|useful)",
             r"(?:what if|how about|consider).*(?:we|using|adding)",
-            r"(?:future|later|eventually).*(?:could|should|might)"
+            r"(?:future|later|eventually).*(?:could|should|might)",
         ],
-        "description": "Improvement opportunities, optimizations, or alternative approaches"
+        "description": "Improvement opportunities, optimizations, or alternative approaches",
     },
     "intervention": {
         "keywords": [
-            "changed", "modified", "corrected", "fixed", "adjusted",
-            "override", "overrode", "replaced", "rewrote", "edited",
-            "instead", "rather", "different", "not quite", "almost",
-            "tweaked", "refined", "improved", "simplified", "removed"
+            "changed",
+            "modified",
+            "corrected",
+            "fixed",
+            "adjusted",
+            "override",
+            "overrode",
+            "replaced",
+            "rewrote",
+            "edited",
+            "instead",
+            "rather",
+            "different",
+            "not quite",
+            "almost",
+            "tweaked",
+            "refined",
+            "improved",
+            "simplified",
+            "removed",
         ],
         "patterns": [
             r"(?:changed|modified|corrected|fixed).*(?:AI|generated|suggested)",
             r"(?:AI|it).*(?:suggested|generated|produced).*(?:but|however)",
             r"(?:had to|needed to).*(?:change|modify|fix|correct|adjust)",
-            r"(?:not quite|almost|close but).*(?:right|correct|what)"
+            r"(?:not quite|almost|close but).*(?:right|correct|what)",
         ],
-        "description": "Human modifications to AI-generated output"
+        "description": "Human modifications to AI-generated output",
     },
     "code": {
         "keywords": [
-            "created", "implemented", "wrote", "added", "built",
-            "function", "class", "module", "file", "feature",
-            "refactored", "optimized", "fixed", "updated", "modified",
-            "lines", "code", "script", "program"
+            "created",
+            "implemented",
+            "wrote",
+            "added",
+            "built",
+            "function",
+            "class",
+            "module",
+            "file",
+            "feature",
+            "refactored",
+            "optimized",
+            "fixed",
+            "updated",
+            "modified",
+            "lines",
+            "code",
+            "script",
+            "program",
         ],
         "patterns": [
             r"(?:created|wrote|implemented|added).*(?:function|class|module|file)",
             r"(?:\d+).*(?:lines|functions|classes)",
-            r"(?:new|updated|modified).*(?:file|code|implementation)"
+            r"(?:new|updated|modified).*(?:file|code|implementation)",
         ],
-        "description": "Code contributions or modifications"
+        "description": "Code contributions or modifications",
     },
     "error": {
         "keywords": [
-            "error", "exception", "crash", "bug", "failure",
-            "traceback", "stack trace", "raised", "thrown",
-            "TypeError", "ValueError", "RuntimeError", "AttributeError",
-            "null", "undefined", "NaN", "infinite loop", "timeout"
+            "error",
+            "exception",
+            "crash",
+            "bug",
+            "failure",
+            "traceback",
+            "stack trace",
+            "raised",
+            "thrown",
+            "TypeError",
+            "ValueError",
+            "RuntimeError",
+            "AttributeError",
+            "null",
+            "undefined",
+            "NaN",
+            "infinite loop",
+            "timeout",
         ],
         "patterns": [
             r"(?:error|exception|crash|failure).*(?:occurred|happened|raised)",
             r"(?:TypeError|ValueError|RuntimeError|KeyError|AttributeError)",
-            r"(?:returned|got|received).*(?:null|None|undefined|NaN)"
+            r"(?:returned|got|received).*(?:null|None|undefined|NaN)",
         ],
-        "description": "Errors, exceptions, or failures encountered"
-    }
+        "description": "Errors, exceptions, or failures encountered",
+    },
 }
 
 
@@ -463,7 +739,7 @@ def calculate_text_similarity(text1: str, text2: str) -> float:
     return len(intersection) / len(union) if union else 0.0
 
 
-def detect_event_type(context: str) -> List[tuple]:
+def detect_event_type(context: str) -> list[tuple]:
     """
     Detect likely event types from context.
     Returns list of (event_type, confidence, reasoning) tuples sorted by confidence.
@@ -489,9 +765,8 @@ def detect_event_type(context: str) -> List[tuple]:
                 matched_patterns.append(pattern)
 
         if score > 0:
-            # Normalize score (rough approximation)
-            max_possible = len(patterns["keywords"]) + len(patterns["patterns"]) * 2
-            confidence = min(score / 5, 1.0)  # Cap at 1.0, threshold at 5 matches
+            # Normalize score (cap at 1.0, threshold at 5 matches)
+            confidence = min(score / 5, 1.0)
 
             if confidence >= 0.2:  # Only include if at least 20% confident
                 confidence_label = "high" if confidence >= 0.6 else "medium" if confidence >= 0.4 else "low"
@@ -505,7 +780,7 @@ def detect_event_type(context: str) -> List[tuple]:
     return [(r[0], r[1], r[2]) for r in results]
 
 
-def find_similar_entries(trace: dict, context: str, event_type: str, threshold: float = 0.3) -> List[dict]:
+def find_similar_entries(trace: dict, context: str, event_type: str, threshold: float = 0.3) -> list[dict]:
     """Find similar existing entries in TRACE data."""
     similar = []
 
@@ -517,7 +792,7 @@ def find_similar_entries(trace: dict, context: str, event_type: str, threshold: 
         "idea": ("ideas", ["idea", "triggered_by"]),
         "intervention": ("interventions", ["ai_output_summary", "human_action"]),
         "code": ("code_contributions", ["description", "file_path"]),
-        "error": ("errors", ["description", "resolution_description"])
+        "error": ("errors", ["description", "resolution_description"]),
     }
 
     if event_type not in category_fields:
@@ -538,12 +813,14 @@ def find_similar_entries(trace: dict, context: str, event_type: str, threshold: 
         if entry_text:
             similarity = calculate_text_similarity(context, entry_text)
             if similarity >= threshold:
-                similar.append({
-                    "id": entry.get("id", "unknown"),
-                    "similarity": round(similarity, 2),
-                    "entry_preview": entry_text[:200] + "..." if len(entry_text) > 200 else entry_text,
-                    "category": category
-                })
+                similar.append(
+                    {
+                        "id": entry.get("id", "unknown"),
+                        "similarity": round(similarity, 2),
+                        "entry_preview": entry_text[:200] + "..." if len(entry_text) > 200 else entry_text,
+                        "category": category,
+                    }
+                )
 
     # Sort by similarity descending
     similar.sort(key=lambda x: x["similarity"], reverse=True)
@@ -557,10 +834,36 @@ def generate_suggested_fields(context: str, event_type: str) -> dict:
 
     # Extract potential tags from context
     common_tech_terms = [
-        "python", "javascript", "typescript", "react", "node", "api", "database",
-        "sql", "nosql", "redis", "docker", "kubernetes", "aws", "gcp", "azure",
-        "git", "testing", "pytest", "jest", "async", "sync", "cache", "auth",
-        "pandas", "numpy", "tensorflow", "pytorch", "ml", "ai", "data"
+        "python",
+        "javascript",
+        "typescript",
+        "react",
+        "node",
+        "api",
+        "database",
+        "sql",
+        "nosql",
+        "redis",
+        "docker",
+        "kubernetes",
+        "aws",
+        "gcp",
+        "azure",
+        "git",
+        "testing",
+        "pytest",
+        "jest",
+        "async",
+        "sync",
+        "cache",
+        "auth",
+        "pandas",
+        "numpy",
+        "tensorflow",
+        "pytorch",
+        "ml",
+        "ai",
+        "data",
     ]
     context_lower = context.lower()
     potential_tags = [term for term in common_tech_terms if term in context_lower]
@@ -582,7 +885,7 @@ def generate_suggested_fields(context: str, event_type: str) -> dict:
             "problem": problem_part if problem_part else context,
             "solution": solution_part if solution_part else "TODO: Add solution",
             "severity": "medium",
-            "tags": potential_tags[:5]
+            "tags": potential_tags[:5],
         }
 
     elif event_type == "decision":
@@ -590,7 +893,7 @@ def generate_suggested_fields(context: str, event_type: str) -> dict:
             "decision": context,
             "rationale": "TODO: Add rationale",
             "proposed_by": "collaborative",
-            "tags": potential_tags[:5]
+            "tags": potential_tags[:5],
         }
 
     elif event_type == "learning":
@@ -599,7 +902,7 @@ def generate_suggested_fields(context: str, event_type: str) -> dict:
             "evidence": "TODO: Add evidence",
             "confidence": "medium",
             "discovered_by": "collaborative",
-            "tags": potential_tags[:5]
+            "tags": potential_tags[:5],
         }
 
     elif event_type == "idea":
@@ -612,18 +915,14 @@ def generate_suggested_fields(context: str, event_type: str) -> dict:
         elif any(word in context_lower for word in ["refactor", "clean", "simplify"]):
             idea_type = "design"
 
-        suggestions = {
-            "idea": context,
-            "idea_type": idea_type,
-            "source": "collaborative"
-        }
+        suggestions = {"idea": context, "idea_type": idea_type, "source": "collaborative"}
 
     elif event_type == "intervention":
         suggestions = {
             "intervention_type": "refinement",
             "ai_output_summary": "TODO: Describe AI output",
             "human_action": context,
-            "significance": "minor"
+            "significance": "minor",
         }
 
     elif event_type == "code":
@@ -631,7 +930,7 @@ def generate_suggested_fields(context: str, event_type: str) -> dict:
             "file_path": "TODO: Add file path",
             "contribution_type": "modification",
             "description": context,
-            "direction_source": "human_directed"
+            "direction_source": "human_directed",
         }
 
     elif event_type == "error":
@@ -649,14 +948,13 @@ def generate_suggested_fields(context: str, event_type: str) -> dict:
             "error_type": "logic",
             "severity": severity,
             "originated_from": "ai",
-            "detected_by": "human"
+            "detected_by": "human",
         }
 
     return suggestions
 
 
-def knowledge_check(trace: dict, context: str, event_type: Optional[str] = None,
-                    check_duplicates: bool = True) -> dict:
+def knowledge_check(trace: dict, context: str, event_type: str | None = None, check_duplicates: bool = True) -> dict:
     """
     Main knowledge check function.
     Analyzes context, detects event type, checks for duplicates, and returns recommendations.
@@ -667,7 +965,7 @@ def knowledge_check(trace: dict, context: str, event_type: Optional[str] = None,
         "confidence": "low",
         "reasoning": "",
         "similar_entries": [],
-        "suggested_fields": {}
+        "suggested_fields": {},
     }
 
     # Detect event types if not specified
@@ -693,7 +991,9 @@ def knowledge_check(trace: dict, context: str, event_type: Optional[str] = None,
         # If very similar entry exists, suggest not logging
         if similar and similar[0]["similarity"] >= 0.7:
             result["should_log"] = False
-            result["reasoning"] = f"Very similar entry already exists (ID: {similar[0]['id']}, similarity: {similar[0]['similarity']})"
+            result["reasoning"] = (
+                f"Very similar entry already exists (ID: {similar[0]['id']}, similarity: {similar[0]['similarity']})"
+            )
             return result
 
     # Should log if we detected types and no close duplicates
@@ -701,9 +1001,7 @@ def knowledge_check(trace: dict, context: str, event_type: Optional[str] = None,
     result["recommended_types"] = [t[0] for t in detected_types[:3]]  # Top 3 types
 
     # Generate suggested fields for primary type
-    result["suggested_fields"] = {
-        primary_type: generate_suggested_fields(context, primary_type)
-    }
+    result["suggested_fields"] = {primary_type: generate_suggested_fields(context, primary_type)}
 
     # Also generate for secondary type if different
     if len(detected_types) > 1:
@@ -717,7 +1015,8 @@ def knowledge_check(trace: dict, context: str, event_type: Optional[str] = None,
 # Checkpoint and Knowledge Persistence (v2.1)
 # ============================================================
 
-def analyze_session_for_checkpoint(trace: dict, session_id: str, files_touched: List[str] = None) -> dict:
+
+def analyze_session_for_checkpoint(trace: dict, session_id: str, files_touched: list[str] | None = None) -> dict:
     """
     Analyze a session to identify potential unlogged knowledge.
     Returns checkpoint analysis with recommendations.
@@ -732,8 +1031,8 @@ def analyze_session_for_checkpoint(trace: dict, session_id: str, files_touched: 
         return {"error": f"Session {session_id} not found"}
 
     # Get all entries from this session
-    session_learnings = [l for l in trace.get("learnings", []) if l.get("session_id") == session_id]
-    session_decisions = [d for d in trace.get("decisions", []) if d.get("session_id") == session_id]
+    session_learnings = [entry for entry in trace.get("learnings", []) if entry.get("session_id") == session_id]
+    session_decisions = [entry for entry in trace.get("decisions", []) if entry.get("session_id") == session_id]
     session_gotchas = [g for g in trace.get("gotchas", []) if g.get("session_id") == session_id]
     session_code = [c for c in trace.get("code_contributions", []) if c.get("session_id") == session_id]
     session_suggestions = [s for s in trace.get("ai_suggestions", []) if s.get("session_id") == session_id]
@@ -751,7 +1050,7 @@ def analyze_session_for_checkpoint(trace: dict, session_id: str, files_touched: 
     estimated_unlogged = {
         "decisions": max(0, (duration_minutes // 20) - len(session_decisions)),  # Expect ~1 decision per 20 min
         "learnings": max(0, (duration_minutes // 30) - len(session_learnings)),  # Expect ~1 learning per 30 min
-        "code_contributions": len(files_touched or []) - len(session_code) if files_touched else 0
+        "code_contributions": len(files_touched or []) - len(session_code) if files_touched else 0,
     }
 
     # Generate prompts based on what's missing
@@ -790,17 +1089,18 @@ def analyze_session_for_checkpoint(trace: dict, session_id: str, files_touched: 
             "gotchas": len(session_gotchas),
             "code_contributions": len(session_code),
             "ideas": len(session_ideas),
-            "interventions": len(session_interventions)
+            "interventions": len(session_interventions),
         },
         "pending_suggestions": len(pending_suggestions),
         "estimated_unlogged": estimated_unlogged,
         "prompts": prompts,
-        "recommendations": recommendations
+        "recommendations": recommendations,
     }
 
 
-def refresh_context_for_topics(trace: dict, topics: List[str], include_recent: bool = True,
-                                max_items: int = 5, categories: List[str] = None) -> dict:
+def refresh_context_for_topics(
+    trace: dict, topics: list[str], include_recent: bool = True, max_items: int = 5, categories: list[str] | None = None
+) -> dict:
     """
     Find relevant past knowledge based on topics.
     Returns categorized relevant entries.
@@ -831,10 +1131,7 @@ def refresh_context_for_topics(trace: dict, topics: List[str], include_recent: b
                     score += 3  # Tag matches are more relevant
 
             if score > 0:
-                results[category].append({
-                    "entry": entry,
-                    "relevance_score": score
-                })
+                results[category].append({"entry": entry, "relevance_score": score})
 
         # Sort by relevance and limit
         results[category].sort(key=lambda x: x["relevance_score"], reverse=True)
@@ -844,15 +1141,13 @@ def refresh_context_for_topics(trace: dict, topics: List[str], include_recent: b
     if include_recent:
         recent_cutoff = datetime.now().isoformat()[:10]  # Today's date
         for category in categories:
-            recent = [e for e in trace.get(category, [])
-                     if e.get("timestamp", "")[:10] == recent_cutoff
-                     and e not in [r["entry"] for r in results[category]]]
+            recent = [
+                e
+                for e in trace.get(category, [])
+                if e.get("timestamp", "")[:10] == recent_cutoff and e not in [r["entry"] for r in results[category]]
+            ]
             for entry in recent[:2]:  # Add up to 2 recent per category
-                results[category].append({
-                    "entry": entry,
-                    "relevance_score": 1,
-                    "recent": True
-                })
+                results[category].append({"entry": entry, "relevance_score": 1, "recent": True})
 
     return results
 
@@ -864,11 +1159,11 @@ def consolidate_session_learnings(trace: dict, session_id: str, auto_link: bool 
     """
     # Get all entries from this session
     session_entries = {
-        "learnings": [l for l in trace.get("learnings", []) if l.get("session_id") == session_id],
-        "decisions": [d for d in trace.get("decisions", []) if d.get("session_id") == session_id],
+        "learnings": [entry for entry in trace.get("learnings", []) if entry.get("session_id") == session_id],
+        "decisions": [entry for entry in trace.get("decisions", []) if entry.get("session_id") == session_id],
         "gotchas": [g for g in trace.get("gotchas", []) if g.get("session_id") == session_id],
         "ideas": [i for i in trace.get("ideas", []) if i.get("session_id") == session_id],
-        "code_contributions": [c for c in trace.get("code_contributions", []) if c.get("session_id") == session_id]
+        "code_contributions": [c for c in trace.get("code_contributions", []) if c.get("session_id") == session_id],
     }
 
     total_entries = sum(len(v) for v in session_entries.values())
@@ -880,17 +1175,13 @@ def consolidate_session_learnings(trace: dict, session_id: str, auto_link: bool 
         all_entries = []
         for category, entries in session_entries.items():
             for entry in entries:
-                all_entries.append({
-                    "category": category,
-                    "entry": entry,
-                    "id": entry.get("id", "unknown")
-                })
+                all_entries.append({"category": category, "entry": entry, "id": entry.get("id", "unknown")})
 
         # Find related entries using text similarity
         for i, entry1 in enumerate(all_entries):
             entry1_text = json.dumps(entry1["entry"]).lower()
 
-            for j, entry2 in enumerate(all_entries[i+1:], i+1):
+            for _j, entry2 in enumerate(all_entries[i + 1 :], i + 1):
                 entry2_text = json.dumps(entry2["entry"]).lower()
 
                 similarity = calculate_text_similarity(entry1_text, entry2_text)
@@ -943,7 +1234,7 @@ def consolidate_session_learnings(trace: dict, session_id: str, auto_link: bool 
         "links_created": links_created,
         "clusters_found": len(clusters),
         "clusters": clusters[:5],  # Top 5 clusters
-        "tags_used": []
+        "tags_used": [],
     }
 
     # Collect all tags used
@@ -968,7 +1259,7 @@ def compute_knowledge_metrics(trace: dict) -> dict:
         "learnings": len(learnings),
         "gotchas": len(gotchas),
         "decisions": len(decisions),
-        "ideas": len(ideas)
+        "ideas": len(ideas),
     }
 
     # Count by tag
@@ -1000,7 +1291,7 @@ def compute_knowledge_metrics(trace: dict) -> dict:
                         aging_90d += 1
                     else:
                         stale_180d += 1
-                except:
+                except (ValueError, TypeError):
                     pass
 
     # Calculate linkage
@@ -1019,17 +1310,13 @@ def compute_knowledge_metrics(trace: dict) -> dict:
     return {
         "total_entries": total_entries,
         "by_tag": by_tag,
-        "staleness": {
-            "fresh_30d": fresh_30d,
-            "aging_90d": aging_90d,
-            "stale_180d": stale_180d
-        },
+        "staleness": {"fresh_30d": fresh_30d, "aging_90d": aging_90d, "stale_180d": stale_180d},
         "linkage": {
             "entries_with_links": entries_with_links,
             "orphan_entries": orphan_entries,
             "total_links": total_links,
-            "avg_links_per_entry": round(total_links / total_knowledge, 2) if total_knowledge > 0 else 0
-        }
+            "avg_links_per_entry": round(total_links / total_knowledge, 2) if total_knowledge > 0 else 0,
+        },
     }
 
 
@@ -1037,13 +1324,23 @@ def compute_knowledge_metrics(trace: dict) -> dict:
 # Git Integration
 # ============================================================
 
-def scan_git_for_human_edits(since: str = "1 week ago") -> List[dict]:
+
+def scan_git_for_human_edits(since: str = "1 week ago") -> list[dict]:
     """Parse git log for [HUMAN-EDIT] commits."""
     try:
         result = subprocess.run(
-            ["git", "log", "--oneline", f"--since={since}",
-             f"--grep={HUMAN_EDIT_TAG}", "--numstat", "--format=%H|%s|%an|%ai"],
-            capture_output=True, text=True, cwd=TRACE_PATH.parent
+            [
+                "git",
+                "log",
+                "--oneline",
+                f"--since={since}",
+                f"--grep={HUMAN_EDIT_TAG}",
+                "--numstat",
+                "--format=%H|%s|%an|%ai",
+            ],
+            capture_output=True,
+            text=True,
+            cwd=TRACE_PATH.parent,
         )
 
         if result.returncode != 0:
@@ -1051,16 +1348,16 @@ def scan_git_for_human_edits(since: str = "1 week ago") -> List[dict]:
 
         commits = []
         current_commit = None
-        lines = result.stdout.strip().split('\n')
+        lines = result.stdout.strip().split("\n")
 
         for line in lines:
             if not line:
                 continue
-            if '|' in line and len(line.split('|')) >= 4:
+            if "|" in line and len(line.split("|")) >= 4:
                 # New commit line
                 if current_commit:
                     commits.append(current_commit)
-                parts = line.split('|')
+                parts = line.split("|")
                 current_commit = {
                     "hash": parts[0],
                     "message": parts[1],
@@ -1068,11 +1365,11 @@ def scan_git_for_human_edits(since: str = "1 week ago") -> List[dict]:
                     "date": parts[3],
                     "files_changed": [],
                     "lines_added": 0,
-                    "lines_removed": 0
+                    "lines_removed": 0,
                 }
-            elif current_commit and '\t' in line:
+            elif current_commit and "\t" in line:
                 # File stat line (additions, deletions, filename)
-                parts = line.split('\t')
+                parts = line.split("\t")
                 if len(parts) >= 3:
                     added = int(parts[0]) if parts[0].isdigit() else 0
                     removed = int(parts[1]) if parts[1].isdigit() else 0
@@ -1094,6 +1391,7 @@ def scan_git_for_human_edits(since: str = "1 week ago") -> List[dict]:
 # Metrics Computation (v2.0)
 # ============================================================
 
+
 def compute_metrics(trace: dict) -> dict:
     """Compute all metrics from TRACE data (v2.1)."""
     metrics = {
@@ -1105,7 +1403,7 @@ def compute_metrics(trace: dict) -> dict:
         "intervention_metrics": compute_intervention_metrics(trace),
         "session_metrics": compute_session_metrics(trace),
         "validation_metrics": compute_validation_metrics(trace),
-        "knowledge_metrics": compute_knowledge_metrics(trace)
+        "knowledge_metrics": compute_knowledge_metrics(trace),
     }
     return metrics
 
@@ -1192,25 +1490,40 @@ def compute_code_metrics_v2(trace: dict) -> dict:
         total_human_manual += he.get("lines_added", 0)
 
     # Calculate percentages (lines)
-    total_lines = (total_human_directed_ai + total_human_directed_human +
-                   total_ai_suggested_accepted + total_ai_suggested_modified +
-                   total_human_manual + total_collaborative)
+    total_lines = (
+        total_human_directed_ai
+        + total_human_directed_human
+        + total_ai_suggested_accepted
+        + total_ai_suggested_modified
+        + total_human_manual
+        + total_collaborative
+    )
 
     human_direction_total = total_human_directed_ai + total_human_directed_human
     ai_suggestion_total = total_ai_suggested_accepted + total_ai_suggested_modified
 
     # Calculate word totals
-    total_words = (total_human_directed_ai_words + total_human_directed_human_words +
-                   total_ai_suggested_accepted_words + total_ai_suggested_modified_words +
-                   total_human_manual_words + total_collaborative_words)
+    total_words = (
+        total_human_directed_ai_words
+        + total_human_directed_human_words
+        + total_ai_suggested_accepted_words
+        + total_ai_suggested_modified_words
+        + total_human_manual_words
+        + total_collaborative_words
+    )
 
     human_direction_words = total_human_directed_ai_words + total_human_directed_human_words
     ai_suggestion_words = total_ai_suggested_accepted_words + total_ai_suggested_modified_words
 
     # Calculate row totals
-    total_rows = (total_human_directed_ai_rows + total_human_directed_human_rows +
-                  total_ai_suggested_accepted_rows + total_ai_suggested_modified_rows +
-                  total_human_manual_rows + total_collaborative_rows)
+    total_rows = (
+        total_human_directed_ai_rows
+        + total_human_directed_human_rows
+        + total_ai_suggested_accepted_rows
+        + total_ai_suggested_modified_rows
+        + total_human_manual_rows
+        + total_collaborative_rows
+    )
 
     human_direction_rows = total_human_directed_ai_rows + total_human_directed_human_rows
     ai_suggestion_rows = total_ai_suggested_accepted_rows + total_ai_suggested_modified_rows
@@ -1222,7 +1535,7 @@ def compute_code_metrics_v2(trace: dict) -> dict:
             "ai_suggested_accepted": total_ai_suggested_accepted,
             "ai_suggested_modified": total_ai_suggested_modified,
             "human_manual_edit": total_human_manual,
-            "collaborative": total_collaborative
+            "collaborative": total_collaborative,
         },
         "total_words": {
             "human_directed_ai_executed": total_human_directed_ai_words,
@@ -1230,7 +1543,7 @@ def compute_code_metrics_v2(trace: dict) -> dict:
             "ai_suggested_accepted": total_ai_suggested_accepted_words,
             "ai_suggested_modified": total_ai_suggested_modified_words,
             "human_manual_edit": total_human_manual_words,
-            "collaborative": total_collaborative_words
+            "collaborative": total_collaborative_words,
         },
         "total_rows": {
             "human_directed_ai_executed": total_human_directed_ai_rows,
@@ -1238,29 +1551,35 @@ def compute_code_metrics_v2(trace: dict) -> dict:
             "ai_suggested_accepted": total_ai_suggested_accepted_rows,
             "ai_suggested_modified": total_ai_suggested_modified_rows,
             "human_manual_edit": total_human_manual_rows,
-            "collaborative": total_collaborative_rows
+            "collaborative": total_collaborative_rows,
         },
         "by_source": {
-            "human_direction_percentage": round(human_direction_total / total_lines * 100, 2) if total_lines > 0 else None,
+            "human_direction_percentage": round(human_direction_total / total_lines * 100, 2)
+            if total_lines > 0
+            else None,
             "ai_suggestion_percentage": round(ai_suggestion_total / total_lines * 100, 2) if total_lines > 0 else None,
-            "human_manual_percentage": round(total_human_manual / total_lines * 100, 2) if total_lines > 0 else None
+            "human_manual_percentage": round(total_human_manual / total_lines * 100, 2) if total_lines > 0 else None,
         },
         "by_source_words": {
-            "human_direction_percentage": round(human_direction_words / total_words * 100, 2) if total_words > 0 else None,
+            "human_direction_percentage": round(human_direction_words / total_words * 100, 2)
+            if total_words > 0
+            else None,
             "ai_suggestion_percentage": round(ai_suggestion_words / total_words * 100, 2) if total_words > 0 else None,
-            "human_manual_percentage": round(total_human_manual_words / total_words * 100, 2) if total_words > 0 else None
+            "human_manual_percentage": round(total_human_manual_words / total_words * 100, 2)
+            if total_words > 0
+            else None,
         },
         "by_source_rows": {
             "human_direction_percentage": round(human_direction_rows / total_rows * 100, 2) if total_rows > 0 else None,
             "ai_suggestion_percentage": round(ai_suggestion_rows / total_rows * 100, 2) if total_rows > 0 else None,
-            "human_manual_percentage": round(total_human_manual_rows / total_rows * 100, 2) if total_rows > 0 else None
+            "human_manual_percentage": round(total_human_manual_rows / total_rows * 100, 2) if total_rows > 0 else None,
         },
         "by_content_type": by_content_type,
         "git_integration": {
             "manual_edit_commits_detected": len(human_edits),
             "manual_edit_lines_added": git_lines_added,
-            "manual_edit_lines_removed": git_lines_removed
-        }
+            "manual_edit_lines_removed": git_lines_removed,
+        },
     }
 
 
@@ -1301,7 +1620,7 @@ def compute_suggestion_metrics(trace: dict) -> dict:
         "lines_accepted_as_is": lines_accepted,
         "lines_modified_by_human": lines_modified,
         "lines_rejected": lines_rejected,
-        "by_type": by_type
+        "by_type": by_type,
     }
 
 
@@ -1309,13 +1628,17 @@ def compute_error_metrics(trace: dict) -> dict:
     """Compute error detection metrics."""
     errors = trace.get("errors", [])
 
-    ai_errors_human_caught = sum(1 for e in errors
-        if e.get("source", {}).get("originated_from") == "ai"
-        and e.get("detection", {}).get("detected_by") == "human")
+    ai_errors_human_caught = sum(
+        1
+        for e in errors
+        if e.get("source", {}).get("originated_from") == "ai" and e.get("detection", {}).get("detected_by") == "human"
+    )
 
-    human_errors_ai_caught = sum(1 for e in errors
-        if e.get("source", {}).get("originated_from") == "human"
-        and e.get("detection", {}).get("detected_by") == "ai")
+    human_errors_ai_caught = sum(
+        1
+        for e in errors
+        if e.get("source", {}).get("originated_from") == "human" and e.get("detection", {}).get("detected_by") == "ai"
+    )
 
     ai_errors_total = sum(1 for e in errors if e.get("source", {}).get("originated_from") == "ai")
     human_errors_total = sum(1 for e in errors if e.get("source", {}).get("originated_from") == "human")
@@ -1325,8 +1648,10 @@ def compute_error_metrics(trace: dict) -> dict:
         "human_errors_caught_by_ai": human_errors_ai_caught,
         "total_ai_errors": ai_errors_total,
         "total_human_errors": human_errors_total,
-        "ai_error_rate": ai_errors_total / (ai_errors_total + human_errors_total) if (ai_errors_total + human_errors_total) > 0 else None,
-        "total_errors": len(errors)
+        "ai_error_rate": ai_errors_total / (ai_errors_total + human_errors_total)
+        if (ai_errors_total + human_errors_total) > 0
+        else None,
+        "total_errors": len(errors),
     }
 
 
@@ -1337,8 +1662,8 @@ def compute_idea_metrics(trace: dict) -> dict:
     ai_ideas = [i for i in ideas if i.get("origin", {}).get("source") == "ai_suggested"]
     human_ideas = [i for i in ideas if i.get("origin", {}).get("source") == "human"]
 
-    ai_accepted = sum(1 for i in ai_ideas if i.get("outcome", {}).get("adopted") == True)
-    ai_rejected = sum(1 for i in ai_ideas if i.get("outcome", {}).get("adopted") == False)
+    ai_accepted = sum(1 for i in ai_ideas if i.get("outcome", {}).get("adopted") is True)
+    ai_rejected = sum(1 for i in ai_ideas if i.get("outcome", {}).get("adopted") is False)
     ai_modified = sum(1 for i in ai_ideas if i.get("outcome", {}).get("modification_description"))
 
     return {
@@ -1349,7 +1674,7 @@ def compute_idea_metrics(trace: dict) -> dict:
         "ai_ideas_modified": ai_modified,
         "ai_idea_acceptance_rate": ai_accepted / len(ai_ideas) if ai_ideas else None,
         "ai_idea_rejection_rate": ai_rejected / len(ai_ideas) if ai_ideas else None,
-        "total_ideas": len(ideas)
+        "total_ideas": len(ideas),
     }
 
 
@@ -1368,7 +1693,7 @@ def compute_intervention_metrics(trace: dict) -> dict:
         "corrections": corrections,
         "overrides": overrides,
         "rejections": rejections,
-        "intervention_rate": len(interventions) / len(interactions) if interactions else None
+        "intervention_rate": len(interventions) / len(interactions) if interactions else None,
     }
 
 
@@ -1383,7 +1708,7 @@ def compute_session_metrics(trace: dict) -> dict:
         "total_sessions": len(sessions),
         "total_time_minutes": sum(durations) if durations else 0,
         "avg_session_duration": sum(durations) / len(durations) if durations else None,
-        "avg_interactions_per_session": len(interactions) / len(sessions) if sessions else None
+        "avg_interactions_per_session": len(interactions) / len(sessions) if sessions else None,
     }
 
 
@@ -1398,13 +1723,14 @@ def compute_validation_metrics(trace: dict) -> dict:
         "total_validations": len(validations),
         "passed": passed,
         "failed": failed,
-        "pass_rate": passed / len(validations) if validations else None
+        "pass_rate": passed / len(validations) if validations else None,
     }
 
 
 # ============================================================
 # MCP Tool Definitions
 # ============================================================
+
 
 @server.list_tools()
 async def list_tools() -> list[Tool]:
@@ -1421,11 +1747,11 @@ async def list_tools() -> list[Tool]:
                     "categories": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Categories to search (default: all)"
-                    }
+                        "description": "Categories to search (default: all)",
+                    },
                 },
-                "required": ["query"]
-            }
+                "required": ["query"],
+            },
         ),
         Tool(
             name="trace_get_context",
@@ -1434,10 +1760,9 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "include_metrics": {"type": "boolean", "description": "Include computed metrics (default: true)"}
-                }
-            }
+                },
+            },
         ),
-
         # Session Management
         Tool(
             name="trace_start_session",
@@ -1448,13 +1773,24 @@ async def list_tools() -> list[Tool]:
                     "purpose": {"type": "string", "description": "What will be worked on"},
                     "scientific_stage": {
                         "type": "string",
-                        "enum": ["exploration", "hypothesis", "data_collection", "analysis", "interpretation", "validation", "writing"],
-                        "description": "Stage of the scientific method"
+                        "enum": [
+                            "exploration",
+                            "hypothesis",
+                            "data_collection",
+                            "analysis",
+                            "interpretation",
+                            "validation",
+                            "writing",
+                        ],
+                        "description": "Stage of the scientific method",
                     },
-                    "ai_model": {"type": "string", "description": "AI model being used (e.g., claude-opus-4-5-20251101)"}
+                    "ai_model": {
+                        "type": "string",
+                        "description": "AI model being used (e.g., claude-opus-4-5-20251101)",
+                    },
                 },
-                "required": ["purpose"]
-            }
+                "required": ["purpose"],
+            },
         ),
         Tool(
             name="trace_end_session",
@@ -1465,13 +1801,72 @@ async def list_tools() -> list[Tool]:
                     "session_id": {"type": "string", "description": "Session ID to end"},
                     "summary": {"type": "string", "description": "Summary of what was accomplished"},
                     "reflection": {"type": "string", "description": "Reflection on the session"},
-                    "ai_helpfulness_rating": {"type": "number", "minimum": 1, "maximum": 5, "description": "Rating of AI helpfulness (1-5)"}
+                    "ai_helpfulness_rating": {
+                        "type": "number",
+                        "minimum": 1,
+                        "maximum": 5,
+                        "description": "Rating of AI helpfulness (1-5)",
+                    },
                 },
-                "required": ["session_id"]
-            }
+                "required": ["session_id"],
+            },
         ),
-
-        # NEW: AI Suggestion Tracking
+        # v3.0: Environment Capture
+        Tool(
+            name="trace_capture_environment",
+            description="Capture execution environment for reproducibility. Auto-called at session start, but can be called manually.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Session to associate environment with"},
+                    "agent_name": {"type": "string", "description": "AI agent/model name"},
+                    "agent_framework": {"type": "string", "description": "Agent framework (mcp, langchain, etc.)"},
+                    "agent_parameters": {
+                        "type": "object",
+                        "description": "Model parameters (temperature, etc.)",
+                    },
+                },
+            },
+        ),
+        # v3.0: Evaluation Logging
+        Tool(
+            name="trace_log_evaluation",
+            description="Log test results, benchmarks, or other evaluations. Use after running tests or benchmarks.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "evaluation_type": {
+                        "type": "string",
+                        "enum": [
+                            "unit_test",
+                            "integration_test",
+                            "benchmark",
+                            "human_eval",
+                            "code_review",
+                            "validation",
+                        ],
+                        "description": "Type of evaluation",
+                    },
+                    "session_id": {"type": "string", "description": "Session ID"},
+                    "target_files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Files being evaluated",
+                    },
+                    "target_description": {"type": "string", "description": "Description of what's being evaluated"},
+                    "tests_passed": {"type": "integer", "description": "Number of tests passed"},
+                    "tests_failed": {"type": "integer", "description": "Number of tests failed"},
+                    "coverage": {"type": "number", "description": "Code coverage (0-1)"},
+                    "duration_ms": {"type": "integer", "description": "Duration in milliseconds"},
+                    "tool": {"type": "string", "description": "Tool used (pytest, jest, etc.)"},
+                    "command": {"type": "string", "description": "Command used to run evaluation"},
+                    "output_summary": {"type": "string", "description": "Summary of output"},
+                    "passed": {"type": "boolean", "description": "Whether evaluation passed overall"},
+                },
+                "required": ["evaluation_type"],
+            },
+        ),
+        # AI Suggestion Tracking
         Tool(
             name="trace_log_suggestion",
             description="Log an AI suggestion. Use this when AI proposes something (code, approach, etc.) that the human will decide to accept, reject, or modify.",
@@ -1481,21 +1876,33 @@ async def list_tools() -> list[Tool]:
                     "description": {"type": "string", "description": "What AI suggested"},
                     "suggestion_type": {
                         "type": "string",
-                        "enum": ["code_change", "architecture", "approach", "bugfix", "optimization", "refactor", "feature"],
-                        "description": "Type of suggestion"
+                        "enum": [
+                            "code_change",
+                            "architecture",
+                            "approach",
+                            "bugfix",
+                            "optimization",
+                            "refactor",
+                            "feature",
+                        ],
+                        "description": "Type of suggestion",
                     },
                     "lines_proposed": {"type": "integer", "description": "Lines of code/change proposed"},
-                    "files_affected": {"type": "array", "items": {"type": "string"}, "description": "Files that would be affected"},
+                    "files_affected": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Files that would be affected",
+                    },
                     "ai_confidence": {
                         "type": "string",
                         "enum": ["high", "medium", "low"],
-                        "description": "How confident AI is in this suggestion"
+                        "description": "How confident AI is in this suggestion",
                     },
                     "what_prompted": {"type": "string", "description": "What prompted this suggestion"},
-                    "session_id": {"type": "string", "description": "Current session ID"}
+                    "session_id": {"type": "string", "description": "Current session ID"},
                 },
-                "required": ["description", "suggestion_type"]
-            }
+                "required": ["description", "suggestion_type"],
+            },
         ),
         Tool(
             name="trace_resolve_suggestion",
@@ -1507,18 +1914,17 @@ async def list_tools() -> list[Tool]:
                     "status": {
                         "type": "string",
                         "enum": ["accepted", "rejected", "modified"],
-                        "description": "What happened to the suggestion"
+                        "description": "What happened to the suggestion",
                     },
                     "lines_accepted_as_is": {"type": "integer", "description": "Lines accepted without changes"},
                     "lines_modified": {"type": "integer", "description": "Lines accepted but modified by human"},
                     "lines_rejected": {"type": "integer", "description": "Lines not used at all"},
                     "human_rationale": {"type": "string", "description": "Why human made this decision"},
-                    "modification_description": {"type": "string", "description": "If modified, what changed"}
+                    "modification_description": {"type": "string", "description": "If modified, what changed"},
                 },
-                "required": ["suggestion_id", "status"]
-            }
+                "required": ["suggestion_id", "status"],
+            },
         ),
-
         # Code/Content Contribution Tracking (v2.0)
         Tool(
             name="trace_log_code",
@@ -1530,139 +1936,128 @@ async def list_tools() -> list[Tool]:
                     "content_type": {
                         "type": "string",
                         "enum": ["code", "text", "data"],
-                        "description": "Type of content: 'code' (scripts, programs), 'text' (papers, docs), 'data' (csv, datasets). Default: 'code'"
+                        "description": "Type of content: 'code' (scripts, programs), 'text' (papers, docs), 'data' (csv, datasets). Default: 'code'",
                     },
                     "contribution_type": {
                         "type": "string",
                         "enum": ["creation", "modification", "refactor", "bugfix", "optimization"],
-                        "description": "Type of contribution"
+                        "description": "Type of contribution",
                     },
                     "description": {"type": "string", "description": "What this contribution does"},
-
                     "direction_source": {
                         "type": "string",
                         "enum": ["human_directed", "ai_suggested", "collaborative"],
-                        "description": "Who decided this change should happen"
+                        "description": "Who decided this change should happen",
                     },
-
                     # Human-directed breakdown (lines - all types)
                     "human_directed_ai_executed_lines": {
                         "type": "integer",
-                        "description": "Lines written by AI based on human direction"
+                        "description": "Lines written by AI based on human direction",
                     },
                     "human_directed_human_executed_lines": {
                         "type": "integer",
-                        "description": "Lines written by human based on human direction"
+                        "description": "Lines written by human based on human direction",
                     },
-
                     # Human-directed breakdown (words - text type)
                     "human_directed_ai_executed_words": {
                         "type": "integer",
-                        "description": "(Text only) Words written by AI based on human direction"
+                        "description": "(Text only) Words written by AI based on human direction",
                     },
                     "human_directed_human_executed_words": {
                         "type": "integer",
-                        "description": "(Text only) Words written by human based on human direction"
+                        "description": "(Text only) Words written by human based on human direction",
                     },
-
                     # Human-directed breakdown (rows - data type)
                     "human_directed_ai_executed_rows": {
                         "type": "integer",
-                        "description": "(Data only) Rows added/modified by AI based on human direction"
+                        "description": "(Data only) Rows added/modified by AI based on human direction",
                     },
                     "human_directed_human_executed_rows": {
                         "type": "integer",
-                        "description": "(Data only) Rows added/modified by human based on human direction"
+                        "description": "(Data only) Rows added/modified by human based on human direction",
                     },
-
                     # AI-suggested breakdown (lines)
                     "ai_suggested_accepted_lines": {
                         "type": "integer",
-                        "description": "Lines from AI suggestion accepted as-is"
+                        "description": "Lines from AI suggestion accepted as-is",
                     },
                     "ai_suggested_modified_lines": {
                         "type": "integer",
-                        "description": "Lines from AI suggestion that human modified"
+                        "description": "Lines from AI suggestion that human modified",
                     },
                     "ai_suggested_rejected_lines": {
                         "type": "integer",
-                        "description": "Lines AI proposed but human rejected"
+                        "description": "Lines AI proposed but human rejected",
                     },
-
                     # AI-suggested breakdown (words - text type)
                     "ai_suggested_accepted_words": {
                         "type": "integer",
-                        "description": "(Text only) Words from AI suggestion accepted as-is"
+                        "description": "(Text only) Words from AI suggestion accepted as-is",
                     },
                     "ai_suggested_modified_words": {
                         "type": "integer",
-                        "description": "(Text only) Words from AI suggestion that human modified"
+                        "description": "(Text only) Words from AI suggestion that human modified",
                     },
                     "ai_suggested_rejected_words": {
                         "type": "integer",
-                        "description": "(Text only) Words AI proposed but human rejected"
+                        "description": "(Text only) Words AI proposed but human rejected",
                     },
-
                     # AI-suggested breakdown (rows - data type)
                     "ai_suggested_accepted_rows": {
                         "type": "integer",
-                        "description": "(Data only) Rows from AI suggestion accepted as-is"
+                        "description": "(Data only) Rows from AI suggestion accepted as-is",
                     },
                     "ai_suggested_modified_rows": {
                         "type": "integer",
-                        "description": "(Data only) Rows from AI suggestion that human modified"
+                        "description": "(Data only) Rows from AI suggestion that human modified",
                     },
                     "ai_suggested_rejected_rows": {
                         "type": "integer",
-                        "description": "(Data only) Rows AI proposed but human rejected"
+                        "description": "(Data only) Rows AI proposed but human rejected",
                     },
-
                     # Human manual edit (lines)
                     "human_manual_edit_lines": {
                         "type": "integer",
-                        "description": "Lines human edited directly (outside AI session)"
+                        "description": "Lines human edited directly (outside AI session)",
                     },
-
                     # Human manual edit (words - text type)
                     "human_manual_edit_words": {
                         "type": "integer",
-                        "description": "(Text only) Words human edited directly (outside AI session)"
+                        "description": "(Text only) Words human edited directly (outside AI session)",
                     },
-
                     # Human manual edit (rows - data type)
                     "human_manual_edit_rows": {
                         "type": "integer",
-                        "description": "(Data only) Rows human edited directly (outside AI session)"
+                        "description": "(Data only) Rows human edited directly (outside AI session)",
                     },
-
                     # Collaborative
                     "collaborative_lines": {
                         "type": "integer",
-                        "description": "Lines from back-and-forth collaboration"
+                        "description": "Lines from back-and-forth collaboration",
                     },
                     "collaborative_words": {
                         "type": "integer",
-                        "description": "(Text only) Words from back-and-forth collaboration"
+                        "description": "(Text only) Words from back-and-forth collaboration",
                     },
                     "collaborative_rows": {
                         "type": "integer",
-                        "description": "(Data only) Rows from back-and-forth collaboration"
+                        "description": "(Data only) Rows from back-and-forth collaboration",
                     },
-
                     # Git integration
                     "git_commit": {"type": "string", "description": "Git commit hash if available"},
                     "has_human_edit_tag": {
                         "type": "boolean",
-                        "description": "Whether commit message contains [HUMAN-EDIT]"
+                        "description": "Whether commit message contains [HUMAN-EDIT]",
                     },
-
                     "session_id": {"type": "string", "description": "Current session ID"},
-                    "related_suggestion_id": {"type": "string", "description": "If this resulted from an AI suggestion"}
+                    "related_suggestion_id": {
+                        "type": "string",
+                        "description": "If this resulted from an AI suggestion",
+                    },
                 },
-                "required": ["file_path", "contribution_type", "description", "direction_source"]
-            }
+                "required": ["file_path", "contribution_type", "description", "direction_source"],
+            },
         ),
-
         # NEW: Git Integration
         Tool(
             name="trace_scan_git_commits",
@@ -1671,11 +2066,10 @@ async def list_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "since": {"type": "string", "description": "Git date filter (e.g., '1 week ago', '2024-01-01')"},
-                    "session_id": {"type": "string", "description": "Session to associate commits with"}
-                }
-            }
+                    "session_id": {"type": "string", "description": "Session to associate commits with"},
+                },
+            },
         ),
-
         # Idea Tracking
         Tool(
             name="trace_log_idea",
@@ -1687,18 +2081,18 @@ async def list_tools() -> list[Tool]:
                     "idea_type": {
                         "type": "string",
                         "enum": ["approach", "hypothesis", "optimization", "feature", "design", "analysis"],
-                        "description": "Type of idea"
+                        "description": "Type of idea",
                     },
                     "source": {
                         "type": "string",
                         "enum": ["ai_suggested", "human", "collaborative"],
-                        "description": "Who originated the idea"
+                        "description": "Who originated the idea",
                     },
                     "triggered_by": {"type": "string", "description": "What prompted this idea"},
-                    "session_id": {"type": "string", "description": "Current session ID"}
+                    "session_id": {"type": "string", "description": "Current session ID"},
                 },
-                "required": ["idea", "source"]
-            }
+                "required": ["idea", "source"],
+            },
         ),
         Tool(
             name="trace_evaluate_idea",
@@ -1710,12 +2104,11 @@ async def list_tools() -> list[Tool]:
                     "adopted": {"type": "boolean", "description": "Whether the idea was adopted"},
                     "rejection_reason": {"type": "string", "description": "If rejected, why"},
                     "modification_description": {"type": "string", "description": "If modified, what changed"},
-                    "evaluation_notes": {"type": "string", "description": "Additional evaluation notes"}
+                    "evaluation_notes": {"type": "string", "description": "Additional evaluation notes"},
                 },
-                "required": ["idea_id", "adopted"]
-            }
+                "required": ["idea_id", "adopted"],
+            },
         ),
-
         # Error Tracking
         Tool(
             name="trace_log_error",
@@ -1727,36 +2120,35 @@ async def list_tools() -> list[Tool]:
                     "error_type": {
                         "type": "string",
                         "enum": ["syntax", "logic", "runtime", "design", "security", "performance"],
-                        "description": "Type of error"
+                        "description": "Type of error",
                     },
                     "severity": {
                         "type": "string",
                         "enum": ["critical", "high", "medium", "low"],
-                        "description": "Error severity"
+                        "description": "Error severity",
                     },
                     "originated_from": {
                         "type": "string",
                         "enum": ["ai", "human"],
-                        "description": "Who produced the error"
+                        "description": "Who produced the error",
                     },
                     "detected_by": {
                         "type": "string",
                         "enum": ["ai", "human", "automated_test"],
-                        "description": "Who/what caught the error"
+                        "description": "Who/what caught the error",
                     },
                     "detection_method": {
                         "type": "string",
                         "enum": ["code_review", "testing", "runtime", "static_analysis"],
-                        "description": "How it was detected"
+                        "description": "How it was detected",
                     },
                     "resolution_description": {"type": "string", "description": "How it was fixed"},
                     "session_id": {"type": "string", "description": "Current session ID"},
-                    "file_path": {"type": "string", "description": "File where error occurred"}
+                    "file_path": {"type": "string", "description": "File where error occurred"},
                 },
-                "required": ["description", "originated_from", "detected_by"]
-            }
+                "required": ["description", "originated_from", "detected_by"],
+            },
         ),
-
         # Intervention Tracking
         Tool(
             name="trace_log_intervention",
@@ -1767,7 +2159,7 @@ async def list_tools() -> list[Tool]:
                     "intervention_type": {
                         "type": "string",
                         "enum": ["correction", "override", "rejection", "refinement"],
-                        "description": "Type of intervention"
+                        "description": "Type of intervention",
                     },
                     "ai_output_summary": {"type": "string", "description": "What AI produced"},
                     "human_action": {"type": "string", "description": "What human changed"},
@@ -1775,20 +2167,19 @@ async def list_tools() -> list[Tool]:
                     "expertise_applied": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Types of expertise applied (e.g., domain_knowledge, methodology)"
+                        "description": "Types of expertise applied (e.g., domain_knowledge, methodology)",
                     },
                     "significance": {
                         "type": "string",
                         "enum": ["critical", "major", "minor"],
-                        "description": "Significance of the intervention"
+                        "description": "Significance of the intervention",
                     },
                     "lines_affected": {"type": "integer", "description": "Number of lines affected by intervention"},
-                    "session_id": {"type": "string", "description": "Current session ID"}
+                    "session_id": {"type": "string", "description": "Current session ID"},
                 },
-                "required": ["intervention_type", "ai_output_summary", "human_action"]
-            }
+                "required": ["intervention_type", "ai_output_summary", "human_action"],
+            },
         ),
-
         # Standard Knowledge Management
         Tool(
             name="trace_add_decision",
@@ -1802,13 +2193,16 @@ async def list_tools() -> list[Tool]:
                     "proposed_by": {
                         "type": "string",
                         "enum": ["human", "ai_suggested", "collaborative"],
-                        "description": "Who proposed this decision"
+                        "description": "Who proposed this decision",
                     },
-                    "related_suggestion_id": {"type": "string", "description": "If this decision came from an AI suggestion"},
-                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for categorization"}
+                    "related_suggestion_id": {
+                        "type": "string",
+                        "description": "If this decision came from an AI suggestion",
+                    },
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags for categorization"},
                 },
-                "required": ["decision", "rationale"]
-            }
+                "required": ["decision", "rationale"],
+            },
         ),
         Tool(
             name="trace_add_learning",
@@ -1821,17 +2215,17 @@ async def list_tools() -> list[Tool]:
                     "discovered_by": {
                         "type": "string",
                         "enum": ["human", "ai_suggested", "collaborative"],
-                        "description": "Who discovered this"
+                        "description": "Who discovered this",
                     },
                     "confidence": {
                         "type": "string",
                         "enum": ["high", "medium", "low"],
-                        "description": "Confidence level"
+                        "description": "Confidence level",
                     },
-                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags"}
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags"},
                 },
-                "required": ["learning"]
-            }
+                "required": ["learning"],
+            },
         ),
         Tool(
             name="trace_add_gotcha",
@@ -1844,19 +2238,18 @@ async def list_tools() -> list[Tool]:
                     "discovered_by": {
                         "type": "string",
                         "enum": ["human", "ai", "collaborative"],
-                        "description": "Who discovered this"
+                        "description": "Who discovered this",
                     },
                     "severity": {
                         "type": "string",
                         "enum": ["critical", "high", "medium", "low"],
-                        "description": "Severity"
+                        "description": "Severity",
                     },
-                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags"}
+                    "tags": {"type": "array", "items": {"type": "string"}, "description": "Tags"},
                 },
-                "required": ["problem", "solution"]
-            }
+                "required": ["problem", "solution"],
+            },
         ),
-
         # Smart Triggers (v2.1)
         Tool(
             name="trace_knowledge_check",
@@ -1864,24 +2257,20 @@ async def list_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "context": {
-                        "type": "string",
-                        "description": "Description of what happened or was discovered"
-                    },
+                    "context": {"type": "string", "description": "Description of what happened or was discovered"},
                     "event_type": {
                         "type": "string",
                         "enum": ["gotcha", "decision", "learning", "idea", "intervention", "code", "error", "auto"],
-                        "description": "Hint about the type of event (default: auto-detect)"
+                        "description": "Hint about the type of event (default: auto-detect)",
                     },
                     "check_duplicates": {
                         "type": "boolean",
-                        "description": "Whether to check for similar existing entries (default: true)"
-                    }
+                        "description": "Whether to check for similar existing entries (default: true)",
+                    },
                 },
-                "required": ["context"]
-            }
+                "required": ["context"],
+            },
         ),
-
         # Checkpoints and Knowledge Persistence (v2.1)
         Tool(
             name="trace_checkpoint",
@@ -1893,17 +2282,17 @@ async def list_tools() -> list[Tool]:
                     "trigger": {
                         "type": "string",
                         "enum": ["time", "milestone", "context_switch", "break", "problem_solved", "session_end"],
-                        "description": "What triggered this checkpoint"
+                        "description": "What triggered this checkpoint",
                     },
                     "notes": {"type": "string", "description": "Optional notes about current progress"},
                     "files_touched": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Files modified since last checkpoint"
-                    }
+                        "description": "Files modified since last checkpoint",
+                    },
                 },
-                "required": ["session_id", "trigger"]
-            }
+                "required": ["session_id", "trigger"],
+            },
         ),
         Tool(
             name="trace_context_refresh",
@@ -1914,24 +2303,24 @@ async def list_tools() -> list[Tool]:
                     "topics": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Topics/keywords to search for relevant past knowledge"
+                        "description": "Topics/keywords to search for relevant past knowledge",
                     },
                     "include_recent": {
                         "type": "boolean",
-                        "description": "Include recent entries regardless of topic match (default: true)"
+                        "description": "Include recent entries regardless of topic match (default: true)",
                     },
                     "max_items": {
                         "type": "integer",
-                        "description": "Maximum items to return per category (default: 5)"
+                        "description": "Maximum items to return per category (default: 5)",
                     },
                     "categories": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Categories to search (default: gotchas, decisions, learnings, patterns)"
-                    }
+                        "description": "Categories to search (default: gotchas, decisions, learnings, patterns)",
+                    },
                 },
-                "required": ["topics"]
-            }
+                "required": ["topics"],
+            },
         ),
         Tool(
             name="trace_consolidate_learnings",
@@ -1942,17 +2331,16 @@ async def list_tools() -> list[Tool]:
                     "session_id": {"type": "string", "description": "Session to consolidate"},
                     "auto_link": {
                         "type": "boolean",
-                        "description": "Automatically detect and link related entries (default: true)"
+                        "description": "Automatically detect and link related entries (default: true)",
                     },
                     "generate_summary": {
                         "type": "boolean",
-                        "description": "Generate a knowledge summary for the session (default: true)"
-                    }
+                        "description": "Generate a knowledge summary for the session (default: true)",
+                    },
                 },
-                "required": ["session_id"]
-            }
+                "required": ["session_id"],
+            },
         ),
-
         # Metrics
         Tool(
             name="trace_get_metrics",
@@ -1962,21 +2350,26 @@ async def list_tools() -> list[Tool]:
                 "properties": {
                     "category": {
                         "type": "string",
-                        "enum": ["all", "code", "suggestions", "errors", "ideas", "interventions", "sessions", "knowledge"],
-                        "description": "Which metrics to retrieve (default: all)"
+                        "enum": [
+                            "all",
+                            "code",
+                            "suggestions",
+                            "errors",
+                            "ideas",
+                            "interventions",
+                            "sessions",
+                            "knowledge",
+                        ],
+                        "description": "Which metrics to retrieve (default: all)",
                     }
-                }
-            }
+                },
+            },
         ),
         Tool(
             name="trace_compute_metrics",
             description="Recompute all metrics from TRACE data. Call periodically to update summary.",
-            inputSchema={
-                "type": "object",
-                "properties": {}
-            }
+            inputSchema={"type": "object", "properties": {}},
         ),
-
         # Attribution
         Tool(
             name="trace_add_attribution",
@@ -1988,25 +2381,29 @@ async def list_tools() -> list[Tool]:
                     "artifact_type": {
                         "type": "string",
                         "enum": ["code", "analysis", "figure", "table", "text", "model"],
-                        "description": "Type of artifact"
+                        "description": "Type of artifact",
                     },
-                    "ai_contribution_percentage": {"type": "integer", "minimum": 0, "maximum": 100, "description": "Estimated AI contribution %"},
+                    "ai_contribution_percentage": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "description": "Estimated AI contribution %",
+                    },
                     "ai_contribution_types": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Types of AI contribution (e.g., code_generation, suggestions)"
+                        "description": "Types of AI contribution (e.g., code_generation, suggestions)",
                     },
                     "human_contribution_types": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": "Types of human contribution (e.g., design, validation)"
+                        "description": "Types of human contribution (e.g., design, validation)",
                     },
-                    "citation_text": {"type": "string", "description": "Suggested citation text"}
+                    "citation_text": {"type": "string", "description": "Suggested citation text"},
                 },
-                "required": ["artifact_description", "artifact_type"]
-            }
+                "required": ["artifact_description", "artifact_type"],
+            },
         ),
-
         # Export
         Tool(
             name="trace_export_report",
@@ -2017,11 +2414,129 @@ async def list_tools() -> list[Tool]:
                     "format": {
                         "type": "string",
                         "enum": ["json", "markdown", "summary"],
-                        "description": "Export format"
+                        "description": "Export format",
                     }
-                }
-            }
-        )
+                },
+            },
+        ),
+        # ============================================================
+        # V&V (Verification & Validation) Tools
+        # ============================================================
+        Tool(
+            name="trace_snapshot",
+            description="Capture file state for verification. Creates compressed snapshots with SHA-256 hashes. Auto-triggered at session start and before contributions.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "files": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of file paths to snapshot",
+                    },
+                    "trigger": {
+                        "type": "string",
+                        "enum": ["session_start", "pre_contribution", "pre_suggestion", "manual", "checkpoint"],
+                        "description": "What triggered this snapshot",
+                    },
+                    "session_id": {"type": "string", "description": "Current session ID"},
+                    "related_entry_id": {
+                        "type": "string",
+                        "description": "Related TRACE entry ID (e.g., code contribution)",
+                    },
+                },
+                "required": ["files", "trigger"],
+            },
+        ),
+        Tool(
+            name="trace_verify",
+            description="Verify TRACE claims match actual file changes. Compares logged line/word counts against diffs with configurable tolerance.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "entry_id": {"type": "string", "description": "Entry ID to verify (e.g., CC001)"},
+                    "session_id": {"type": "string", "description": "Session ID to verify all entries"},
+                    "pre_snapshot_id": {"type": "string", "description": "Snapshot ID for pre-change state"},
+                    "tolerance_percent": {
+                        "type": "number",
+                        "description": "Percentage tolerance for counts (default: 5)",
+                    },
+                    "tolerance_lines": {
+                        "type": "integer",
+                        "description": "Absolute line tolerance for small counts (default: 2)",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="trace_git_reconcile",
+            description="Cross-validate TRACE logs with git history. Detects unlogged commits, phantom entries, and timestamp mismatches.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "since": {"type": "string", "description": "Git date filter (e.g., '1 week ago', '2024-01-01')"},
+                    "auto_log_missing": {
+                        "type": "boolean",
+                        "description": "Generate suggestions for missing entries (default: false)",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="trace_verify_integrity",
+            description="Verify cryptographic hash chain for tamper detection. Each TRACE entry is linked via SHA-256 hashes.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "entry_id": {"type": "string", "description": "Verify specific entry (optional)"},
+                    "rebuild_chain": {
+                        "type": "boolean",
+                        "description": "Rebuild chain from TRACE data (WARNING: replaces existing chain)",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="trace_trust_report",
+            description="Generate trust metrics and verification report for publication. Computes overall trust score from verification, git sync, integrity, and temporal checks.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "period": {"type": "string", "description": "Time period to analyze (e.g., '30 days', '1 week')"},
+                    "format": {
+                        "type": "string",
+                        "enum": ["json", "markdown", "summary"],
+                        "description": "Output format (default: markdown)",
+                    },
+                },
+            },
+        ),
+        Tool(
+            name="trace_analyze_text",
+            description="Analyze text document (LaTeX, Markdown) for section-level authorship tracking. Returns word counts and fingerprints per section.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file_path": {"type": "string", "description": "Path to the text file"},
+                    "include_authorship": {
+                        "type": "boolean",
+                        "description": "Include authorship info from TRACE (default: true)",
+                    },
+                },
+                "required": ["file_path"],
+            },
+        ),
+        Tool(
+            name="trace_list_snapshots",
+            description="List available snapshots. Useful for finding pre-change states for verification.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "session_id": {"type": "string", "description": "Filter by session ID"},
+                    "trigger": {"type": "string", "description": "Filter by trigger type"},
+                    "limit": {"type": "integer", "description": "Maximum results (default: 50)"},
+                },
+            },
+        ),
     ]
 
 
@@ -2029,8 +2544,9 @@ async def list_tools() -> list[Tool]:
 # MCP Tool Handlers
 # ============================================================
 
+
 @server.call_tool()
-async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+async def call_tool(name: str, arguments: dict) -> list[TextContent]:  # type: ignore[return]
     """Handle tool calls."""
     trace = load_trace()
 
@@ -2043,7 +2559,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             results = search_trace(trace, arguments["query"], arguments.get("categories"))
             if not results:
                 return [TextContent(type="text", text=f"No results found for: '{arguments['query']}'")]
-            return [TextContent(type="text", text=f"Found {len(results)} result(s):\n\n{json.dumps(results, indent=2)}")]
+            return [
+                TextContent(type="text", text=f"Found {len(results)} result(s):\n\n{json.dumps(results, indent=2)}")
+            ]
 
         elif name == "trace_get_context":
             include_metrics = arguments.get("include_metrics", True)
@@ -2055,7 +2573,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 "recent_decisions": trace.get("decisions", [])[-5:],
                 "recent_learnings": trace.get("learnings", [])[-5:],
                 "recent_suggestions": trace.get("ai_suggestions", [])[-5:],
-                "recent_gotchas": trace.get("gotchas", [])[-5:]
+                "recent_gotchas": trace.get("gotchas", [])[-5:],
             }
             if include_metrics:
                 output["metrics"] = trace.get("metrics_summary", {})
@@ -2082,13 +2600,35 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "learnings_recorded": [],
                     "suggestions_proposed": [],
                     "suggestions_accepted": [],
-                    "suggestions_rejected": []
+                    "suggestions_rejected": [],
                 },
-                "reflection": {}
+                "reflection": {},
             }
             trace["sessions"].append(entry)
+
+            # v3.0: Auto-capture environment
+            env_id = None
+            if CORE_AVAILABLE:
+                try:
+                    capturer = EnvironmentCapture(TRACE_PATH.parent)
+                    env_data = capturer.capture(
+                        agent_name=arguments.get("ai_model", "unknown"),
+                        agent_framework="mcp",
+                    )
+                    env_id = generate_environment_id(trace.get("environments", []))
+                    env_entry = {"id": env_id, **env_data}
+                    if "environments" not in trace:
+                        trace["environments"] = []
+                    trace["environments"].append(env_entry)
+                    entry["environment_id"] = env_id
+                except Exception:
+                    pass  # Environment capture is optional
+
             save_trace(trace)
-            return [TextContent(type="text", text=f"Session started: {entry['id']}\nPurpose: {entry['purpose']}\nSchema: TRACE-2.0")]
+            response = f"Session started: {entry['id']}\nPurpose: {entry['purpose']}\nSchema: TRACE-3.0"
+            if env_id:
+                response += f"\nEnvironment: {env_id}"
+            return [TextContent(type="text", text=response)]
 
         elif name == "trace_end_session":
             session_id = arguments["session_id"]
@@ -2100,13 +2640,140 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     session["duration_minutes"] = int((ended - started).total_seconds() / 60)
                     session["reflection"] = {
                         "what_went_well": arguments.get("summary"),
-                        "ai_helpfulness_rating": arguments.get("ai_helpfulness_rating")
+                        "ai_helpfulness_rating": arguments.get("ai_helpfulness_rating"),
                     }
                     save_trace(trace)
-                    return [TextContent(type="text", text=f"Session {session_id} ended. Duration: {session['duration_minutes']} minutes")]
+                    return [
+                        TextContent(
+                            type="text",
+                            text=f"Session {session_id} ended. Duration: {session['duration_minutes']} minutes",
+                        )
+                    ]
             return [TextContent(type="text", text=f"Session {session_id} not found")]
 
-        # AI Suggestion Tracking (NEW)
+        # v3.0: Environment Capture
+        elif name == "trace_capture_environment":
+            if not CORE_AVAILABLE:
+                # Fallback implementation if core module not available
+                import platform
+                import sys
+
+                env_id = f"ENV{len(trace.get('environments', [])) + 1:03d}"
+                env_entry = {
+                    "id": env_id,
+                    "captured_at": datetime.now().isoformat(),
+                    "platform": {
+                        "os": platform.system().lower(),
+                        "arch": platform.machine(),
+                        "version": platform.release(),
+                    },
+                    "runtime": {
+                        "language": "python",
+                        "version": f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+                    },
+                    "agent": {
+                        "framework": arguments.get("agent_framework", "mcp"),
+                        "name": arguments.get("agent_name", "unknown"),
+                        "parameters": arguments.get("agent_parameters", {}),
+                    },
+                    "mcp": {
+                        "spec_version": "2025-06-18",
+                        "server_version": "3.0.0",
+                    },
+                }
+            else:
+                capturer = EnvironmentCapture(TRACE_PATH.parent)
+                env_data = capturer.capture(
+                    agent_name=arguments.get("agent_name", "unknown"),
+                    agent_framework=arguments.get("agent_framework", "mcp"),
+                    agent_parameters=arguments.get("agent_parameters"),
+                )
+                env_id = generate_environment_id(trace.get("environments", []))
+                env_entry = {"id": env_id, **env_data}
+
+            if "environments" not in trace:
+                trace["environments"] = []
+            trace["environments"].append(env_entry)
+
+            # Associate with session if provided
+            session_id = arguments.get("session_id")
+            if session_id:
+                for session in trace["sessions"]:
+                    if session["id"] == session_id:
+                        session["environment_id"] = env_id
+                        break
+
+            save_trace(trace)
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Environment captured: {env_id}\n"
+                    f"Platform: {env_entry['platform']['os']}/{env_entry['platform']['arch']}\n"
+                    f"Agent: {env_entry['agent']['name']}",
+                )
+            ]
+
+        # v3.0: Evaluation Logging
+        elif name == "trace_log_evaluation":
+            eval_id = f"EVAL{len(trace.get('evaluations', [])) + 1:03d}"
+
+            eval_entry = {
+                "id": eval_id,
+                "timestamp": datetime.now().isoformat(),
+                "evaluation_type": arguments["evaluation_type"],
+            }
+
+            if arguments.get("session_id"):
+                eval_entry["session_id"] = arguments["session_id"]
+
+            # Build target
+            target = {}
+            if arguments.get("target_files"):
+                target["files"] = arguments["target_files"]
+            if arguments.get("target_description"):
+                target["description"] = arguments["target_description"]
+            if target:
+                eval_entry["target"] = target
+
+            # Build metrics
+            metrics = {}
+            if arguments.get("tests_passed") is not None:
+                metrics["tests_passed"] = arguments["tests_passed"]
+            if arguments.get("tests_failed") is not None:
+                metrics["tests_failed"] = arguments["tests_failed"]
+            if arguments.get("coverage") is not None:
+                metrics["coverage"] = arguments["coverage"]
+            if arguments.get("duration_ms") is not None:
+                metrics["duration_ms"] = arguments["duration_ms"]
+            if metrics:
+                eval_entry["metrics"] = metrics
+
+            if arguments.get("tool"):
+                eval_entry["tool"] = arguments["tool"]
+            if arguments.get("command"):
+                eval_entry["command"] = arguments["command"]
+            if arguments.get("output_summary"):
+                eval_entry["output_summary"] = arguments["output_summary"]
+            if arguments.get("passed") is not None:
+                eval_entry["passed"] = arguments["passed"]
+
+            if "evaluations" not in trace:
+                trace["evaluations"] = []
+            trace["evaluations"].append(eval_entry)
+            save_trace(trace)
+
+            # Build response
+            response_parts = [f"Evaluation logged: {eval_id}", f"Type: {arguments['evaluation_type']}"]
+            if metrics.get("tests_passed") is not None or metrics.get("tests_failed") is not None:
+                passed = metrics.get("tests_passed", 0)
+                failed = metrics.get("tests_failed", 0)
+                response_parts.append(f"Tests: {passed} passed, {failed} failed")
+            if metrics.get("coverage") is not None:
+                response_parts.append(f"Coverage: {metrics['coverage']:.1%}")
+
+            return [TextContent(type="text", text="\n".join(response_parts))]
+
+        # AI Suggestion Tracking
         elif name == "trace_log_suggestion":
             entry = {
                 "id": generate_id("SUG", trace.get("ai_suggestions", [])),
@@ -2117,38 +2784,42 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "description": arguments["description"],
                     "scope": {
                         "files_affected": arguments.get("files_affected", []),
-                        "lines_proposed": arguments.get("lines_proposed", 0)
-                    }
+                        "lines_proposed": arguments.get("lines_proposed", 0),
+                    },
                 },
-                "ai_confidence": {
-                    "level": arguments.get("ai_confidence", "medium"),
-                    "reasoning": None
-                },
+                "ai_confidence": {"level": arguments.get("ai_confidence", "medium"), "reasoning": None},
                 "context": {
                     "what_prompted_suggestion": arguments.get("what_prompted"),
-                    "human_was_aware_before": False
+                    "human_was_aware_before": False,
                 },
                 "outcome": {
                     "status": "pending",
                     "decision_timestamp": None,
                     "human_rationale": None,
-                    "lines_final": {
-                        "accepted_as_is": 0,
-                        "modified_by_human": 0,
-                        "rejected": 0
-                    }
+                    "lines_final": {"accepted_as_is": 0, "modified_by_human": 0, "rejected": 0},
                 },
-                "resulted_in": {
-                    "decisions": [],
-                    "code_contributions": [],
-                    "errors_discovered": []
-                }
+                "resulted_in": {"decisions": [], "code_contributions": [], "errors_discovered": []},
             }
+            # V&V: Add to integrity chain if available
+            if VV_AVAILABLE:
+                try:
+                    trace_dir = TRACE_PATH.parent / ".trace"
+                    chain = IntegrityChain(trace_dir)
+                    integrity_metadata = chain.add_entry(entry["id"], "ai_suggestion", entry)
+                    entry["integrity"] = integrity_metadata
+                except Exception as e:
+                    entry["integrity"] = {"error": str(e)}
+
             if "ai_suggestions" not in trace:
                 trace["ai_suggestions"] = []
             trace["ai_suggestions"].append(entry)
             save_trace(trace)
-            return [TextContent(type="text", text=f"Suggestion logged ({entry['id']}): {arguments['description'][:80]}...\nType: {arguments['suggestion_type']}, Lines proposed: {arguments.get('lines_proposed', 0)}")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Suggestion logged ({entry['id']}): {arguments['description'][:80]}...\nType: {arguments['suggestion_type']}, Lines proposed: {arguments.get('lines_proposed', 0)}",
+                )
+            ]
 
         elif name == "trace_resolve_suggestion":
             suggestion_id = arguments["suggestion_id"]
@@ -2161,8 +2832,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         "lines_final": {
                             "accepted_as_is": arguments.get("lines_accepted_as_is", 0),
                             "modified_by_human": arguments.get("lines_modified", 0),
-                            "rejected": arguments.get("lines_rejected", 0)
-                        }
+                            "rejected": arguments.get("lines_rejected", 0),
+                        },
                     }
                     if arguments.get("modification_description"):
                         sug["outcome"]["modification_description"] = arguments["modification_description"]
@@ -2170,7 +2841,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
                     status = arguments["status"]
                     lines_info = f"Accepted: {arguments.get('lines_accepted_as_is', 0)}, Modified: {arguments.get('lines_modified', 0)}, Rejected: {arguments.get('lines_rejected', 0)}"
-                    return [TextContent(type="text", text=f"Suggestion {suggestion_id} resolved: {status}\n{lines_info}")]
+                    return [
+                        TextContent(type="text", text=f"Suggestion {suggestion_id} resolved: {status}\n{lines_info}")
+                    ]
             return [TextContent(type="text", text=f"Suggestion {suggestion_id} not found")]
 
         # Code/Content Contribution (v2.0)
@@ -2193,81 +2866,96 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "lines_removed": 0,
                     "lines_modified": 0,
                     "functions_added": 0,
-                    "classes_added": 0
+                    "classes_added": 0,
                 },
                 "authorship": {
                     "human_directed": {
                         "ai_executed_lines": arguments.get("human_directed_ai_executed_lines", 0),
-                        "human_executed_lines": arguments.get("human_directed_human_executed_lines", 0)
+                        "human_executed_lines": arguments.get("human_directed_human_executed_lines", 0),
                     },
                     "ai_suggested": {
                         "accepted_lines": arguments.get("ai_suggested_accepted_lines", 0),
                         "rejected_lines": arguments.get("ai_suggested_rejected_lines", 0),
                         "modified_lines": arguments.get("ai_suggested_modified_lines", 0),
                         "modification_description": None,
-                        "related_suggestion_id": arguments.get("related_suggestion_id")
+                        "related_suggestion_id": arguments.get("related_suggestion_id"),
                     },
                     "human_manual_edit": {
                         "lines_added": arguments.get("human_manual_edit_lines", 0),
                         "lines_removed": 0,
                         "lines_modified": 0,
-                        "git_commits": []
+                        "git_commits": [],
                     },
-                    "collaborative": {
-                        "lines": arguments.get("collaborative_lines", 0),
-                        "description": None
-                    }
+                    "collaborative": {"lines": arguments.get("collaborative_lines", 0), "description": None},
                 },
                 "quality": {},
-                "description": arguments["description"]
+                "description": arguments["description"],
             }
 
             # Add word metrics for text content type
             if content_type == "text":
-                entry["authorship"]["human_directed"]["ai_executed_words"] = arguments.get("human_directed_ai_executed_words", 0)
-                entry["authorship"]["human_directed"]["human_executed_words"] = arguments.get("human_directed_human_executed_words", 0)
+                entry["authorship"]["human_directed"]["ai_executed_words"] = arguments.get(
+                    "human_directed_ai_executed_words", 0
+                )
+                entry["authorship"]["human_directed"]["human_executed_words"] = arguments.get(
+                    "human_directed_human_executed_words", 0
+                )
                 entry["authorship"]["ai_suggested"]["accepted_words"] = arguments.get("ai_suggested_accepted_words", 0)
                 entry["authorship"]["ai_suggested"]["modified_words"] = arguments.get("ai_suggested_modified_words", 0)
                 entry["authorship"]["ai_suggested"]["rejected_words"] = arguments.get("ai_suggested_rejected_words", 0)
                 entry["authorship"]["human_manual_edit"]["words_added"] = arguments.get("human_manual_edit_words", 0)
                 entry["authorship"]["collaborative"]["words"] = arguments.get("collaborative_words", 0)
                 entry["metrics"]["words_added"] = (
-                    entry["authorship"]["human_directed"]["ai_executed_words"] +
-                    entry["authorship"]["human_directed"]["human_executed_words"] +
-                    entry["authorship"]["ai_suggested"]["accepted_words"] +
-                    entry["authorship"]["ai_suggested"]["modified_words"] +
-                    entry["authorship"]["human_manual_edit"]["words_added"] +
-                    entry["authorship"]["collaborative"]["words"]
+                    entry["authorship"]["human_directed"]["ai_executed_words"]
+                    + entry["authorship"]["human_directed"]["human_executed_words"]
+                    + entry["authorship"]["ai_suggested"]["accepted_words"]
+                    + entry["authorship"]["ai_suggested"]["modified_words"]
+                    + entry["authorship"]["human_manual_edit"]["words_added"]
+                    + entry["authorship"]["collaborative"]["words"]
                 )
 
             # Add row metrics for data content type
             if content_type == "data":
-                entry["authorship"]["human_directed"]["ai_executed_rows"] = arguments.get("human_directed_ai_executed_rows", 0)
-                entry["authorship"]["human_directed"]["human_executed_rows"] = arguments.get("human_directed_human_executed_rows", 0)
+                entry["authorship"]["human_directed"]["ai_executed_rows"] = arguments.get(
+                    "human_directed_ai_executed_rows", 0
+                )
+                entry["authorship"]["human_directed"]["human_executed_rows"] = arguments.get(
+                    "human_directed_human_executed_rows", 0
+                )
                 entry["authorship"]["ai_suggested"]["accepted_rows"] = arguments.get("ai_suggested_accepted_rows", 0)
                 entry["authorship"]["ai_suggested"]["modified_rows"] = arguments.get("ai_suggested_modified_rows", 0)
                 entry["authorship"]["ai_suggested"]["rejected_rows"] = arguments.get("ai_suggested_rejected_rows", 0)
                 entry["authorship"]["human_manual_edit"]["rows_added"] = arguments.get("human_manual_edit_rows", 0)
                 entry["authorship"]["collaborative"]["rows"] = arguments.get("collaborative_rows", 0)
                 entry["metrics"]["rows_added"] = (
-                    entry["authorship"]["human_directed"]["ai_executed_rows"] +
-                    entry["authorship"]["human_directed"]["human_executed_rows"] +
-                    entry["authorship"]["ai_suggested"]["accepted_rows"] +
-                    entry["authorship"]["ai_suggested"]["modified_rows"] +
-                    entry["authorship"]["human_manual_edit"]["rows_added"] +
-                    entry["authorship"]["collaborative"]["rows"]
+                    entry["authorship"]["human_directed"]["ai_executed_rows"]
+                    + entry["authorship"]["human_directed"]["human_executed_rows"]
+                    + entry["authorship"]["ai_suggested"]["accepted_rows"]
+                    + entry["authorship"]["ai_suggested"]["modified_rows"]
+                    + entry["authorship"]["human_manual_edit"]["rows_added"]
+                    + entry["authorship"]["collaborative"]["rows"]
                 )
 
             # Calculate total lines for metrics (all content types track lines)
             total_lines = (
-                entry["authorship"]["human_directed"]["ai_executed_lines"] +
-                entry["authorship"]["human_directed"]["human_executed_lines"] +
-                entry["authorship"]["ai_suggested"]["accepted_lines"] +
-                entry["authorship"]["ai_suggested"]["modified_lines"] +
-                entry["authorship"]["human_manual_edit"]["lines_added"] +
-                entry["authorship"]["collaborative"]["lines"]
+                entry["authorship"]["human_directed"]["ai_executed_lines"]
+                + entry["authorship"]["human_directed"]["human_executed_lines"]
+                + entry["authorship"]["ai_suggested"]["accepted_lines"]
+                + entry["authorship"]["ai_suggested"]["modified_lines"]
+                + entry["authorship"]["human_manual_edit"]["lines_added"]
+                + entry["authorship"]["collaborative"]["lines"]
             )
             entry["metrics"]["lines_added"] = total_lines
+
+            # V&V: Add to integrity chain if available
+            if VV_AVAILABLE:
+                try:
+                    trace_dir = TRACE_PATH.parent / ".trace"
+                    chain = IntegrityChain(trace_dir)
+                    integrity_metadata = chain.add_entry(entry["id"], "code_contribution", entry)
+                    entry["integrity"] = integrity_metadata
+                except Exception as e:
+                    entry["integrity"] = {"error": str(e)}
 
             trace["code_contributions"].append(entry)
             save_trace(trace)
@@ -2275,11 +2963,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             # Build summary message
             summary_parts = []
             if entry["authorship"]["human_directed"]["ai_executed_lines"] > 0:
-                summary_parts.append(f"Human-directed/AI-executed: {entry['authorship']['human_directed']['ai_executed_lines']} lines")
+                summary_parts.append(
+                    f"Human-directed/AI-executed: {entry['authorship']['human_directed']['ai_executed_lines']} lines"
+                )
             if entry["authorship"]["ai_suggested"]["accepted_lines"] > 0:
-                summary_parts.append(f"AI-suggested/Accepted: {entry['authorship']['ai_suggested']['accepted_lines']} lines")
+                summary_parts.append(
+                    f"AI-suggested/Accepted: {entry['authorship']['ai_suggested']['accepted_lines']} lines"
+                )
             if entry["authorship"]["ai_suggested"]["modified_lines"] > 0:
-                summary_parts.append(f"AI-suggested/Modified: {entry['authorship']['ai_suggested']['modified_lines']} lines")
+                summary_parts.append(
+                    f"AI-suggested/Modified: {entry['authorship']['ai_suggested']['modified_lines']} lines"
+                )
             if entry["authorship"]["human_manual_edit"]["lines_added"] > 0:
                 summary_parts.append(f"Human-manual: {entry['authorship']['human_manual_edit']['lines_added']} lines")
 
@@ -2297,7 +2991,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
             summary = ", ".join(summary_parts) if summary_parts else "No changes logged"
             content_label = {"code": "Code", "text": "Text", "data": "Data"}.get(content_type, "Content")
-            return [TextContent(type="text", text=f"{content_label} contribution logged ({entry['id']}): {arguments['file_path']}\nContent type: {content_type}, Direction: {arguments['direction_source']}\n{summary}")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"{content_label} contribution logged ({entry['id']}): {arguments['file_path']}\nContent type: {content_type}, Direction: {arguments['direction_source']}\n{summary}",
+                )
+            ]
 
         # Git Integration (NEW)
         elif name == "trace_scan_git_commits":
@@ -2314,7 +3013,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             logged_count = 0
             for commit in commits:
                 # Check if already logged
-                existing = [h for h in trace["human_manual_edits"] if h.get("git_commit", {}).get("hash") == commit["hash"]]
+                existing = [
+                    h for h in trace["human_manual_edits"] if h.get("git_commit", {}).get("hash") == commit["hash"]
+                ]
                 if existing:
                     continue
 
@@ -2327,7 +3028,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         "hash": commit["hash"],
                         "message": commit["message"],
                         "author": commit["author"],
-                        "date": commit["date"]
+                        "date": commit["date"],
                     },
                     "files_changed": commit["files_changed"],
                     "lines_added": commit["lines_added"],
@@ -2335,8 +3036,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "context": {
                         "why_manual": None,
                         "related_to_ai_session": arguments.get("session_id"),
-                        "notes": None
-                    }
+                        "notes": None,
+                    },
                 }
                 trace["human_manual_edits"].append(entry)
                 logged_count += 1
@@ -2345,7 +3046,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
             total_lines_added = sum(c["lines_added"] for c in commits)
             total_lines_removed = sum(c["lines_removed"] for c in commits)
-            return [TextContent(type="text", text=f"Git scan complete.\nFound {len(commits)} [HUMAN-EDIT] commits, logged {logged_count} new.\nTotal lines: +{total_lines_added} -{total_lines_removed}")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Git scan complete.\nFound {len(commits)} [HUMAN-EDIT] commits, logged {logged_count} new.\nTotal lines: +{total_lines_added} -{total_lines_removed}",
+                )
+            ]
 
         # Idea Tracking
         elif name == "trace_log_idea":
@@ -2360,15 +3066,20 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 "origin": {
                     "source": arguments["source"],
                     "triggered_by": arguments.get("triggered_by"),
-                    "prior_context": None
+                    "prior_context": None,
                 },
                 "evaluation": {"status": "pending"},
                 "outcome": {"adopted": None},
-                "related_to": {}
+                "related_to": {},
             }
             trace["ideas"].append(entry)
             save_trace(trace)
-            return [TextContent(type="text", text=f"Idea logged ({entry['id']}): {arguments['idea'][:80]}...\nSource: {arguments['source']}")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Idea logged ({entry['id']}): {arguments['idea'][:80]}...\nSource: {arguments['source']}",
+                )
+            ]
 
         elif name == "trace_evaluate_idea":
             idea_id = arguments["idea_id"]
@@ -2378,12 +3089,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                         "status": "evaluated",
                         "evaluated_by": "human",
                         "evaluation_date": datetime.now().isoformat(),
-                        "evaluation_notes": arguments.get("evaluation_notes")
+                        "evaluation_notes": arguments.get("evaluation_notes"),
                     }
                     idea["outcome"] = {
                         "adopted": arguments["adopted"],
                         "rejection_reason": arguments.get("rejection_reason"),
-                        "modification_description": arguments.get("modification_description")
+                        "modification_description": arguments.get("modification_description"),
                     }
                     save_trace(trace)
                     status = "adopted" if arguments["adopted"] else "rejected"
@@ -2404,24 +3115,29 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "originated_from": arguments["originated_from"],
                     "file_path": arguments.get("file_path"),
                     "line_numbers": None,
-                    "code_snippet": None
+                    "code_snippet": None,
                 },
                 "detection": {
                     "detected_by": arguments["detected_by"],
                     "detection_method": arguments.get("detection_method", "code_review"),
-                    "time_to_detect_minutes": None
+                    "time_to_detect_minutes": None,
                 },
                 "resolution": {
                     "resolved": True if arguments.get("resolution_description") else False,
                     "resolved_by": "human",
                     "resolution_description": arguments.get("resolution_description"),
-                    "time_to_resolve_minutes": None
+                    "time_to_resolve_minutes": None,
                 },
-                "impact": {}
+                "impact": {},
             }
             trace["errors"].append(entry)
             save_trace(trace)
-            return [TextContent(type="text", text=f"Error logged ({entry['id']}): {arguments['description'][:80]}...\nSource: {arguments['originated_from']}, Caught by: {arguments['detected_by']}")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Error logged ({entry['id']}): {arguments['description'][:80]}...\nSource: {arguments['originated_from']}, Caught by: {arguments['detected_by']}",
+                )
+            ]
 
         # Intervention Tracking
         elif name == "trace_log_intervention":
@@ -2431,24 +3147,24 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 "session_id": arguments.get("session_id"),
                 "interaction_id": None,
                 "intervention_type": arguments["intervention_type"],
-                "ai_output": {
-                    "summary": arguments["ai_output_summary"],
-                    "artifact_type": "code"
-                },
+                "ai_output": {"summary": arguments["ai_output_summary"], "artifact_type": "code"},
                 "human_action": {
                     "action": arguments["intervention_type"],
                     "description": arguments["human_action"],
                     "rationale": arguments.get("rationale"),
-                    "lines_affected": arguments.get("lines_affected", 0)
+                    "lines_affected": arguments.get("lines_affected", 0),
                 },
                 "expertise_applied": arguments.get("expertise_applied", []),
-                "impact": {
-                    "significance": arguments.get("significance", "minor")
-                }
+                "impact": {"significance": arguments.get("significance", "minor")},
             }
             trace["interventions"].append(entry)
             save_trace(trace)
-            return [TextContent(type="text", text=f"Intervention logged ({entry['id']}): {arguments['intervention_type']}\n{arguments['human_action'][:80]}...")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Intervention logged ({entry['id']}): {arguments['intervention_type']}\n{arguments['human_action'][:80]}...",
+                )
+            ]
 
         # Standard Knowledge Management
         elif name == "trace_add_decision":
@@ -2464,16 +3180,18 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "proposed_by": arguments.get("proposed_by", "human"),
                     "ai_contribution": "none" if arguments.get("proposed_by") == "human" else "suggested",
                     "information_consulted": [],
-                    "related_suggestion_id": arguments.get("related_suggestion_id")
+                    "related_suggestion_id": arguments.get("related_suggestion_id"),
                 },
                 "confidence": {"initial": 0.7, "current": 0.7, "history": []},
                 "validation": {"status": "untested"},
                 "status": "active",
-                "tags": arguments.get("tags", [])
+                "tags": arguments.get("tags", []),
             }
             trace["decisions"].append(entry)
             save_trace(trace)
-            return [TextContent(type="text", text=f"Decision recorded ({entry['id']}): {arguments['decision'][:80]}...")]
+            return [
+                TextContent(type="text", text=f"Decision recorded ({entry['id']}): {arguments['decision'][:80]}...")
+            ]
 
         elif name == "trace_add_learning":
             entry = {
@@ -2487,17 +3205,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                     "discovered_by": arguments.get("discovered_by", "human"),
                     "ai_contribution": "none" if arguments.get("discovered_by") == "human" else "contributed",
                     "discovery_method": "experiment",
-                    "discovery_context": None
+                    "discovery_context": None,
                 },
                 "confidence": {
                     "level": arguments.get("confidence", "medium"),
-                    "value": {"high": 0.9, "medium": 0.7, "low": 0.5}.get(arguments.get("confidence", "medium"), 0.7)
+                    "value": {"high": 0.9, "medium": 0.7, "low": 0.5}.get(arguments.get("confidence", "medium"), 0.7),
                 },
-                "tags": arguments.get("tags", [])
+                "tags": arguments.get("tags", []),
             }
             trace["learnings"].append(entry)
             save_trace(trace)
-            return [TextContent(type="text", text=f"Learning recorded ({entry['id']}): {arguments['learning'][:80]}...")]
+            return [
+                TextContent(type="text", text=f"Learning recorded ({entry['id']}): {arguments['learning'][:80]}...")
+            ]
 
         elif name == "trace_add_gotcha":
             entry = {
@@ -2510,9 +3230,9 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 "provenance": {
                     "discovered_by": arguments.get("discovered_by", "human"),
                     "ai_contribution": "none",
-                    "discovery_context": None
+                    "discovery_context": None,
                 },
-                "tags": arguments.get("tags", [])
+                "tags": arguments.get("tags", []),
             }
             trace["gotchas"].append(entry)
             save_trace(trace)
@@ -2563,20 +3283,22 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             output_lines.append(f"Should log: {'Yes' if result['should_log'] else 'No'}")
             output_lines.append(f"Confidence: {result['confidence']}")
 
-            if result['recommended_types']:
+            if result["recommended_types"]:
                 output_lines.append(f"Recommended types: {', '.join(result['recommended_types'])}")
 
-            if result['reasoning']:
+            if result["reasoning"]:
                 output_lines.append(f"Reasoning: {result['reasoning']}")
 
-            if result['similar_entries']:
+            if result["similar_entries"]:
                 output_lines.append("\nSimilar existing entries:")
-                for entry in result['similar_entries'][:3]:
-                    output_lines.append(f"  - [{entry['id']}] (similarity: {entry['similarity']}) {entry['entry_preview'][:100]}...")
+                for entry in result["similar_entries"][:3]:
+                    output_lines.append(
+                        f"  - [{entry['id']}] (similarity: {entry['similarity']}) {entry['entry_preview'][:100]}..."
+                    )
 
-            if result['should_log'] and result['suggested_fields']:
+            if result["should_log"] and result["suggested_fields"]:
                 output_lines.append("\nSuggested fields:")
-                output_lines.append(json.dumps(result['suggested_fields'], indent=2))
+                output_lines.append(json.dumps(result["suggested_fields"], indent=2))
 
             return [TextContent(type="text", text="\n".join(output_lines))]
 
@@ -2601,7 +3323,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 "timestamp": datetime.now().isoformat(),
                 "trigger": trigger,
                 "notes": notes,
-                "analysis": analysis
+                "analysis": analysis,
             }
 
             if "checkpoints" not in trace:
@@ -2647,10 +3369,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             results = refresh_context_for_topics(trace, topics, include_recent, max_items, categories)
 
             # Format output
-            output_lines = [
-                f"Context refresh for topics: {', '.join(topics)}",
-                ""
-            ]
+            output_lines = [f"Context refresh for topics: {', '.join(topics)}", ""]
 
             total_found = 0
             for category, items in results.items():
@@ -2686,7 +3405,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         elif name == "trace_consolidate_learnings":
             session_id = arguments["session_id"]
             auto_link = arguments.get("auto_link", True)
-            generate_summary = arguments.get("generate_summary", True)
+            _generate_summary = arguments.get("generate_summary", True)  # Reserved for future use
 
             result = consolidate_session_learnings(trace, session_id, auto_link)
 
@@ -2698,7 +3417,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 f"Consolidation complete for session {session_id}",
                 f"Total entries: {result['total_entries']}",
                 "",
-                "By category:"
+                "By category:",
             ]
 
             for category, count in result["by_category"].items():
@@ -2729,18 +3448,23 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 "ai_contribution": {
                     "percentage_estimate": arguments.get("ai_contribution_percentage", 50),
                     "contribution_types": arguments.get("ai_contribution_types", []),
-                    "model_used": "claude-opus-4-5-20251101"
+                    "model_used": "claude-opus-4-5-20251101",
                 },
                 "human_contribution": {
                     "percentage_estimate": 100 - arguments.get("ai_contribution_percentage", 50),
-                    "contribution_types": arguments.get("human_contribution_types", [])
+                    "contribution_types": arguments.get("human_contribution_types", []),
                 },
                 "citation_text": arguments.get("citation_text", ""),
-                "related_session_ids": []
+                "related_session_ids": [],
             }
             trace["attributions"].append(entry)
             save_trace(trace)
-            return [TextContent(type="text", text=f"Attribution recorded ({entry['id']}): {arguments['artifact_description'][:80]}...")]
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Attribution recorded ({entry['id']}): {arguments['artifact_description'][:80]}...",
+                )
+            ]
 
         # Export
         elif name == "trace_export_report":
@@ -2757,6 +3481,243 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             elif format_type == "markdown":
                 return [TextContent(type="text", text=generate_markdown_report(trace))]
 
+        # ============================================================
+        # V&V (Verification & Validation) Tool Handlers
+        # ============================================================
+
+        elif name == "trace_snapshot":
+            if not VV_AVAILABLE:
+                return [TextContent(type="text", text="V&V module not available. Check installation.")]
+
+            trace_dir = TRACE_PATH.parent / ".trace"
+            snapshot_manager = SnapshotManager(trace_dir)
+
+            files = arguments.get("files", [])
+            trigger = arguments.get("trigger", "manual")
+            session_id = arguments.get("session_id")
+            related_entry_id = arguments.get("related_entry_id")
+
+            result = snapshot_manager.create_snapshot(
+                files=files, trigger=trigger, session_id=session_id, related_entry_id=related_entry_id
+            )
+
+            save_trace(trace)
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Snapshot created: {result['snapshot_id']}\n"
+                    f"Files: {len(result['files'])}\n"
+                    f"Trigger: {result['trigger']}\n"
+                    f"Git commit: {result['git_state'].get('commit_hash', 'N/A')[:8]}\n\n"
+                    f"{json.dumps(result, indent=2)}",
+                )
+            ]
+
+        elif name == "trace_verify":
+            if not VV_AVAILABLE:
+                return [TextContent(type="text", text="V&V module not available. Check installation.")]
+
+            trace_dir = TRACE_PATH.parent / ".trace"
+
+            tolerance_percent = arguments.get("tolerance_percent", 5.0)
+            tolerance_lines = arguments.get("tolerance_lines", 2)
+
+            engine = VerificationEngine(trace_dir, tolerance_percent=tolerance_percent, tolerance_lines=tolerance_lines)
+
+            entry_id = arguments.get("entry_id")
+            session_id = arguments.get("session_id")
+            pre_snapshot_id = arguments.get("pre_snapshot_id")
+
+            if entry_id:
+                result = engine.verify_entry(trace, entry_id, pre_snapshot_id)
+                status = "VERIFIED" if result.get("verified") else "ISSUES FOUND"
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Verification Result: {status}\n"
+                        f"Entry: {entry_id}\n"
+                        f"Checks: {result.get('checks_passed', 0)}/{result.get('checks_passed', 0) + result.get('checks_failed', 0)}\n\n"
+                        f"{json.dumps(result, indent=2)}",
+                    )
+                ]
+
+            elif session_id:
+                result = engine.verify_session(trace, session_id)
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Session Verification: {session_id}\n"
+                        f"Entries: {result.get('entries_verified', 0)}/{result.get('entries_total', 0)} verified\n"
+                        f"Verification Rate: {result.get('verification_rate', 0)}%\n\n"
+                        f"{json.dumps(result, indent=2)}",
+                    )
+                ]
+
+            else:
+                return [TextContent(type="text", text="Please provide either entry_id or session_id to verify.")]
+
+        elif name == "trace_git_reconcile":
+            if not VV_AVAILABLE:
+                return [TextContent(type="text", text="V&V module not available. Check installation.")]
+
+            reconciler = GitReconciler(TRACE_PATH.parent)
+
+            since = arguments.get("since", "1 week ago")
+            auto_log_missing = arguments.get("auto_log_missing", False)
+
+            result = reconciler.reconcile(trace, since, auto_log_missing)
+
+            if result.get("error"):
+                return [TextContent(type="text", text=f"Git reconciliation error: {result['error']}")]
+
+            summary = result.get("summary", {})
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Git Reconciliation Report\n"
+                    f"========================\n"
+                    f"Period: since {since}\n"
+                    f"Coverage: {summary.get('coverage_percent', 0)}%\n"
+                    f"Total commits: {summary.get('total_commits', 0)}\n"
+                    f"Tracked: {summary.get('tracked_commits', 0)}\n"
+                    f"Unlogged: {summary.get('unlogged_commits', 0)}\n"
+                    f"Human-edit commits: {summary.get('human_edit_commits', 0)}\n"
+                    f"Phantom entries: {summary.get('phantom_entries', 0)}\n\n"
+                    f"{json.dumps(result, indent=2)}",
+                )
+            ]
+
+        elif name == "trace_verify_integrity":
+            if not VV_AVAILABLE:
+                return [TextContent(type="text", text="V&V module not available. Check installation.")]
+
+            trace_dir = TRACE_PATH.parent / ".trace"
+            chain = IntegrityChain(trace_dir)
+
+            entry_id = arguments.get("entry_id")
+            rebuild = arguments.get("rebuild_chain", False)
+
+            if rebuild:
+                result = chain.rebuild_chain(trace)
+                # Update entries with integrity metadata
+                save_trace(trace)
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Chain Rebuilt\n"
+                        f"Old length: {result.get('old_chain_length', 0)}\n"
+                        f"New length: {result.get('new_chain_length', 0)}\n"
+                        f"Entries added: {result.get('entries_added', 0)}",
+                    )
+                ]
+
+            elif entry_id:
+                # Find entry and verify
+                entry = None
+                for collection in ["code_contributions", "ai_suggestions", "decisions", "learnings", "gotchas"]:
+                    for e in trace.get(collection, []):
+                        if e.get("id") == entry_id:
+                            entry = e
+                            break
+                    if entry:
+                        break
+
+                if not entry:
+                    return [TextContent(type="text", text=f"Entry {entry_id} not found")]
+
+                result = chain.verify_entry(entry, entry_id)
+                status = "VERIFIED" if result.get("verified") else "INTEGRITY ISSUE"
+                return [TextContent(type="text", text=f"Entry Integrity: {status}\n{json.dumps(result, indent=2)}")]
+
+            else:
+                # Verify full chain
+                result = chain.verify_chain(trace)
+                status = "INTACT" if result.get("verified") else "ISSUES DETECTED"
+                return [
+                    TextContent(
+                        type="text",
+                        text=f"Chain Integrity: {status}\n"
+                        f"Chain length: {result.get('chain_length', 0)}\n"
+                        f"Errors: {len(result.get('errors', []))}\n"
+                        f"Warnings: {len(result.get('warnings', []))}\n\n"
+                        f"{json.dumps(result, indent=2)}",
+                    )
+                ]
+
+        elif name == "trace_trust_report":
+            if not VV_AVAILABLE:
+                return [TextContent(type="text", text="V&V module not available. Check installation.")]
+
+            trace_dir = TRACE_PATH.parent / ".trace"
+
+            period = arguments.get("period", "30 days")
+            format_type = arguments.get("format", "markdown")
+
+            generator = ReportGenerator(trace_dir, TRACE_PATH.parent)
+            report = generator.generate_trust_report(trace, period, format_type)
+
+            return [TextContent(type="text", text=report)]
+
+        elif name == "trace_analyze_text":
+            if not VV_AVAILABLE:
+                return [TextContent(type="text", text="V&V module not available. Check installation.")]
+
+            file_path = arguments.get("file_path")
+            include_authorship = arguments.get("include_authorship", True)
+
+            if not file_path:
+                return [TextContent(type="text", text="file_path is required")]
+
+            analyzer = TextAnalyzer()
+
+            # Make path absolute if needed
+            file_path = Path(file_path)
+            if not file_path.is_absolute():
+                file_path = TRACE_PATH.parent / file_path
+
+            result = analyzer.analyze_file(file_path)
+
+            if "error" in result:
+                return [TextContent(type="text", text=f"Analysis error: {result['error']}")]
+
+            if include_authorship:
+                contributions = trace.get("code_contributions", [])
+                result["sections"] = analyzer.get_section_authorship(result["sections"], contributions, str(file_path))
+
+            return [
+                TextContent(
+                    type="text",
+                    text=f"Text Analysis: {file_path.name}\n"
+                    f"Type: {result.get('file_type', 'unknown')}\n"
+                    f"Sections: {result.get('total_sections', 0)}\n"
+                    f"Words: {result.get('total_words', 0)}\n"
+                    f"Lines: {result.get('total_lines', 0)}\n\n"
+                    f"{json.dumps(result, indent=2)}",
+                )
+            ]
+
+        elif name == "trace_list_snapshots":
+            if not VV_AVAILABLE:
+                return [TextContent(type="text", text="V&V module not available. Check installation.")]
+
+            trace_dir = TRACE_PATH.parent / ".trace"
+            snapshot_manager = SnapshotManager(trace_dir)
+
+            session_id = arguments.get("session_id")
+            trigger = arguments.get("trigger")
+            limit = arguments.get("limit", 50)
+
+            snapshots = snapshot_manager.list_snapshots(session_id=session_id, trigger=trigger, limit=limit)
+
+            if not snapshots:
+                return [TextContent(type="text", text="No snapshots found matching criteria.")]
+
+            return [
+                TextContent(
+                    type="text", text=f"Found {len(snapshots)} snapshot(s):\n\n{json.dumps(snapshots, indent=2)}"
+                )
+            ]
+
         else:
             return [TextContent(type="text", text=f"Unknown tool: {name}")]
 
@@ -2766,93 +3727,93 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
 def generate_summary_report(trace: dict, metrics: dict) -> str:
     """Generate a summary report."""
-    code_metrics = metrics.get('code_metrics', {})
-    content_type_counts = code_metrics.get('by_content_type', {})
+    code_metrics = metrics.get("code_metrics", {})
+    content_type_counts = code_metrics.get("by_content_type", {})
 
     # Build word section if text contributions exist
     word_section = ""
-    if content_type_counts.get('text', 0) > 0:
-        total_words = code_metrics.get('total_words', {})
+    if content_type_counts.get("text", 0) > 0:
+        total_words = code_metrics.get("total_words", {})
         word_section = f"""
 ## Text Authorship (Words)
-- Human-directed, AI-executed: {total_words.get('human_directed_ai_executed', 0)} words
-- Human-directed, Human-executed: {total_words.get('human_directed_human_executed', 0)} words
-- AI-suggested, Accepted: {total_words.get('ai_suggested_accepted', 0)} words
-- AI-suggested, Modified: {total_words.get('ai_suggested_modified', 0)} words
-- Human Manual Edit: {total_words.get('human_manual_edit', 0)} words
-- Collaborative: {total_words.get('collaborative', 0)} words
+- Human-directed, AI-executed: {total_words.get("human_directed_ai_executed", 0)} words
+- Human-directed, Human-executed: {total_words.get("human_directed_human_executed", 0)} words
+- AI-suggested, Accepted: {total_words.get("ai_suggested_accepted", 0)} words
+- AI-suggested, Modified: {total_words.get("ai_suggested_modified", 0)} words
+- Human Manual Edit: {total_words.get("human_manual_edit", 0)} words
+- Collaborative: {total_words.get("collaborative", 0)} words
 """
 
     # Build row section if data contributions exist
     row_section = ""
-    if content_type_counts.get('data', 0) > 0:
-        total_rows = code_metrics.get('total_rows', {})
+    if content_type_counts.get("data", 0) > 0:
+        total_rows = code_metrics.get("total_rows", {})
         row_section = f"""
 ## Data Authorship (Rows)
-- Human-directed, AI-executed: {total_rows.get('human_directed_ai_executed', 0)} rows
-- Human-directed, Human-executed: {total_rows.get('human_directed_human_executed', 0)} rows
-- AI-suggested, Accepted: {total_rows.get('ai_suggested_accepted', 0)} rows
-- AI-suggested, Modified: {total_rows.get('ai_suggested_modified', 0)} rows
-- Human Manual Edit: {total_rows.get('human_manual_edit', 0)} rows
-- Collaborative: {total_rows.get('collaborative', 0)} rows
+- Human-directed, AI-executed: {total_rows.get("human_directed_ai_executed", 0)} rows
+- Human-directed, Human-executed: {total_rows.get("human_directed_human_executed", 0)} rows
+- AI-suggested, Accepted: {total_rows.get("ai_suggested_accepted", 0)} rows
+- AI-suggested, Modified: {total_rows.get("ai_suggested_modified", 0)} rows
+- Human Manual Edit: {total_rows.get("human_manual_edit", 0)} rows
+- Collaborative: {total_rows.get("collaborative", 0)} rows
 """
 
-    return f"""# TRACE Report: {trace['metadata'].get('project', 'Unknown Project')}
+    return f"""# TRACE Report: {trace["metadata"].get("project", "Unknown Project")}
 Generated: {datetime.now().isoformat()}
-Schema Version: {trace.get('schema_version', 'unknown')}
+Schema Version: {trace.get("schema_version", "unknown")}
 
 ## Overview
-- Sessions: {len(trace.get('sessions', []))}
-- Total AI Suggestions: {metrics['suggestion_metrics'].get('total_suggestions', 0)}
-- Code Contributions: {len(trace.get('code_contributions', []))}
-- Content Types: Code ({content_type_counts.get('code', 0)}), Text ({content_type_counts.get('text', 0)}), Data ({content_type_counts.get('data', 0)})
+- Sessions: {len(trace.get("sessions", []))}
+- Total AI Suggestions: {metrics["suggestion_metrics"].get("total_suggestions", 0)}
+- Code Contributions: {len(trace.get("code_contributions", []))}
+- Content Types: Code ({content_type_counts.get("code", 0)}), Text ({content_type_counts.get("text", 0)}), Data ({content_type_counts.get("data", 0)})
 
 ## Code/Content Authorship (Lines - v2.0 Model)
-- Human-directed, AI-executed: {code_metrics['total_lines'].get('human_directed_ai_executed', 0)} lines
-- Human-directed, Human-executed: {code_metrics['total_lines'].get('human_directed_human_executed', 0)} lines
-- AI-suggested, Accepted: {code_metrics['total_lines'].get('ai_suggested_accepted', 0)} lines
-- AI-suggested, Modified: {code_metrics['total_lines'].get('ai_suggested_modified', 0)} lines
-- Human Manual Edit: {code_metrics['total_lines'].get('human_manual_edit', 0)} lines
-- Collaborative: {code_metrics['total_lines'].get('collaborative', 0)} lines
+- Human-directed, AI-executed: {code_metrics["total_lines"].get("human_directed_ai_executed", 0)} lines
+- Human-directed, Human-executed: {code_metrics["total_lines"].get("human_directed_human_executed", 0)} lines
+- AI-suggested, Accepted: {code_metrics["total_lines"].get("ai_suggested_accepted", 0)} lines
+- AI-suggested, Modified: {code_metrics["total_lines"].get("ai_suggested_modified", 0)} lines
+- Human Manual Edit: {code_metrics["total_lines"].get("human_manual_edit", 0)} lines
+- Collaborative: {code_metrics["total_lines"].get("collaborative", 0)} lines
 {word_section}{row_section}
 ## AI Suggestion Metrics
-- Total suggestions: {metrics['suggestion_metrics'].get('total_suggestions', 0)}
-- Accepted: {metrics['suggestion_metrics'].get('accepted_count', 0)}
-- Rejected: {metrics['suggestion_metrics'].get('rejected_count', 0)}
-- Modified: {metrics['suggestion_metrics'].get('modified_count', 0)}
-- Acceptance rate: {metrics['suggestion_metrics'].get('acceptance_rate', 'N/A')}
-- Lines proposed: {metrics['suggestion_metrics'].get('lines_proposed_total', 0)}
-- Lines accepted as-is: {metrics['suggestion_metrics'].get('lines_accepted_as_is', 0)}
-- Lines modified by human: {metrics['suggestion_metrics'].get('lines_modified_by_human', 0)}
+- Total suggestions: {metrics["suggestion_metrics"].get("total_suggestions", 0)}
+- Accepted: {metrics["suggestion_metrics"].get("accepted_count", 0)}
+- Rejected: {metrics["suggestion_metrics"].get("rejected_count", 0)}
+- Modified: {metrics["suggestion_metrics"].get("modified_count", 0)}
+- Acceptance rate: {metrics["suggestion_metrics"].get("acceptance_rate", "N/A")}
+- Lines proposed: {metrics["suggestion_metrics"].get("lines_proposed_total", 0)}
+- Lines accepted as-is: {metrics["suggestion_metrics"].get("lines_accepted_as_is", 0)}
+- Lines modified by human: {metrics["suggestion_metrics"].get("lines_modified_by_human", 0)}
 
 ## Git Integration
-- Manual edit commits detected: {code_metrics['git_integration'].get('manual_edit_commits_detected', 0)}
-- Manual edit lines added: {code_metrics['git_integration'].get('manual_edit_lines_added', 0)}
-- Manual edit lines removed: {code_metrics['git_integration'].get('manual_edit_lines_removed', 0)}
+- Manual edit commits detected: {code_metrics["git_integration"].get("manual_edit_commits_detected", 0)}
+- Manual edit lines added: {code_metrics["git_integration"].get("manual_edit_lines_added", 0)}
+- Manual edit lines removed: {code_metrics["git_integration"].get("manual_edit_lines_removed", 0)}
 
 ## Error Metrics
-- AI errors caught by human: {metrics['error_metrics'].get('ai_errors_caught_by_human', 0)}
-- Human errors caught by AI: {metrics['error_metrics'].get('human_errors_caught_by_ai', 0)}
-- Total errors: {metrics['error_metrics'].get('total_errors', 0)}
+- AI errors caught by human: {metrics["error_metrics"].get("ai_errors_caught_by_human", 0)}
+- Human errors caught by AI: {metrics["error_metrics"].get("human_errors_caught_by_ai", 0)}
+- Total errors: {metrics["error_metrics"].get("total_errors", 0)}
 
 ## Intervention Metrics
-- Total interventions: {metrics['intervention_metrics'].get('total_interventions', 0)}
-- Corrections: {metrics['intervention_metrics'].get('corrections', 0)}
-- Overrides: {metrics['intervention_metrics'].get('overrides', 0)}
-- Rejections: {metrics['intervention_metrics'].get('rejections', 0)}
+- Total interventions: {metrics["intervention_metrics"].get("total_interventions", 0)}
+- Corrections: {metrics["intervention_metrics"].get("corrections", 0)}
+- Overrides: {metrics["intervention_metrics"].get("overrides", 0)}
+- Rejections: {metrics["intervention_metrics"].get("rejections", 0)}
 """
 
 
 def generate_markdown_report(trace: dict) -> str:
     """Generate a full markdown report for publication."""
     metrics = compute_metrics(trace)
-    code_metrics = metrics.get('code_metrics', {})
-    content_type_counts = code_metrics.get('by_content_type', {})
+    code_metrics = metrics.get("code_metrics", {})
+    content_type_counts = code_metrics.get("by_content_type", {})
 
     # Build word section if text contributions exist
     word_section = ""
-    if content_type_counts.get('text', 0) > 0:
-        total_words = code_metrics.get('total_words', {})
+    if content_type_counts.get("text", 0) > 0:
+        total_words = code_metrics.get("total_words", {})
         word_section = f"""
 ---
 
@@ -2862,24 +3823,24 @@ For text content (papers, documentation), TRACE also tracks word-level metrics.
 
 | Category | Words |
 |----------|-------|
-| Human-directed, AI-executed | {total_words.get('human_directed_ai_executed', 0)} |
-| Human-directed, Human-executed | {total_words.get('human_directed_human_executed', 0)} |
-| AI-suggested, Accepted as-is | {total_words.get('ai_suggested_accepted', 0)} |
-| AI-suggested, Modified by human | {total_words.get('ai_suggested_modified', 0)} |
-| Human manual edits | {total_words.get('human_manual_edit', 0)} |
-| Collaborative | {total_words.get('collaborative', 0)} |
+| Human-directed, AI-executed | {total_words.get("human_directed_ai_executed", 0)} |
+| Human-directed, Human-executed | {total_words.get("human_directed_human_executed", 0)} |
+| AI-suggested, Accepted as-is | {total_words.get("ai_suggested_accepted", 0)} |
+| AI-suggested, Modified by human | {total_words.get("ai_suggested_modified", 0)} |
+| Human manual edits | {total_words.get("human_manual_edit", 0)} |
+| Collaborative | {total_words.get("collaborative", 0)} |
 
 ### Word Source Percentages
 
-- Human direction: {code_metrics.get('by_source_words', {}).get('human_direction_percentage', 'N/A')}%
-- AI suggestion: {code_metrics.get('by_source_words', {}).get('ai_suggestion_percentage', 'N/A')}%
-- Human manual: {code_metrics.get('by_source_words', {}).get('human_manual_percentage', 'N/A')}%
+- Human direction: {code_metrics.get("by_source_words", {}).get("human_direction_percentage", "N/A")}%
+- AI suggestion: {code_metrics.get("by_source_words", {}).get("ai_suggestion_percentage", "N/A")}%
+- Human manual: {code_metrics.get("by_source_words", {}).get("human_manual_percentage", "N/A")}%
 """
 
     # Build row section if data contributions exist
     row_section = ""
-    if content_type_counts.get('data', 0) > 0:
-        total_rows = code_metrics.get('total_rows', {})
+    if content_type_counts.get("data", 0) > 0:
+        total_rows = code_metrics.get("total_rows", {})
         row_section = f"""
 ---
 
@@ -2889,24 +3850,24 @@ For data content (datasets, CSV files), TRACE tracks row-level metrics.
 
 | Category | Rows |
 |----------|------|
-| Human-directed, AI-executed | {total_rows.get('human_directed_ai_executed', 0)} |
-| Human-directed, Human-executed | {total_rows.get('human_directed_human_executed', 0)} |
-| AI-suggested, Accepted as-is | {total_rows.get('ai_suggested_accepted', 0)} |
-| AI-suggested, Modified by human | {total_rows.get('ai_suggested_modified', 0)} |
-| Human manual edits | {total_rows.get('human_manual_edit', 0)} |
-| Collaborative | {total_rows.get('collaborative', 0)} |
+| Human-directed, AI-executed | {total_rows.get("human_directed_ai_executed", 0)} |
+| Human-directed, Human-executed | {total_rows.get("human_directed_human_executed", 0)} |
+| AI-suggested, Accepted as-is | {total_rows.get("ai_suggested_accepted", 0)} |
+| AI-suggested, Modified by human | {total_rows.get("ai_suggested_modified", 0)} |
+| Human manual edits | {total_rows.get("human_manual_edit", 0)} |
+| Collaborative | {total_rows.get("collaborative", 0)} |
 
 ### Row Source Percentages
 
-- Human direction: {code_metrics.get('by_source_rows', {}).get('human_direction_percentage', 'N/A')}%
-- AI suggestion: {code_metrics.get('by_source_rows', {}).get('ai_suggestion_percentage', 'N/A')}%
-- Human manual: {code_metrics.get('by_source_rows', {}).get('human_manual_percentage', 'N/A')}%
+- Human direction: {code_metrics.get("by_source_rows", {}).get("human_direction_percentage", "N/A")}%
+- AI suggestion: {code_metrics.get("by_source_rows", {}).get("ai_suggestion_percentage", "N/A")}%
+- Human manual: {code_metrics.get("by_source_rows", {}).get("human_manual_percentage", "N/A")}%
 """
 
-    report = f"""# TRACE Report: {trace['metadata'].get('project', 'Unknown Project')}
+    report = f"""# TRACE Report: {trace["metadata"].get("project", "Unknown Project")}
 
 **Generated**: {datetime.now().isoformat()}
-**Schema Version**: {trace.get('schema_version', 'unknown')}
+**Schema Version**: {trace.get("schema_version", "unknown")}
 
 ---
 
@@ -2919,18 +3880,18 @@ This report documents the AI-human collaboration for this project using the TRAC
 
 | Metric | Value |
 |--------|-------|
-| Total Sessions | {len(trace.get('sessions', []))} |
-| Total Contributions | {len(trace.get('code_contributions', []))} |
-| Code Contributions | {content_type_counts.get('code', 0)} |
-| Text Contributions | {content_type_counts.get('text', 0)} |
-| Data Contributions | {content_type_counts.get('data', 0)} |
-| Human-Directed Lines (AI executed) | {code_metrics['total_lines'].get('human_directed_ai_executed', 0)} |
-| AI-Suggested Lines (Accepted) | {code_metrics['total_lines'].get('ai_suggested_accepted', 0)} |
-| AI-Suggested Lines (Modified) | {code_metrics['total_lines'].get('ai_suggested_modified', 0)} |
-| Human Manual Edit Lines | {code_metrics['total_lines'].get('human_manual_edit', 0)} |
-| Total AI Suggestions | {metrics['suggestion_metrics'].get('total_suggestions', 0)} |
-| AI Suggestion Acceptance Rate | {metrics['suggestion_metrics'].get('acceptance_rate', 'N/A')} |
-| Human Interventions | {metrics['intervention_metrics'].get('total_interventions', 0)} |
+| Total Sessions | {len(trace.get("sessions", []))} |
+| Total Contributions | {len(trace.get("code_contributions", []))} |
+| Code Contributions | {content_type_counts.get("code", 0)} |
+| Text Contributions | {content_type_counts.get("text", 0)} |
+| Data Contributions | {content_type_counts.get("data", 0)} |
+| Human-Directed Lines (AI executed) | {code_metrics["total_lines"].get("human_directed_ai_executed", 0)} |
+| AI-Suggested Lines (Accepted) | {code_metrics["total_lines"].get("ai_suggested_accepted", 0)} |
+| AI-Suggested Lines (Modified) | {code_metrics["total_lines"].get("ai_suggested_modified", 0)} |
+| Human Manual Edit Lines | {code_metrics["total_lines"].get("human_manual_edit", 0)} |
+| Total AI Suggestions | {metrics["suggestion_metrics"].get("total_suggestions", 0)} |
+| AI Suggestion Acceptance Rate | {metrics["suggestion_metrics"].get("acceptance_rate", "N/A")} |
+| Human Interventions | {metrics["intervention_metrics"].get("total_interventions", 0)} |
 
 ---
 
@@ -2940,15 +3901,15 @@ This report documents the AI-human collaboration for this project using the TRAC
 
 | Status | Count | Lines |
 |--------|-------|-------|
-| Accepted | {metrics['suggestion_metrics'].get('accepted_count', 0)} | {metrics['suggestion_metrics'].get('lines_accepted_as_is', 0)} |
-| Modified | {metrics['suggestion_metrics'].get('modified_count', 0)} | {metrics['suggestion_metrics'].get('lines_modified_by_human', 0)} |
-| Rejected | {metrics['suggestion_metrics'].get('rejected_count', 0)} | {metrics['suggestion_metrics'].get('lines_rejected', 0)} |
+| Accepted | {metrics["suggestion_metrics"].get("accepted_count", 0)} | {metrics["suggestion_metrics"].get("lines_accepted_as_is", 0)} |
+| Modified | {metrics["suggestion_metrics"].get("modified_count", 0)} | {metrics["suggestion_metrics"].get("lines_modified_by_human", 0)} |
+| Rejected | {metrics["suggestion_metrics"].get("rejected_count", 0)} | {metrics["suggestion_metrics"].get("lines_rejected", 0)} |
 
 ### Acceptance Rates
 
-- **Overall acceptance rate**: {metrics['suggestion_metrics'].get('acceptance_rate', 'N/A')}
-- **Modification rate**: {metrics['suggestion_metrics'].get('modification_rate', 'N/A')}
-- **Rejection rate**: {metrics['suggestion_metrics'].get('rejection_rate', 'N/A')}
+- **Overall acceptance rate**: {metrics["suggestion_metrics"].get("acceptance_rate", "N/A")}
+- **Modification rate**: {metrics["suggestion_metrics"].get("modification_rate", "N/A")}
+- **Rejection rate**: {metrics["suggestion_metrics"].get("rejection_rate", "N/A")}
 
 ---
 
@@ -2964,18 +3925,18 @@ The v2.0 authorship model distinguishes between:
 
 | Category | Lines |
 |----------|-------|
-| Human-directed, AI-executed | {code_metrics['total_lines'].get('human_directed_ai_executed', 0)} |
-| Human-directed, Human-executed | {code_metrics['total_lines'].get('human_directed_human_executed', 0)} |
-| AI-suggested, Accepted as-is | {code_metrics['total_lines'].get('ai_suggested_accepted', 0)} |
-| AI-suggested, Modified by human | {code_metrics['total_lines'].get('ai_suggested_modified', 0)} |
-| Human manual edits | {code_metrics['total_lines'].get('human_manual_edit', 0)} |
-| Collaborative | {code_metrics['total_lines'].get('collaborative', 0)} |
+| Human-directed, AI-executed | {code_metrics["total_lines"].get("human_directed_ai_executed", 0)} |
+| Human-directed, Human-executed | {code_metrics["total_lines"].get("human_directed_human_executed", 0)} |
+| AI-suggested, Accepted as-is | {code_metrics["total_lines"].get("ai_suggested_accepted", 0)} |
+| AI-suggested, Modified by human | {code_metrics["total_lines"].get("ai_suggested_modified", 0)} |
+| Human manual edits | {code_metrics["total_lines"].get("human_manual_edit", 0)} |
+| Collaborative | {code_metrics["total_lines"].get("collaborative", 0)} |
 
 ### Line Source Percentages
 
-- Human direction: {code_metrics['by_source'].get('human_direction_percentage', 'N/A')}%
-- AI suggestion: {code_metrics['by_source'].get('ai_suggestion_percentage', 'N/A')}%
-- Human manual: {code_metrics['by_source'].get('human_manual_percentage', 'N/A')}%
+- Human direction: {code_metrics["by_source"].get("human_direction_percentage", "N/A")}%
+- AI suggestion: {code_metrics["by_source"].get("ai_suggestion_percentage", "N/A")}%
+- Human manual: {code_metrics["by_source"].get("human_manual_percentage", "N/A")}%
 {word_section}{row_section}
 ---
 
@@ -2985,9 +3946,9 @@ Commits with [HUMAN-EDIT] tag are automatically detected.
 
 | Metric | Value |
 |--------|-------|
-| Manual edit commits | {code_metrics['git_integration'].get('manual_edit_commits_detected', 0)} |
-| Lines added | {code_metrics['git_integration'].get('manual_edit_lines_added', 0)} |
-| Lines removed | {code_metrics['git_integration'].get('manual_edit_lines_removed', 0)} |
+| Manual edit commits | {code_metrics["git_integration"].get("manual_edit_commits_detected", 0)} |
+| Lines added | {code_metrics["git_integration"].get("manual_edit_lines_added", 0)} |
+| Lines removed | {code_metrics["git_integration"].get("manual_edit_lines_removed", 0)} |
 
 ---
 
@@ -3013,18 +3974,16 @@ For more information about TRACE, see the protocol documentation.
 # Main Entry Point
 # ============================================================
 
+
 async def main():
     """Run the MCP server."""
     import sys
-    print(f"Starting TRACE MCP Server v2.0", file=sys.stderr)
+
+    print("Starting TRACE MCP Server v2.0", file=sys.stderr)
     print(f"TRACE file path: {TRACE_PATH}", file=sys.stderr)
 
     async with stdio_server() as (read_stream, write_stream):
-        await server.run(
-            read_stream,
-            write_stream,
-            server.create_initialization_options()
-        )
+        await server.run(read_stream, write_stream, server.create_initialization_options())
 
 
 if __name__ == "__main__":

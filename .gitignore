@@ -1,8 +1,16 @@
 # macOS
 .DS_Store
+
 .AppleDouble
 .LSOverride
 ._*
+
+# Some local files for dev 
+lit_review/
+ROADMAP.md
+TRACE_claude_code_handoff_v2.md
+TRACE_v3_UPDATES.md
+trace_implementation_plan_v2.md
 
 # Python
 __pycache__/

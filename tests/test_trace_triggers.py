@@ -14,48 +14,48 @@ Run: pytest tests/test_trace_triggers.py -v
 """
 
 import sys
-import json
-from pathlib import Path
 from datetime import datetime, timedelta
+from pathlib import Path
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "mcp_server"))
 
 from server import (
-    # Trigger functions
-    detect_event_type,
-    calculate_text_similarity,
-    find_similar_entries,
-    generate_suggested_fields,
-    knowledge_check,
     TRIGGER_PATTERNS,
     # Checkpoint functions
     analyze_session_for_checkpoint,
-    refresh_context_for_topics,
-    consolidate_session_learnings,
+    calculate_text_similarity,
     compute_knowledge_metrics,
+    consolidate_session_learnings,
     # Utilities
     create_default_trace,
-    generate_id,
+    # Trigger functions
+    detect_event_type,
+    find_similar_entries,
+    generate_suggested_fields,
+    knowledge_check,
+    refresh_context_for_topics,
 )
-
 
 # ============================================================
 # Test Fixtures
 # ============================================================
+
 
 def create_test_trace():
     """Create a test TRACE structure with sample data."""
     trace = create_default_trace()
 
     # Add a session
-    trace["sessions"].append({
-        "id": "S001",
-        "started": (datetime.now() - timedelta(minutes=45)).isoformat(),
-        "ended": None,
-        "purpose": "Test session",
-        "scientific_stage": "analysis"
-    })
+    trace["sessions"].append(
+        {
+            "id": "S001",
+            "started": (datetime.now() - timedelta(minutes=45)).isoformat(),
+            "ended": None,
+            "purpose": "Test session",
+            "scientific_stage": "analysis",
+        }
+    )
 
     # Add some learnings
     trace["learnings"] = [
@@ -66,7 +66,7 @@ def create_test_trace():
             "learning": "pytest fixtures can be scoped to session level for expensive setup",
             "evidence": "Reduced test time by 50%",
             "tags": ["testing", "pytest", "performance"],
-            "discovered_by": "collaborative"
+            "discovered_by": "collaborative",
         },
         {
             "id": "L002",
@@ -75,8 +75,8 @@ def create_test_trace():
             "learning": "async functions need special handling in pytest",
             "evidence": "Tests were silently passing without running",
             "tags": ["testing", "pytest", "async"],
-            "discovered_by": "ai_suggested"
-        }
+            "discovered_by": "ai_suggested",
+        },
     ]
 
     # Add some gotchas
@@ -89,7 +89,7 @@ def create_test_trace():
             "solution": "Add asyncio_mode = auto to pytest.ini",
             "severity": "high",
             "tags": ["pytest", "async", "testing"],
-            "discovered_by": "human"
+            "discovered_by": "human",
         },
         {
             "id": "G002",
@@ -98,8 +98,8 @@ def create_test_trace():
             "solution": "Use fillna() before merge or handle NaN explicitly",
             "severity": "high",
             "tags": ["pandas", "data", "gotcha"],
-            "discovered_by": "collaborative"
-        }
+            "discovered_by": "collaborative",
+        },
     ]
 
     # Add some decisions
@@ -112,7 +112,7 @@ def create_test_trace():
             "rationale": "Better fixture support and more readable assertions",
             "alternatives_considered": "unittest, nose2",
             "tags": ["testing", "architecture"],
-            "proposed_by": "human"
+            "proposed_by": "human",
         }
     ]
 
@@ -124,7 +124,7 @@ def create_test_trace():
             "timestamp": datetime.now().isoformat(),
             "idea": "Could add caching to the similarity calculation for performance",
             "idea_type": "optimization",
-            "source": "ai_suggested"
+            "source": "ai_suggested",
         }
     ]
 
@@ -137,7 +137,7 @@ def create_test_trace():
             "file_path": "tests/test_example.py",
             "contribution_type": "creation",
             "description": "Added test file for example module",
-            "direction_source": "human_directed"
+            "direction_source": "human_directed",
         }
     ]
 
@@ -147,13 +147,8 @@ def create_test_trace():
             "id": "SUG001",
             "session_id": "S001",
             "timestamp": datetime.now().isoformat(),
-            "suggestion": {
-                "type": "optimization",
-                "description": "Add memoization to recursive function"
-            },
-            "outcome": {
-                "status": "pending"
-            }
+            "suggestion": {"type": "optimization", "description": "Add memoization to recursive function"},
+            "outcome": {"status": "pending"},
         }
     ]
 
@@ -163,6 +158,7 @@ def create_test_trace():
 # ============================================================
 # Tests: Trigger Pattern Detection
 # ============================================================
+
 
 class TestTriggerPatterns:
     """Test trigger pattern detection."""
@@ -286,6 +282,7 @@ class TestTriggerPatterns:
 # Tests: Text Similarity
 # ============================================================
 
+
 class TestTextSimilarity:
     """Test text similarity calculation."""
 
@@ -319,6 +316,7 @@ class TestTextSimilarity:
 # ============================================================
 # Tests: Find Similar Entries
 # ============================================================
+
 
 class TestFindSimilarEntries:
     """Test finding similar existing entries."""
@@ -358,6 +356,7 @@ class TestFindSimilarEntries:
 # Tests: Knowledge Check
 # ============================================================
 
+
 class TestKnowledgeCheck:
     """Test the main knowledge_check function."""
 
@@ -368,7 +367,7 @@ class TestKnowledgeCheck:
 
         result = knowledge_check(trace, context, "gotcha", True)
 
-        assert result["should_log"] == True
+        assert result["should_log"] is True
         assert "gotcha" in result["recommended_types"]
 
     def test_should_not_log_duplicate(self):
@@ -382,7 +381,7 @@ class TestKnowledgeCheck:
         assert len(result["similar_entries"]) > 0
         # High similarity should prevent logging
         if result["similar_entries"][0]["similarity"] >= 0.7:
-            assert result["should_log"] == False
+            assert result["should_log"] is False
 
     def test_auto_detect_type(self):
         """Should auto-detect event type when not specified."""
@@ -408,6 +407,7 @@ class TestKnowledgeCheck:
 # ============================================================
 # Tests: Suggested Fields Generation
 # ============================================================
+
 
 class TestSuggestedFields:
     """Test suggested field generation."""
@@ -460,6 +460,7 @@ class TestSuggestedFields:
 # Tests: Checkpoint Analysis
 # ============================================================
 
+
 class TestCheckpointAnalysis:
     """Test session checkpoint analysis."""
 
@@ -506,6 +507,7 @@ class TestCheckpointAnalysis:
 # Tests: Context Refresh
 # ============================================================
 
+
 class TestContextRefresh:
     """Test context refresh functionality."""
 
@@ -524,18 +526,14 @@ class TestContextRefresh:
 
         result = refresh_context_for_topics(trace, ["testing"], max_items=1)
 
-        for category, items in result.items():
+        for _category, items in result.items():
             assert len(items) <= 1
 
     def test_refresh_filters_by_category(self):
         """Context refresh filters by category."""
         trace = create_test_trace()
 
-        result = refresh_context_for_topics(
-            trace,
-            ["testing"],
-            categories=["gotchas"]
-        )
+        result = refresh_context_for_topics(trace, ["testing"], categories=["gotchas"])
 
         assert "gotchas" in result
         assert "decisions" not in result
@@ -544,6 +542,7 @@ class TestContextRefresh:
 # ============================================================
 # Tests: Learning Consolidation
 # ============================================================
+
 
 class TestLearningConsolidation:
     """Test learning consolidation."""
@@ -580,6 +579,7 @@ class TestLearningConsolidation:
 # ============================================================
 # Tests: Knowledge Metrics
 # ============================================================
+
 
 class TestKnowledgeMetrics:
     """Test knowledge metrics computation."""
@@ -626,13 +626,13 @@ class TestKnowledgeMetrics:
 # Tests: Trigger Patterns Configuration
 # ============================================================
 
+
 class TestTriggerPatternsConfig:
     """Test trigger patterns configuration."""
 
     def test_all_types_have_patterns(self):
         """All event types have trigger patterns defined."""
-        expected_types = ["gotcha", "decision", "learning", "idea",
-                         "intervention", "code", "error"]
+        expected_types = ["gotcha", "decision", "learning", "idea", "intervention", "code", "error"]
 
         for event_type in expected_types:
             assert event_type in TRIGGER_PATTERNS
@@ -650,6 +650,7 @@ class TestTriggerPatternsConfig:
 # ============================================================
 # Integration Tests
 # ============================================================
+
 
 class TestIntegration:
     """Integration tests for the full workflow."""
@@ -669,7 +670,7 @@ class TestIntegration:
         result = knowledge_check(trace, context, check_duplicates=True)
 
         # 3. Should recommend logging
-        assert result["should_log"] == True
+        assert result["should_log"] is True
         assert "gotcha" in result["recommended_types"]
 
         # 4. Should have suggested fields
@@ -698,4 +699,5 @@ class TestIntegration:
 
 if __name__ == "__main__":
     import pytest
+
     pytest.main([__file__, "-v"])

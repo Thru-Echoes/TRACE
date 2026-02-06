@@ -1,0 +1,79 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "trace-mcp"
+version = "0.1.0"
+description = "TRACE: Transparent Recording of AI-assisted Collaboration Experiments — MCP audit protocol for scientific workflows"
+requires-python = ">=3.11"
+license = "Apache-2.0"
+dependencies = [
+    "mcp>=1.0.0",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.4",
+    "pyright>=1.1.350",
+]
+
+[project.scripts]
+trace-mcp = "trace_mcp.server:main"
+trace-mcp-init = "trace_mcp.init_project:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/trace_mcp"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["src"]
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "B",
+    "I",
+    "UP",
+]
+ignore = [
+    "E501",
+    "B008",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["trace_mcp"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-v --tb=short"
+asyncio_mode = "auto"
+
+[tool.pyright]
+include = ["src"]
+exclude = ["tests", "**/__pycache__"]
+pythonVersion = "3.11"
+typeCheckingMode = "basic"
+reportMissingImports = true
+reportMissingTypeStubs = false
+
+[tool.coverage.run]
+source = ["trace_mcp"]
+omit = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+]

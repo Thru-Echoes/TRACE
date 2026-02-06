@@ -1,224 +1,149 @@
-# TRACE - Transparent Research AI Collaboration Environment
+# TRACE
 
-> A protocol for documenting AI-human collaboration in scientific research
+**Transparent Recording of AI-assisted Collaboration Experiments**
 
-[![License: CC BY 4.0](https://img.shields.io/badge/License-CC%20BY%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by/4.0/)
-[![Protocol Version](https://img.shields.io/badge/Protocol-v1.0-blue.svg)]()
+TRACE is an MCP server that provides a standardized audit trail for AI-assisted research workflows. It records tool calls, decisions, annotations, and actor attribution — who proposed what, who accepted or revised it, and why.
 
----
-
-## Overview
-
-**TRACE** (Transparent Research AI Collaboration Environment) is a protocol and toolset for systematically documenting AI contributions to research. As AI assistants become integral to scientific workflows, TRACE provides the infrastructure for:
-
-- **Attribution**: Track who contributed what (AI vs. human)
-- **Reproducibility**: Document AI-assisted methods for replication
-- **Accountability**: Ensure appropriate human oversight
-- **Transparency**: Meet disclosure requirements for publication
-
----
-
-## Key Features
-
-| Feature | What it tracks | Why it matters |
-|---------|---------------|----------------|
-| **Code Authorship** | Lines written/improved by AI vs. human | Attribution & reproducibility |
-| **Idea Provenance** | Origin of ideas (AI/human/collaborative) | Intellectual contribution credit |
-| **Error Attribution** | Who made and who caught errors | Quality assurance metrics |
-| **Interventions** | Human modifications to AI output | Oversight documentation |
-| **Sessions** | Work periods with AI assistance | Time tracking & workflow analysis |
-| **Automatic Metrics** | Computed statistics | Publication-ready disclosures |
-
----
+TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy or intercept calls — the AI client explicitly logs events to TRACE, creating a complete, human-readable provenance record.
 
 ## Quick Start
 
-### 1. Copy to your project
+### Install
 
 ```bash
-cp -r TRACE_template/* your_project/
+pip install -e .
 ```
 
-### 2. Install dependencies
+### Configure for Claude Code
 
-```bash
-pip install mcp anthropic
-```
+Add to your project's `.mcp.json`:
 
-### 3. Start using TRACE
-
-With Claude Code:
-```
-> Start a TRACE session for implementing the data analysis
-> ... do your work ...
-> End the current TRACE session
-> Show me the TRACE metrics
-```
-
----
-
-## Directory Structure
-
-```
-TRACE_template/
-├── README.md                 # This file
-├── CLAUDE.md                 # Instructions for Claude Code
-├── USER_GUIDE.md             # Detailed user guide
-├── TRACE_PROTOCOL.md         # Formal protocol specification
-├── trace.json                # Template TRACE data file
-├── .mcp.json                 # MCP server configuration
-├── .claude/
-│   └── settings.local.json   # Claude Code permissions
-├── mcp_server/
-│   ├── server.py             # TRACE MCP server
-│   └── analysis.py           # Analysis utilities
-└── examples/
-    └── example_trace.json    # Example with sample data
-```
-
----
-
-## Core Concepts
-
-### Sessions
-Bounded work periods with AI assistance. Track purpose, scientific stage, duration, and reflection.
-
-### Code Contributions
-File-level records with line-by-line authorship:
-- `ai_authored_lines`: Written by AI
-- `human_authored_lines`: Written by human
-- `human_improved_ai_lines`: AI code modified by human
-- `ai_improved_lines`: Human code improved by AI
-
-### Ideas
-Every significant idea with origin tracking:
-- `ai_suggested`: AI proposed it
-- `human`: Human proposed it
-- `collaborative`: Emerged together
-
-### Errors
-Attribution for both creation and detection:
-- Who made the error (AI or human)
-- Who caught the error (AI, human, or automated test)
-
-### Interventions
-Human modifications to AI output:
-- Corrections (fixing errors)
-- Overrides (changing valid suggestions)
-- Rejections (not using suggestions)
-- Refinements (improving suggestions)
-
----
-
-## Computed Metrics
-
-TRACE automatically computes:
-
-| Category | Metrics |
-|----------|---------|
-| **Code** | AI authorship %, acceptance rate, modification rate |
-| **Ideas** | AI contribution %, acceptance rate, rejection rate |
-| **Errors** | AI error rate, human catch rate, AI catch rate |
-| **Interventions** | Total count, rate, breakdown by type |
-| **Sessions** | Count, total time, average duration |
-
----
-
-## MCP Server Tools
-
-The TRACE MCP server provides these tool categories:
-
-| Category | Tools |
-|----------|-------|
-| Session | `trace_start_session`, `trace_end_session` |
-| Code | `trace_log_code` |
-| Ideas | `trace_log_idea`, `trace_evaluate_idea` |
-| Errors | `trace_log_error` |
-| Interventions | `trace_log_intervention` |
-| Knowledge | `trace_add_decision`, `trace_add_learning`, `trace_add_gotcha` |
-| Metrics | `trace_get_metrics`, `trace_compute_metrics` |
-| Export | `trace_export_report` |
-
----
-
-## For Publication
-
-### AI Disclosure Statement
-
-```
-This research utilized AI assistance documented via the TRACE protocol (v1.0).
-Over [N] sessions totaling [X] hours, the AI assistant (Claude, Anthropic)
-contributed [Y]% of code ([Z] lines) and proposed [W] ideas ([V]% acceptance rate).
-Human researchers caught [A] AI-generated errors and made [B] interventions.
-Full TRACE logs are available in the supplementary materials.
-```
-
-### Supplementary Materials
-
-Include:
-- `trace.json` - Full TRACE data
-- `trace_report.md` - Generated analysis report
-- Protocol version reference
-
----
-
-## Analysis Tools
-
-Generate reports:
-```bash
-python mcp_server/analysis.py trace.json --report markdown -o report.md
-```
-
-Export to CSV:
-```bash
-python mcp_server/analysis.py trace.json --export csv -o exports/
-```
-
-View specific metrics:
-```bash
-python mcp_server/analysis.py trace.json --metrics code
-python mcp_server/analysis.py trace.json --metrics ideas
-python mcp_server/analysis.py trace.json --metrics errors
-```
-
----
-
-## Documentation
-
-- **[USER_GUIDE.md](USER_GUIDE.md)** - Complete usage guide
-- **[TRACE_PROTOCOL.md](TRACE_PROTOCOL.md)** - Formal protocol specification
-- **[CLAUDE.md](CLAUDE.md)** - Instructions for Claude Code
-- **[examples/](examples/)** - Example TRACE data
-
----
-
-## Contributing
-
-Contributions welcome! Please see the protocol specification for schema details.
-
----
-
-## Citation
-
-If you use TRACE in your research, please cite:
-
-```bibtex
-@misc{trace2026,
-  title={TRACE: Transparent Research AI Collaboration Environment},
-  author={[Your Name]},
-  year={2026},
-  note={Protocol specification v1.0}
+```json
+{
+  "mcpServers": {
+    "trace": {
+      "command": "trace-mcp",
+      "args": []
+    }
+  }
 }
 ```
 
----
+### Configure for Claude Desktop
+
+Add to your Claude Desktop MCP settings:
+
+```json
+{
+  "mcpServers": {
+    "trace": {
+      "command": "trace-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+### Run a First Session
+
+Once configured, TRACE tools are available to the AI client:
+
+```
+You: "Start a TRACE session for our climate NLP analysis"
+
+Claude: -> trace_start_session(project="Climate NLP", ...)
+        "Session started: trace_20260205_a1b2c3"
+
+You: "Search for adaptation passages in the IPCC corpus"
+
+Claude: -> [calls corpus-search-mcp/search_passages]
+        -> trace_log_tool_call(server="corpus-search-mcp", ...)
+        -> trace_propose_decision(description="Focus on chapters 14-17", ...)
+
+You: "Also include chapter 6"
+
+Claude: -> trace_resolve_decision(disposition="revised", ...)
+        -> trace_log_annotation(category="learning", ...)
+
+You: "End the session"
+
+Claude: -> trace_end_session(summary="Analyzed 47 passages...")
+```
+
+Session files are written to `~/.trace/sessions/`.
+
+## Available Tools
+
+| Tool | Description |
+|------|-------------|
+| `trace_start_session` | Start a new audit session |
+| `trace_end_session` | End a session with optional summary |
+| `trace_log_tool_call` | Record a tool invocation on another MCP server |
+| `trace_log_annotation` | Record a learning, gotcha, observation, or todo |
+| `trace_log_state_change` | Record an environment or configuration change |
+| `trace_propose_decision` | Propose a methodological decision |
+| `trace_resolve_decision` | Accept, revise, or reject a proposed decision |
+| `trace_get_session` | Get session metadata |
+| `trace_get_events` | List events (filterable by type) |
+| `trace_get_decisions` | List decisions (filterable by disposition) |
+| `trace_get_decision_chain` | Walk linked decision revisions |
+| `trace_search` | Search events by text content |
+| `trace_export` | Export as JSON, Markdown, or PROV JSON-LD |
+| `trace_list_sessions` | List all sessions (filterable by project) |
+
+## How It Works
+
+```
+AI Client (Claude Code, Claude Desktop, etc.)
+    |
+    +-- connects to: Domain MCP Server(s)
+    |                 (corpus search, NLP pipeline, etc.)
+    |                 --> does the actual work
+    |
+    +-- connects to: TRACE MCP Server
+                     --> records what happened to JSON files
+```
+
+Each session is stored as a self-contained JSON file in `~/.trace/sessions/`. Files are human-readable (pretty-printed), git-diffable, and shareable.
+
+## Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `TRACE_SESSIONS_DIR` | `~/.trace/sessions/` | Directory for session JSON files |
+| `TRACE_LOG_LEVEL` | `INFO` | Logging verbosity |
+
+## Export Formats
+
+- **JSON**: The native session file — always available, always complete
+- **Markdown**: Human-readable summary with decision log, tool call table, annotations, and statistics
+- **PROV JSON-LD**: W3C PROV-compatible provenance graph for interoperability
+
+## Schema Reference
+
+The formal protocol specification is a JSON Schema generated from the Pydantic models:
+
+- [`schemas/trace-v0.1.json`](schemas/trace-v0.1.json)
+
+Regenerate with: `python scripts/generate_schema.py`
+
+## Using with Claude Code Skill
+
+Copy the skill file to teach Claude Code to automatically use TRACE:
+
+```bash
+cp skill/TRACE.md ~/.claude/skills/
+```
+
+Or reference it in your project's Claude Code configuration.
+
+## Development
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
 
 ## License
 
-This protocol specification and reference implementation are released under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/).
-
----
-
-## Acknowledgments
-
-Developed at [UC Berkeley] for transparent AI-assisted research.
+Apache 2.0

@@ -1,0 +1,440 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:trace:schema:extensions:v3",
+  "title": "TRACE Protocol Extensions Schema",
+  "description": "Optional extensions for TRACE Protocol - knowledge management, Claude-specific features, and reporting",
+  "type": "object",
+  "properties": {
+    "knowledge": {
+      "$ref": "#/$defs/KnowledgeExtension"
+    },
+    "claude": {
+      "$ref": "#/$defs/ClaudeExtension"
+    },
+    "reports": {
+      "$ref": "#/$defs/ReportsExtension"
+    }
+  },
+  "$defs": {
+    "KnowledgeExtension": {
+      "type": "object",
+      "description": "Knowledge management extension for tracking decisions, learnings, gotchas, and ideas",
+      "properties": {
+        "decisions": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Decision" }
+        },
+        "learnings": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Learning" }
+        },
+        "gotchas": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Gotcha" }
+        },
+        "ideas": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Idea" }
+        }
+      }
+    },
+    "Decision": {
+      "type": "object",
+      "required": ["id", "timestamp", "decision", "rationale"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^D[0-9]+$"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "decision": {
+          "type": "string",
+          "description": "What was decided"
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Why this decision was made"
+        },
+        "alternatives_considered": {
+          "type": "string",
+          "description": "Other options that were considered"
+        },
+        "proposed_by": {
+          "type": "string",
+          "enum": ["human", "ai_suggested", "collaborative"]
+        },
+        "related_suggestion_id": {
+          "type": "string",
+          "pattern": "^SUG[0-9]+$"
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "integrity": {
+          "$ref": "trace-core.schema.json#/$defs/IntegrityMetadata"
+        }
+      }
+    },
+    "Learning": {
+      "type": "object",
+      "required": ["id", "timestamp", "learning"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^L[0-9]+$"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "learning": {
+          "type": "string",
+          "description": "What was learned"
+        },
+        "evidence": {
+          "type": "string",
+          "description": "Evidence supporting this learning"
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["high", "medium", "low"]
+        },
+        "discovered_by": {
+          "type": "string",
+          "enum": ["human", "ai_suggested", "collaborative"]
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "integrity": {
+          "$ref": "trace-core.schema.json#/$defs/IntegrityMetadata"
+        }
+      }
+    },
+    "Gotcha": {
+      "type": "object",
+      "required": ["id", "timestamp", "problem", "solution"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^G[0-9]+$"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "problem": {
+          "type": "string",
+          "description": "The pitfall or problem"
+        },
+        "solution": {
+          "type": "string",
+          "description": "How to solve or avoid it"
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"]
+        },
+        "discovered_by": {
+          "type": "string",
+          "enum": ["human", "ai", "collaborative"]
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "integrity": {
+          "$ref": "trace-core.schema.json#/$defs/IntegrityMetadata"
+        }
+      }
+    },
+    "Idea": {
+      "type": "object",
+      "required": ["id", "timestamp", "idea", "source"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^IDEA[0-9]+$"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "idea": {
+          "type": "string",
+          "description": "Description of the idea"
+        },
+        "idea_type": {
+          "type": "string",
+          "enum": ["approach", "hypothesis", "optimization", "feature", "design", "analysis"]
+        },
+        "source": {
+          "type": "string",
+          "enum": ["ai_suggested", "human", "collaborative"]
+        },
+        "triggered_by": {
+          "type": "string",
+          "description": "What prompted this idea"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["proposed", "adopted", "rejected", "deferred"],
+          "default": "proposed"
+        },
+        "evaluation": {
+          "type": "object",
+          "properties": {
+            "adopted": { "type": "boolean" },
+            "evaluation_notes": { "type": "string" },
+            "rejection_reason": { "type": "string" },
+            "modification_description": { "type": "string" }
+          }
+        },
+        "integrity": {
+          "$ref": "trace-core.schema.json#/$defs/IntegrityMetadata"
+        }
+      }
+    },
+    "ClaudeExtension": {
+      "type": "object",
+      "description": "Claude-specific features for enhanced AI collaboration",
+      "properties": {
+        "checkpoints": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/Checkpoint" }
+        },
+        "knowledge_checks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/KnowledgeCheck" }
+        }
+      }
+    },
+    "Checkpoint": {
+      "type": "object",
+      "required": ["id", "session_id", "timestamp", "trigger"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^CP[0-9]+$"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "trigger": {
+          "type": "string",
+          "enum": ["time", "milestone", "context_switch", "break", "problem_solved", "session_end"]
+        },
+        "notes": {
+          "type": "string"
+        },
+        "files_touched": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "summary": {
+          "type": "object",
+          "properties": {
+            "pending_suggestions": { "type": "integer" },
+            "unlogged_decisions": { "type": "integer" },
+            "unlogged_learnings": { "type": "integer" }
+          }
+        },
+        "recommendations": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "KnowledgeCheck": {
+      "type": "object",
+      "required": ["id", "timestamp", "context"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^KC[0-9]+$"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "context": {
+          "type": "string",
+          "description": "The context being checked"
+        },
+        "event_type_hint": {
+          "type": "string",
+          "enum": ["gotcha", "decision", "learning", "idea", "intervention", "code"]
+        },
+        "result": {
+          "type": "object",
+          "properties": {
+            "should_log": { "type": "boolean" },
+            "recommended_types": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "confidence": {
+              "type": "string",
+              "enum": ["high", "medium", "low"]
+            },
+            "similar_entries": {
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "ReportsExtension": {
+      "type": "object",
+      "description": "Reporting and analysis extension",
+      "properties": {
+        "trust_reports": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/TrustReport" }
+        },
+        "text_analyses": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/TextAnalysis" }
+        }
+      }
+    },
+    "TrustReport": {
+      "type": "object",
+      "required": ["id", "timestamp", "period", "overall_score"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^TR[0-9]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "period": {
+          "type": "string"
+        },
+        "overall_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "trust_level": {
+          "type": "string",
+          "enum": ["high", "good", "moderate", "low", "poor"]
+        },
+        "components": {
+          "type": "object",
+          "properties": {
+            "verification_accuracy": {
+              "type": "object",
+              "properties": {
+                "score": { "type": "number" },
+                "verified_count": { "type": "integer" },
+                "total_count": { "type": "integer" }
+              }
+            },
+            "git_sync_coverage": {
+              "type": "object",
+              "properties": {
+                "score": { "type": "number" },
+                "coverage_percent": { "type": "number" }
+              }
+            },
+            "chain_integrity": {
+              "type": "object",
+              "properties": {
+                "score": { "type": "number" },
+                "chain_verified": { "type": "boolean" }
+              }
+            },
+            "temporal_consistency": {
+              "type": "object",
+              "properties": {
+                "score": { "type": "number" },
+                "issues_count": { "type": "integer" }
+              }
+            }
+          }
+        },
+        "recommendations": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "TextAnalysis": {
+      "type": "object",
+      "required": ["id", "timestamp", "file_path", "file_type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^TA[0-9]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "file_path": {
+          "type": "string"
+        },
+        "file_type": {
+          "type": "string",
+          "enum": ["latex", "markdown", "plaintext"]
+        },
+        "total_sections": {
+          "type": "integer"
+        },
+        "total_words": {
+          "type": "integer"
+        },
+        "total_lines": {
+          "type": "integer"
+        },
+        "sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "title": { "type": "string" },
+              "level": { "type": "string" },
+              "word_count": { "type": "integer" },
+              "line_count": { "type": "integer" },
+              "fingerprint": { "type": "string" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

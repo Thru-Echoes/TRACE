@@ -1,0 +1,718 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:trace:schema:core:v3",
+  "title": "TRACE Protocol Core Schema",
+  "description": "Transparent Research AI Collaboration Environment - Core audit schema for AI-human collaboration tracking",
+  "type": "object",
+  "required": ["schema_version", "metadata", "sessions", "contributions", "suggestions"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "3.0",
+      "description": "Schema version identifier"
+    },
+    "schema_uri": {
+      "type": "string",
+      "format": "uri",
+      "default": "urn:trace:schema:core:v3",
+      "description": "URI identifying this schema"
+    },
+    "metadata": {
+      "$ref": "#/$defs/Metadata"
+    },
+    "environments": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Environment" },
+      "description": "Execution environments for reproducibility"
+    },
+    "sessions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Session" },
+      "description": "Work sessions"
+    },
+    "contributions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Contribution" },
+      "description": "Artifact contributions with authorship"
+    },
+    "suggestions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Suggestion" },
+      "description": "AI suggestions and their outcomes"
+    },
+    "interventions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Intervention" },
+      "description": "Human interventions on AI output"
+    },
+    "errors": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Error" },
+      "description": "Errors and their resolutions"
+    },
+    "evaluations": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/Evaluation" },
+      "description": "Test and benchmark results"
+    },
+    "integrity_chain": {
+      "$ref": "#/$defs/IntegrityChain",
+      "description": "Cryptographic hash chain for tamper detection"
+    },
+    "audit_log": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/AuditEntry" },
+      "description": "Immutable log of all operations"
+    },
+    "_extensions": {
+      "type": "object",
+      "description": "Extension data (not part of core schema)",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "Metadata": {
+      "type": "object",
+      "required": ["project_name", "created"],
+      "properties": {
+        "project_name": {
+          "type": "string",
+          "description": "Name of the project being tracked"
+        },
+        "created": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When this trace was created"
+        },
+        "description": {
+          "type": "string",
+          "description": "Project description"
+        },
+        "repository": {
+          "type": "string",
+          "format": "uri",
+          "description": "Repository URL if applicable"
+        },
+        "authors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Human authors/contributors"
+        }
+      }
+    },
+    "Environment": {
+      "type": "object",
+      "required": ["id", "captured_at", "platform", "agent"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^ENV[0-9]+$",
+          "description": "Unique environment identifier"
+        },
+        "captured_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When this environment was captured"
+        },
+        "platform": {
+          "type": "object",
+          "required": ["os", "arch"],
+          "properties": {
+            "os": {
+              "type": "string",
+              "description": "Operating system (darwin, linux, windows)"
+            },
+            "arch": {
+              "type": "string",
+              "description": "Architecture (arm64, x86_64)"
+            },
+            "version": {
+              "type": "string",
+              "description": "OS version string"
+            }
+          }
+        },
+        "runtime": {
+          "type": "object",
+          "properties": {
+            "language": {
+              "type": "string",
+              "description": "Primary language (python, node, etc.)"
+            },
+            "version": {
+              "type": "string",
+              "description": "Language version"
+            }
+          }
+        },
+        "agent": {
+          "type": "object",
+          "required": ["name"],
+          "properties": {
+            "framework": {
+              "type": "string",
+              "description": "Agent framework (mcp, langchain, autogen, etc.)"
+            },
+            "name": {
+              "type": "string",
+              "description": "Model/agent name"
+            },
+            "version": {
+              "type": "string",
+              "description": "Agent/model version"
+            },
+            "parameters": {
+              "type": "object",
+              "description": "Model parameters (temperature, etc.)",
+              "additionalProperties": true
+            }
+          }
+        },
+        "mcp": {
+          "type": "object",
+          "properties": {
+            "spec_version": {
+              "type": "string",
+              "description": "MCP specification version"
+            },
+            "server_version": {
+              "type": "string",
+              "description": "TRACE server version"
+            }
+          }
+        },
+        "dependencies_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "description": "Hash of dependency manifest (requirements.txt, package.json, etc.)"
+        },
+        "git_state": {
+          "type": "object",
+          "properties": {
+            "commit": {
+              "type": "string",
+              "description": "Current commit hash"
+            },
+            "branch": {
+              "type": "string",
+              "description": "Current branch"
+            },
+            "dirty": {
+              "type": "boolean",
+              "description": "Whether working directory has uncommitted changes"
+            }
+          }
+        }
+      }
+    },
+    "Session": {
+      "type": "object",
+      "required": ["id", "started"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$",
+          "description": "Unique session identifier"
+        },
+        "environment_id": {
+          "type": "string",
+          "pattern": "^ENV[0-9]+$",
+          "description": "Reference to execution environment"
+        },
+        "started": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Session start time"
+        },
+        "ended": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Session end time"
+        },
+        "purpose": {
+          "type": "string",
+          "description": "What the session aims to accomplish"
+        },
+        "scientific_stage": {
+          "type": "string",
+          "enum": ["exploration", "hypothesis", "data_collection", "analysis", "interpretation", "validation", "writing"],
+          "description": "Stage in scientific method"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Summary of what was accomplished"
+        },
+        "ai_helpfulness_rating": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5,
+          "description": "Human rating of AI helpfulness"
+        }
+      }
+    },
+    "Contribution": {
+      "type": "object",
+      "required": ["id", "timestamp", "file_path", "authorship"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^C[0-9]+$",
+          "description": "Unique contribution identifier"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$",
+          "description": "Reference to parent session"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When contribution was logged"
+        },
+        "file_path": {
+          "type": "string",
+          "description": "Path to the file"
+        },
+        "content_type": {
+          "type": "string",
+          "enum": ["code", "text", "data"],
+          "default": "code",
+          "description": "Type of content"
+        },
+        "contribution_type": {
+          "type": "string",
+          "enum": ["creation", "modification", "refactor", "bugfix", "optimization", "deletion"],
+          "description": "Nature of the contribution"
+        },
+        "description": {
+          "type": "string",
+          "description": "What this contribution does"
+        },
+        "authorship": {
+          "$ref": "#/$defs/Authorship"
+        },
+        "related_suggestion_id": {
+          "type": ["string", "null"],
+          "pattern": "^SUG[0-9]+$",
+          "description": "If from an AI suggestion, reference to that suggestion"
+        },
+        "git_commit": {
+          "type": ["string", "null"],
+          "description": "Associated git commit hash"
+        },
+        "integrity": {
+          "$ref": "#/$defs/IntegrityMetadata"
+        }
+      }
+    },
+    "Authorship": {
+      "type": "object",
+      "required": ["direction"],
+      "description": "Authorship attribution following the direction/execution model",
+      "properties": {
+        "direction": {
+          "type": "string",
+          "enum": ["human_directed", "ai_suggested", "collaborative"],
+          "description": "Who decided this change should happen"
+        },
+        "execution": {
+          "type": "object",
+          "description": "Who wrote the actual content",
+          "properties": {
+            "ai_lines": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Lines written by AI"
+            },
+            "human_lines": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Lines written by human"
+            },
+            "ai_words": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Words written by AI (for text content)"
+            },
+            "human_words": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Words written by human (for text content)"
+            },
+            "ai_rows": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Data rows from AI (for data content)"
+            },
+            "human_rows": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Data rows from human (for data content)"
+            }
+          }
+        }
+      }
+    },
+    "Suggestion": {
+      "type": "object",
+      "required": ["id", "timestamp", "description"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^SUG[0-9]+$",
+          "description": "Unique suggestion identifier"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$",
+          "description": "Reference to parent session"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When suggestion was made"
+        },
+        "description": {
+          "type": "string",
+          "description": "What the AI suggested"
+        },
+        "suggestion_type": {
+          "type": "string",
+          "enum": ["code_change", "architecture", "approach", "bugfix", "optimization", "refactor", "feature"],
+          "description": "Category of suggestion"
+        },
+        "proposed": {
+          "type": "object",
+          "properties": {
+            "lines": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Lines of code/text proposed"
+            },
+            "files": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Files that would be affected"
+            }
+          }
+        },
+        "confidence": {
+          "type": "string",
+          "enum": ["high", "medium", "low"],
+          "description": "AI's confidence in the suggestion"
+        },
+        "what_prompted": {
+          "type": "string",
+          "description": "What prompted this suggestion"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["pending", "accepted", "rejected", "modified"],
+          "default": "pending",
+          "description": "Current status of the suggestion"
+        },
+        "resolution": {
+          "type": ["object", "null"],
+          "properties": {
+            "resolved_at": {
+              "type": "string",
+              "format": "date-time",
+              "description": "When the suggestion was resolved"
+            },
+            "lines_accepted": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Lines accepted as-is"
+            },
+            "lines_modified": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Lines accepted with modifications"
+            },
+            "lines_rejected": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Lines rejected"
+            },
+            "rationale": {
+              "type": "string",
+              "description": "Human's rationale for the decision"
+            },
+            "modification_description": {
+              "type": "string",
+              "description": "If modified, what was changed"
+            }
+          }
+        },
+        "integrity": {
+          "$ref": "#/$defs/IntegrityMetadata"
+        }
+      }
+    },
+    "Intervention": {
+      "type": "object",
+      "required": ["id", "timestamp", "type", "ai_output_summary", "human_action"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^INT[0-9]+$",
+          "description": "Unique intervention identifier"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["correction", "override", "rejection", "refinement"],
+          "description": "Type of intervention"
+        },
+        "ai_output_summary": {
+          "type": "string",
+          "description": "What the AI produced"
+        },
+        "human_action": {
+          "type": "string",
+          "description": "What the human changed"
+        },
+        "rationale": {
+          "type": "string",
+          "description": "Why the human made this change"
+        },
+        "lines_affected": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of lines affected"
+        },
+        "expertise_applied": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Types of expertise applied (domain_knowledge, methodology, etc.)"
+        },
+        "significance": {
+          "type": "string",
+          "enum": ["critical", "major", "minor"],
+          "description": "Significance of the intervention"
+        },
+        "integrity": {
+          "$ref": "#/$defs/IntegrityMetadata"
+        }
+      }
+    },
+    "Error": {
+      "type": "object",
+      "required": ["id", "timestamp", "description", "originated_from", "detected_by"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^ERR[0-9]+$"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "error_type": {
+          "type": "string",
+          "enum": ["syntax", "logic", "runtime", "design", "security", "performance"]
+        },
+        "description": {
+          "type": "string",
+          "description": "What the error was"
+        },
+        "file_path": {
+          "type": "string",
+          "description": "File where error occurred"
+        },
+        "originated_from": {
+          "type": "string",
+          "enum": ["ai", "human"],
+          "description": "Who produced the error"
+        },
+        "detected_by": {
+          "type": "string",
+          "enum": ["ai", "human", "automated_test"],
+          "description": "Who/what caught the error"
+        },
+        "detection_method": {
+          "type": "string",
+          "enum": ["code_review", "testing", "runtime", "static_analysis"]
+        },
+        "severity": {
+          "type": "string",
+          "enum": ["critical", "high", "medium", "low"]
+        },
+        "resolution": {
+          "type": "string",
+          "description": "How the error was resolved"
+        },
+        "integrity": {
+          "$ref": "#/$defs/IntegrityMetadata"
+        }
+      }
+    },
+    "Evaluation": {
+      "type": "object",
+      "required": ["id", "timestamp", "evaluation_type"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^EVAL[0-9]+$",
+          "description": "Unique evaluation identifier"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "evaluation_type": {
+          "type": "string",
+          "enum": ["unit_test", "integration_test", "benchmark", "human_eval", "code_review", "validation"],
+          "description": "Type of evaluation"
+        },
+        "target": {
+          "type": "object",
+          "properties": {
+            "files": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Files being evaluated"
+            },
+            "scope": {
+              "type": "string",
+              "enum": ["function", "module", "system"],
+              "description": "Scope of evaluation"
+            },
+            "description": {
+              "type": "string",
+              "description": "What is being evaluated"
+            }
+          }
+        },
+        "metrics": {
+          "type": "object",
+          "description": "Evaluation metrics",
+          "properties": {
+            "tests_passed": { "type": "integer", "minimum": 0 },
+            "tests_failed": { "type": "integer", "minimum": 0 },
+            "tests_skipped": { "type": "integer", "minimum": 0 },
+            "coverage": { "type": "number", "minimum": 0, "maximum": 1 },
+            "duration_ms": { "type": "integer", "minimum": 0 },
+            "score": { "type": "number" }
+          },
+          "additionalProperties": true
+        },
+        "tool": {
+          "type": "string",
+          "description": "Tool used for evaluation (pytest, jest, etc.)"
+        },
+        "command": {
+          "type": "string",
+          "description": "Command used to run evaluation"
+        },
+        "output_summary": {
+          "type": "string",
+          "description": "Summary of evaluation output"
+        },
+        "passed": {
+          "type": "boolean",
+          "description": "Whether the evaluation passed overall"
+        },
+        "integrity": {
+          "$ref": "#/$defs/IntegrityMetadata"
+        }
+      }
+    },
+    "IntegrityMetadata": {
+      "type": "object",
+      "properties": {
+        "entry_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "description": "SHA-256 hash of this entry"
+        },
+        "previous_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$",
+          "description": "Hash of the previous entry in chain"
+        },
+        "chain_position": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Position in the integrity chain"
+        }
+      }
+    },
+    "IntegrityChain": {
+      "type": "object",
+      "properties": {
+        "version": {
+          "type": "string",
+          "default": "1.0"
+        },
+        "genesis_hash": {
+          "type": "string",
+          "pattern": "^sha256:[a-f0-9]{64}$"
+        },
+        "current_position": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "created": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "last_updated": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "position": { "type": "integer" },
+              "entry_id": { "type": "string" },
+              "entry_type": { "type": "string" },
+              "timestamp": { "type": "string", "format": "date-time" },
+              "previous_hash": { "type": "string" },
+              "entry_hash": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "AuditEntry": {
+      "type": "object",
+      "required": ["timestamp", "operation"],
+      "properties": {
+        "timestamp": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "operation": {
+          "type": "string",
+          "description": "The operation that was performed"
+        },
+        "arguments_hash": {
+          "type": "string",
+          "description": "Hash of the arguments (for privacy)"
+        },
+        "session_id": {
+          "type": "string",
+          "pattern": "^S[0-9]+$"
+        }
+      }
+    }
+  }
+}

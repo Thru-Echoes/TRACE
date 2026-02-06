@@ -1,0 +1,658 @@
+{
+  "$defs": {
+    "Actor": {
+      "description": "Who performed an action.",
+      "properties": {
+        "type": {
+          "enum": [
+            "human",
+            "ai",
+            "system"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Role"
+        }
+      },
+      "required": [
+        "type",
+        "id"
+      ],
+      "title": "Actor",
+      "type": "object"
+    },
+    "AnnotationData": {
+      "description": "Free-form observations, learnings, gotchas, todos.",
+      "properties": {
+        "category": {
+          "enum": [
+            "learning",
+            "gotcha",
+            "observation",
+            "todo",
+            "question",
+            "other"
+          ],
+          "title": "Category",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "related_event_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Event Ids",
+          "type": "array"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "category",
+        "content"
+      ],
+      "title": "AnnotationData",
+      "type": "object"
+    },
+    "DecisionData": {
+      "description": "Records a decision with full attribution and resolution status.",
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "rationale": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rationale"
+        },
+        "proposed_by": {
+          "$ref": "#/$defs/Actor"
+        },
+        "disposition": {
+          "default": "proposed",
+          "enum": [
+            "proposed",
+            "accepted",
+            "revised",
+            "rejected"
+          ],
+          "title": "Disposition",
+          "type": "string"
+        },
+        "resolved_by": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Actor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "revision_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revision Note"
+        },
+        "revises_event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Revises Event Id"
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        }
+      },
+      "required": [
+        "description",
+        "proposed_by"
+      ],
+      "title": "DecisionData",
+      "type": "object"
+    },
+    "Environment": {
+      "description": "Execution context for reproducibility.",
+      "properties": {
+        "mcp_servers": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Mcp Servers",
+          "type": "array"
+        },
+        "client": {
+          "default": "",
+          "title": "Client",
+          "type": "string"
+        },
+        "os": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Os"
+        },
+        "python_version": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Python Version"
+        },
+        "trace_version": {
+          "default": "",
+          "title": "Trace Version",
+          "type": "string"
+        },
+        "custom": {
+          "additionalProperties": true,
+          "title": "Custom",
+          "type": "object"
+        }
+      },
+      "title": "Environment",
+      "type": "object"
+    },
+    "EventContext": {
+      "description": "Shared context attached to any event.",
+      "properties": {
+        "conversation_turn": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Turn"
+        },
+        "parent_event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Event Id"
+        },
+        "reasoning_summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reasoning Summary"
+        },
+        "related_event_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Related Event Ids",
+          "type": "array"
+        }
+      },
+      "title": "EventContext",
+      "type": "object"
+    },
+    "SessionMetadata": {
+      "description": "Descriptive metadata for a session.",
+      "properties": {
+        "project": {
+          "title": "Project",
+          "type": "string"
+        },
+        "experiment_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Experiment Id"
+        },
+        "description": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Description"
+        },
+        "participants": {
+          "items": {
+            "$ref": "#/$defs/Actor"
+          },
+          "title": "Participants",
+          "type": "array"
+        },
+        "environment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Environment"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "tags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Tags",
+          "type": "array"
+        },
+        "doi": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Doi"
+        },
+        "custom": {
+          "additionalProperties": true,
+          "title": "Custom",
+          "type": "object"
+        }
+      },
+      "required": [
+        "project"
+      ],
+      "title": "SessionMetadata",
+      "type": "object"
+    },
+    "StateChangeData": {
+      "description": "Records a change in environment, configuration, or tools.",
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "field": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Field"
+        },
+        "old_value": {
+          "default": null,
+          "title": "Old Value"
+        },
+        "new_value": {
+          "default": null,
+          "title": "New Value"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        }
+      },
+      "required": [
+        "description"
+      ],
+      "title": "StateChangeData",
+      "type": "object"
+    },
+    "ToolCallData": {
+      "description": "Records an MCP tool invocation on another server.",
+      "properties": {
+        "server": {
+          "title": "Server",
+          "type": "string"
+        },
+        "method": {
+          "default": "tools/call",
+          "title": "Method",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "input": {
+          "additionalProperties": true,
+          "title": "Input",
+          "type": "object"
+        },
+        "output": {
+          "default": null,
+          "title": "Output"
+        },
+        "output_truncated": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Truncated"
+        },
+        "output_hash": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Hash"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        },
+        "status": {
+          "default": "success",
+          "enum": [
+            "success",
+            "error",
+            "timeout"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "error_message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Error Message"
+        }
+      },
+      "required": [
+        "server",
+        "name",
+        "input"
+      ],
+      "title": "ToolCallData",
+      "type": "object"
+    },
+    "TraceEvent": {
+      "description": "A single audit event. The core unit of TRACE.",
+      "properties": {
+        "id": {
+          "default": "",
+          "title": "Id",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "session_id": {
+          "title": "Session Id",
+          "type": "string"
+        },
+        "type": {
+          "enum": [
+            "tool_call",
+            "decision",
+            "annotation",
+            "state_change"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "actor": {
+          "$ref": "#/$defs/Actor"
+        },
+        "tool_call": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolCallData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DecisionData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "annotation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AnnotationData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "state_change": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StateChangeData"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "context": {
+          "$ref": "#/$defs/EventContext"
+        },
+        "verification": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Verification"
+        }
+      },
+      "required": [
+        "session_id",
+        "type",
+        "actor"
+      ],
+      "title": "TraceEvent",
+      "type": "object"
+    }
+  },
+  "description": "Schema for a TRACE (Transparent Recording of AI-assisted Collaboration Experiments) session document. One JSON file per session.",
+  "properties": {
+    "context": {
+      "default": "https://trace-protocol.org/v0.1",
+      "title": "Context",
+      "type": "string"
+    },
+    "trace_version": {
+      "default": "0.1.0",
+      "title": "Trace Version",
+      "type": "string"
+    },
+    "id": {
+      "title": "Id",
+      "type": "string"
+    },
+    "created": {
+      "format": "date-time",
+      "title": "Created",
+      "type": "string"
+    },
+    "ended": {
+      "anyOf": [
+        {
+          "format": "date-time",
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Ended"
+    },
+    "status": {
+      "default": "active",
+      "enum": [
+        "active",
+        "completed",
+        "abandoned"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "metadata": {
+      "$ref": "#/$defs/SessionMetadata"
+    },
+    "summary": {
+      "anyOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null,
+      "title": "Summary"
+    },
+    "events": {
+      "items": {
+        "$ref": "#/$defs/TraceEvent"
+      },
+      "title": "Events",
+      "type": "array"
+    }
+  },
+  "required": [
+    "id",
+    "metadata"
+  ],
+  "title": "TRACE Session Schema v0.1",
+  "type": "object",
+  "$id": "https://trace-protocol.org/schemas/trace-v0.1.json"
+}
