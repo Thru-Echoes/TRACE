@@ -91,5 +91,5 @@ def list_learnings(
     """List learnings, optionally filtered by category."""
     learnings = store.learnings
     if category:
-        learnings = [l for l in learnings if l.category == category]
-    return [l.model_dump(mode="json") for l in learnings]
+        learnings = [lrn for lrn in learnings if lrn.category == category]
+    return [lrn.model_dump(mode="json") for lrn in learnings]

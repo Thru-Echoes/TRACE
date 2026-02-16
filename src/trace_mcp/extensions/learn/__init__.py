@@ -161,12 +161,14 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             if all_new_ids:
                 store.save_store(ks)
 
-            return json.dumps({
-                "project": project,
-                "new_learnings": len(all_new_ids),
-                "new_ids": all_new_ids,
-                "total_learnings": len(ks.learnings),
-            })
+            return json.dumps(
+                {
+                    "project": project,
+                    "new_learnings": len(all_new_ids),
+                    "new_ids": all_new_ids,
+                    "total_learnings": len(ks.learnings),
+                }
+            )
         except Exception as e:
             logger.exception("Error extracting learnings")
             return f"Error extracting learnings: {e}"

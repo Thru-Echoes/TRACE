@@ -41,9 +41,7 @@ def get_decisions(
     if disposition:
         decisions = [e for e in decisions if e.decision is not None and e.decision.disposition == disposition]
     if proposed_by_type:
-        decisions = [
-            e for e in decisions if e.decision is not None and e.decision.proposed_by.type == proposed_by_type
-        ]
+        decisions = [e for e in decisions if e.decision is not None and e.decision.proposed_by.type == proposed_by_type]
     return [e.model_dump(mode="json") for e in decisions]
 
 
@@ -235,9 +233,7 @@ async def project_summary(
     resolved = accepted + revised + rejected
     acceptance_rate = round(accepted / resolved, 3) if resolved > 0 else None
     human_interventions = correction_count + rejected + revised
-    intervention_rate = (
-        round(human_interventions / total_events, 3) if total_events > 0 else None
-    )
+    intervention_rate = round(human_interventions / total_events, 3) if total_events > 0 else None
 
     return {
         "project": project,

@@ -81,8 +81,14 @@ def extract_description(content: str) -> str:
     """Extract the first line as description, stripping tags."""
     first_line = content.split("\n")[0]
     # Remove known tags
-    for tag in ["[GIT-SYNC]", "[HUMAN-DIRECTED]", "[AI-SUGGESTED]", "[HUMAN-AUTHORED]",
-                 "[HUMAN-MANUAL-EDIT]", "INTERVENTION (correction)"]:
+    for tag in [
+        "[GIT-SYNC]",
+        "[HUMAN-DIRECTED]",
+        "[AI-SUGGESTED]",
+        "[HUMAN-AUTHORED]",
+        "[HUMAN-MANUAL-EDIT]",
+        "INTERVENTION (correction)",
+    ]:
         first_line = first_line.replace(tag, "")
     return first_line.strip().rstrip(":")
 
@@ -172,18 +178,21 @@ def enrich_v1_orphan(s: dict) -> int:
         desc = extract_description(content)
         artifact = extract_file(content)
 
-        new_events.append(make_contribution(
-            s["id"], s["events"] + new_events,
-            description=desc,
-            artifact=artifact,
-            direction=direction,
-            execution=execution,
-            tags=[t for t in tags if t not in ("code_contribution", "git-synced") and not t.startswith("v1_id:")],
-            source_event_id=evt["id"],
-            timestamp=evt["timestamp"],
-            actor_type=evt["actor"]["type"],
-            actor_id=evt["actor"]["id"],
-        ))
+        new_events.append(
+            make_contribution(
+                s["id"],
+                s["events"] + new_events,
+                description=desc,
+                artifact=artifact,
+                direction=direction,
+                execution=execution,
+                tags=[t for t in tags if t not in ("code_contribution", "git-synced") and not t.startswith("v1_id:")],
+                source_event_id=evt["id"],
+                timestamp=evt["timestamp"],
+                actor_type=evt["actor"]["type"],
+                actor_id=evt["actor"]["id"],
+            )
+        )
         contributions_added += 1
 
     s["events"].extend(new_events)
@@ -227,18 +236,21 @@ def enrich_v1_S003(s: dict) -> int:
         desc = extract_description(content)
         artifact = extract_file(content)
 
-        new_events.append(make_contribution(
-            s["id"], s["events"] + new_events,
-            description=desc,
-            artifact=artifact,
-            direction=direction,
-            execution=execution,
-            tags=[t for t in tags if t not in ("code_contribution",) and not t.startswith("v1_id:")],
-            source_event_id=evt["id"],
-            timestamp=evt["timestamp"],
-            actor_type=evt["actor"]["type"],
-            actor_id=evt["actor"]["id"],
-        ))
+        new_events.append(
+            make_contribution(
+                s["id"],
+                s["events"] + new_events,
+                description=desc,
+                artifact=artifact,
+                direction=direction,
+                execution=execution,
+                tags=[t for t in tags if t not in ("code_contribution",) and not t.startswith("v1_id:")],
+                source_event_id=evt["id"],
+                timestamp=evt["timestamp"],
+                actor_type=evt["actor"]["type"],
+                actor_id=evt["actor"]["id"],
+            )
+        )
         contributions_added += 1
 
     s["events"].extend(new_events)

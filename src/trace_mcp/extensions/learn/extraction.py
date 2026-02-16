@@ -16,10 +16,7 @@ _EXTRACTABLE_CATEGORIES = {"learning", "correction", "gotcha"}
 
 def _already_extracted(store: KnowledgeStore, session_id: str, event_id: str) -> bool:
     """Check if a learning from this session+event already exists."""
-    return any(
-        lrn.source_session == session_id and lrn.source_event == event_id
-        for lrn in store.learnings
-    )
+    return any(lrn.source_session == session_id and lrn.source_event == event_id for lrn in store.learnings)
 
 
 def extract_from_session(store: KnowledgeStore, session: Session) -> list[str]:
