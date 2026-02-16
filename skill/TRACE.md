@@ -22,12 +22,26 @@ literature analysis, or multi-step technical research task.
 - For failed tool calls, always log them with status "error" and the
   error message — failures are often the most valuable audit data.
 
+### Contribution Logging
+- After completing a significant piece of work, call `trace_log_contribution`:
+  - `description`: what was contributed
+  - `direction`: who had the idea — "human", "ai", or "collaborative"
+  - `execution`: who did the work — "human", "ai", or "collaborative"
+  - `artifact`: optional file path or identifier for the output
+  - `related_decision_ids`: optional list of decision event IDs that motivated this
+- Examples:
+  - Human asked for a function, AI wrote it: direction="human", execution="ai"
+  - AI proactively refactored code: direction="ai", execution="ai"
+  - Collaborative debugging session: direction="collaborative", execution="collaborative"
+
 ### Decision Logging
 - Before making any SIGNIFICANT methodological choice, call
   `trace_propose_decision` with:
   - Clear description of what you're deciding
   - Specific, technical rationale (not "this seemed best")
   - Yourself as the proposer
+  - `suggestion_type`: "proactive" (you volunteered the idea), "requested"
+    (human asked you to decide), or "collaborative" (emerged from discussion)
 - Significant choices include: which method/algorithm to use, which
   parameters or thresholds to set, which data to include or exclude,
   how to handle missing or messy data, how to preprocess text,
@@ -53,6 +67,12 @@ literature analysis, or multi-step technical research task.
 - Log any changes to models, embeddings, preprocessing pipelines,
   API versions, corpora, or analysis parameters using
   `trace_log_state_change`. Include the old and new values.
+
+### Project Summaries
+- Use `trace_project_summary(project="...")` to get aggregated metrics
+  across all sessions. Useful for paper-ready statistics: event counts,
+  decision breakdowns (AI vs human proposers), contribution attribution,
+  annotation categories, and participant lists.
 
 ## Principles
 - Be thorough but not noisy. Log methodology decisions, not trivial ones

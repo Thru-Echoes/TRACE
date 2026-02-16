@@ -2,6 +2,7 @@
 
 from trace_mcp.schema.events import (
     AnnotationData,
+    ContributionData,
     DecisionData,
     EventContext,
     StateChangeData,
@@ -22,6 +23,7 @@ Session.model_rebuild()
 __all__ = [
     "Actor",
     "AnnotationData",
+    "ContributionData",
     "DecisionData",
     "Environment",
     "EventContext",

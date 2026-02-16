@@ -14,6 +14,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
+from trace_mcp import __version__
 from trace_mcp.schema import Session
 from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import (
@@ -103,6 +104,7 @@ async def trace_log_tool_call(
     duration_ms: int | None = None,
     status: str = "success",
     error_message: str | None = None,
+    retries_event_id: str | None = None,
     actor_type: str = "ai",
     actor_id: str = "ai-assistant",
     reasoning: str | None = None,
@@ -129,6 +131,7 @@ async def trace_log_tool_call(
             duration_ms=duration_ms,
             status=status,
             error_message=error_message,
+            retries_event_id=retries_event_id,
             actor_type=actor_type,
             actor_id=actor_id,
             reasoning=reasoning,
@@ -146,14 +149,17 @@ async def trace_log_annotation(
     category: str,
     content: str,
     tags: list[str] | None = None,
+    corrects_event_ids: list[str] | None = None,
     related_event_ids: list[str] | None = None,
     actor_type: str = "ai",
     actor_id: str = "ai-assistant",
 ) -> str:
-    """Log an observation, learning, gotcha, or note.
+    """Log an observation, learning, gotcha, correction, or note.
 
     Use this whenever you encounter something surprising, learn something
     useful about the data or tools, or want to record a note for future reference.
+    Use category='correction' with corrects_event_ids when a human catches and
+    fixes an AI mistake.
     """
     try:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
@@ -167,6 +173,7 @@ async def trace_log_annotation(
             category=category,
             content=content,
             tags=tags,
+            corrects_event_ids=corrects_event_ids,
             related_event_ids=related_event_ids,
             actor_type=actor_type,
             actor_id=actor_id,
@@ -175,6 +182,48 @@ async def trace_log_annotation(
     except Exception as e:
         logger.exception("Error logging annotation")
         return f"Error logging annotation: {e}"
+
+
+@mcp.tool()
+async def trace_log_contribution(
+    session_id: str,
+    description: str,
+    direction: str,
+    execution: str,
+    artifact: str | None = None,
+    related_decision_ids: list[str] | None = None,
+    tags: list[str] | None = None,
+    actor_type: str = "ai",
+    actor_id: str = "ai-assistant",
+) -> str:
+    """Log a contribution with direction-vs-execution attribution.
+
+    Records who had the idea (direction) vs who did the work (execution).
+    Use 'human', 'ai', or 'collaborative' for each.
+    Optionally link to the decision(s) that motivated this contribution.
+    """
+    try:
+        session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+    except FileNotFoundError:
+        return f"Error: Session '{session_id}' not found."
+
+    try:
+        event_id = await logging_tools.log_contribution(
+            storage,
+            session,
+            description=description,
+            direction=direction,
+            execution=execution,
+            artifact=artifact,
+            related_decision_ids=related_decision_ids,
+            tags=tags,
+            actor_type=actor_type,
+            actor_id=actor_id,
+        )
+        return f"Logged contribution: {event_id}"
+    except Exception as e:
+        logger.exception("Error logging contribution")
+        return f"Error logging contribution: {e}"
 
 
 @mcp.tool()
@@ -227,6 +276,7 @@ async def trace_propose_decision(
     proposed_by_id: str,
     rationale: str | None = None,
     revises_event_id: str | None = None,
+    suggestion_type: str | None = None,
     tags: list[str] | None = None,
 ) -> str:
     """Propose a methodological decision for the workflow.
@@ -235,6 +285,9 @@ async def trace_propose_decision(
     parameters to set, which data to include/exclude, how to handle messy data,
     how to interpret ambiguous results. The decision stays in 'proposed' state
     until resolved.
+
+    suggestion_type can be 'proactive' (AI volunteered), 'requested' (human asked),
+    or 'collaborative' (emerged from discussion).
     """
     try:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
@@ -250,6 +303,7 @@ async def trace_propose_decision(
             proposed_by_type=proposed_by_type,
             proposed_by_id=proposed_by_id,
             revises_event_id=revises_event_id,
+            suggestion_type=suggestion_type,
             tags=tags,
         )
         return f"Decision proposed: {event_id}"
@@ -327,14 +381,15 @@ async def trace_get_events(
 async def trace_get_decisions(
     session_id: str,
     disposition: str | None = None,
+    proposed_by_type: str | None = None,
 ) -> str:
-    """List all decisions in a session, optionally filtered by disposition status."""
+    """List all decisions in a session, optionally filtered by disposition status and/or proposer type."""
     try:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
 
-    decisions = query_tools.get_decisions(session, disposition=disposition)
+    decisions = query_tools.get_decisions(session, disposition=disposition, proposed_by_type=proposed_by_type)
     return json.dumps(decisions, indent=2, default=str)
 
 
@@ -371,6 +426,24 @@ async def trace_search(
 
     results = query_tools.search_events(session, query=query)
     return json.dumps(results, indent=2, default=str)
+
+
+@mcp.tool()
+async def trace_project_summary(
+    project: str,
+) -> str:
+    """Get aggregated metrics across all sessions for a project.
+
+    Returns counts of events by type, decisions by disposition (with AI vs human
+    proposer breakdown), contributions by direction/execution, annotations by
+    category, and unique participants. Useful for paper-ready statistics.
+    """
+    try:
+        summary = await query_tools.project_summary(storage, project=project)
+        return json.dumps(summary, indent=2, default=str)
+    except Exception as e:
+        logger.exception("Error generating project summary")
+        return f"Error generating project summary: {e}"
 
 
 # ── Export ───────────────────────────────────────────────────────────────────
@@ -411,6 +484,29 @@ async def trace_list_sessions(
         return f"Error listing sessions: {e}"
 
 
+# ── Extensions ───────────────────────────────────────────────────────────────
+
+
+def _load_extensions() -> None:
+    """Discover and load TRACE extensions from trace_mcp.extensions package."""
+    import importlib
+    import pkgutil
+
+    try:
+        import trace_mcp.extensions as ext_pkg
+    except ImportError:
+        return
+    for _finder, name, _is_pkg in pkgutil.iter_modules(ext_pkg.__path__):
+        fqn = f"trace_mcp.extensions.{name}"
+        try:
+            mod = importlib.import_module(fqn)
+            if hasattr(mod, "register"):
+                mod.register(mcp, storage)
+                logger.info("Loaded extension: %s", name)
+        except Exception:
+            logger.exception("Failed to load extension: %s", name)
+
+
 # ── Entry Point ──────────────────────────────────────────────────────────────
 
 
@@ -423,7 +519,8 @@ def main() -> None:
         init_project(directory)
         return
 
-    logger.info("Starting TRACE MCP server v%s", "0.1.0")
+    _load_extensions()
+    logger.info("Starting TRACE MCP server v%s", __version__)
     mcp.run(transport="stdio")
 
 

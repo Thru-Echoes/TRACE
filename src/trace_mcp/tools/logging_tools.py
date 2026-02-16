@@ -7,6 +7,7 @@ from typing import Any
 from trace_mcp.schema import (
     Actor,
     AnnotationData,
+    ContributionData,
     EventContext,
     Session,
     StateChangeData,
@@ -28,6 +29,7 @@ async def log_tool_call(
     duration_ms: int | None = None,
     status: str = "success",
     error_message: str | None = None,
+    retries_event_id: str | None = None,
     actor_type: str = "ai",
     actor_id: str = "ai-assistant",
     reasoning: str | None = None,
@@ -46,6 +48,7 @@ async def log_tool_call(
             duration_ms=duration_ms,
             status=status,  # type: ignore[arg-type]
             error_message=error_message,
+            retries_event_id=retries_event_id,
         ),
         context=EventContext(
             reasoning_summary=reasoning,
@@ -63,11 +66,12 @@ async def log_annotation(
     category: str,
     content: str,
     tags: list[str] | None = None,
+    corrects_event_ids: list[str] | None = None,
     related_event_ids: list[str] | None = None,
     actor_type: str = "ai",
     actor_id: str = "ai-assistant",
 ) -> str:
-    """Log an observation, learning, gotcha, or note."""
+    """Log an observation, learning, gotcha, correction, or note."""
     event = TraceEvent(
         session_id=session.id,
         type="annotation",
@@ -76,7 +80,39 @@ async def log_annotation(
             category=category,  # type: ignore[arg-type]
             content=content,
             tags=tags or [],
+            corrects_event_ids=corrects_event_ids or [],
             related_event_ids=related_event_ids or [],
+        ),
+    )
+    event_id = await append_event(storage, session, event)
+    return event_id
+
+
+async def log_contribution(
+    storage: TraceStorage,
+    session: Session,
+    *,
+    description: str,
+    direction: str,
+    execution: str,
+    artifact: str | None = None,
+    related_decision_ids: list[str] | None = None,
+    tags: list[str] | None = None,
+    actor_type: str = "ai",
+    actor_id: str = "ai-assistant",
+) -> str:
+    """Log a contribution with direction-vs-execution attribution."""
+    event = TraceEvent(
+        session_id=session.id,
+        type="contribution",
+        actor=Actor(type=actor_type, id=actor_id),  # type: ignore[arg-type]
+        contribution=ContributionData(
+            description=description,
+            artifact=artifact,
+            direction=direction,  # type: ignore[arg-type]
+            execution=execution,  # type: ignore[arg-type]
+            related_decision_ids=related_decision_ids or [],
+            tags=tags or [],
         ),
     )
     event_id = await append_event(storage, session, event)

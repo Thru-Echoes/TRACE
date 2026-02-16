@@ -16,6 +16,7 @@ async def propose_decision(
     proposed_by_type: str,
     proposed_by_id: str,
     revises_event_id: str | None = None,
+    suggestion_type: str | None = None,
     tags: list[str] | None = None,
 ) -> str:
     """Propose a methodological decision for the workflow."""
@@ -29,6 +30,7 @@ async def propose_decision(
             proposed_by=Actor(type=proposed_by_type, id=proposed_by_id),  # type: ignore[arg-type]
             disposition="proposed",
             revises_event_id=revises_event_id,
+            suggestion_type=suggestion_type,  # type: ignore[arg-type]
             tags=tags or [],
         ),
     )
