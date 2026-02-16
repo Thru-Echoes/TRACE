@@ -14,9 +14,9 @@ TRACE_CLAUDE_BLOCK = """\
 
 ---
 
-## TRACE Audit Protocol (Auto-Injected)
+## TRACE Audit Protocol (v0.2)
 
-This project uses [TRACE](https://trace-protocol.org) for transparent documentation
+This project uses [TRACE](https://trace-protocol.org) v0.2 for transparent documentation
 of AI-human collaboration. The TRACE MCP server is configured in `.mcp.json`.
 
 ### Acknowledgement
@@ -24,8 +24,8 @@ of AI-human collaboration. The TRACE MCP server is configured in `.mcp.json`.
 At the start of every conversation in this project, briefly inform the user that
 TRACE audit logging is active. For example:
 
-> TRACE audit logging is active for this project. Tool calls, decisions, and
-> annotations will be recorded for transparency and reproducibility.
+> TRACE audit logging is active for this project. Tool calls, decisions,
+> contributions, and annotations will be recorded for transparency and reproducibility.
 
 This acknowledgement should happen once per conversation, not per tool call.
 
@@ -42,12 +42,22 @@ After every tool call to another MCP server, call `trace_log_tool_call` with:
 - a `reasoning` note explaining why the tool was called
 - failed calls are especially important to log (status: "error")
 
+### Required: Contribution Logging
+
+After completing a significant piece of work, call `trace_log_contribution` with:
+- `description`: what was contributed
+- `direction`: who had the idea — `"human"`, `"ai"`, or `"collaborative"`
+- `execution`: who did the work — `"human"`, `"ai"`, or `"collaborative"`
+- `artifact`: optional file path or identifier for the output
+- `related_decision_ids`: optional list of decision event IDs that motivated this
+
 ### Required: Decision Logging
 
 Before any significant methodological choice, call `trace_propose_decision`:
 - which method/algorithm, parameters, thresholds, data inclusion/exclusion,
   how to handle messy data, which model, how to interpret ambiguous results
 - include a specific, technical rationale
+- use `suggestion_type`: `"proactive"` (AI volunteered), `"requested"` (human asked), or `"collaborative"`
 - wait for human confirmation on consequential decisions
 - when the human responds, call `trace_resolve_decision` with their disposition
 
@@ -64,6 +74,12 @@ Log observations as they occur with `trace_log_annotation`:
 
 When switching models, changing parameters, or updating configuration,
 call `trace_log_state_change` with old and new values.
+
+### Project Summaries
+
+Use `trace_project_summary(project="...")` to get aggregated metrics across all
+sessions for paper-ready statistics (event counts, decision breakdowns, contribution
+attribution, participant lists).
 
 ### Principles
 

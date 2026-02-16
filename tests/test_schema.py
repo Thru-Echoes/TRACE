@@ -11,6 +11,7 @@ import pytest
 from trace_mcp.schema import (
     Actor,
     AnnotationData,
+    ContributionData,
     DecisionData,
     Environment,
     Session,
@@ -56,7 +57,7 @@ class TestSession:
         )
         assert s.id == "trace_20260205_abc123"
         assert s.status == "active"
-        assert s.trace_version == "0.1.0"
+        assert s.trace_version == "0.2.0"
         assert isinstance(s.created, datetime)
 
     def test_next_event_id(self) -> None:
@@ -140,6 +141,26 @@ class TestTraceEvent:
         )
         assert evt.state_change is not None
 
+    def test_valid_contribution(self) -> None:
+        evt = TraceEvent(
+            id="evt_005",
+            session_id="s001",
+            type="contribution",
+            actor=Actor(type="ai", id="claude"),
+            contribution=ContributionData(
+                description="Implemented cosine similarity function",
+                artifact="src/similarity.py",
+                direction="human",
+                execution="ai",
+                related_decision_ids=["evt_002"],
+                tags=["implementation"],
+            ),
+        )
+        assert evt.contribution is not None
+        assert evt.contribution.direction == "human"
+        assert evt.contribution.execution == "ai"
+        assert evt.contribution.artifact == "src/similarity.py"
+
     def test_type_data_mismatch_raises(self) -> None:
         with pytest.raises(ValueError, match="requires 'tool_call' to be populated"):
             TraceEvent(
@@ -206,6 +227,75 @@ class TestDecisionData:
             assert "revision_note" in str(w[0].message)
 
 
+# ── ContributionData ─────────────────────────────────────────────────────────
+
+
+class TestContributionData:
+    def test_minimal(self) -> None:
+        c = ContributionData(
+            description="Wrote analysis script",
+            direction="human",
+            execution="ai",
+        )
+        assert c.direction == "human"
+        assert c.execution == "ai"
+        assert c.artifact is None
+        assert c.related_decision_ids == []
+        assert c.tags == []
+
+    def test_full(self) -> None:
+        c = ContributionData(
+            description="Refactored embedding pipeline",
+            artifact="src/embeddings.py",
+            direction="ai",
+            execution="collaborative",
+            related_decision_ids=["evt_002", "evt_003"],
+            tags=["refactor", "embeddings"],
+        )
+        assert c.artifact == "src/embeddings.py"
+        assert len(c.related_decision_ids) == 2
+        assert c.tags == ["refactor", "embeddings"]
+
+    def test_roundtrip_json(self) -> None:
+        c = ContributionData(
+            description="Test",
+            direction="collaborative",
+            execution="human",
+            artifact="test.py",
+        )
+        data = c.model_dump(mode="json")
+        restored = ContributionData.model_validate(data)
+        assert restored.direction == "collaborative"
+        assert restored.execution == "human"
+
+
+class TestDecisionSuggestionType:
+    def test_suggestion_type_none_by_default(self) -> None:
+        d = DecisionData(
+            description="Test",
+            proposed_by=Actor(type="ai", id="claude"),
+        )
+        assert d.suggestion_type is None
+
+    def test_suggestion_type_proactive(self) -> None:
+        d = DecisionData(
+            description="Use BGE embeddings",
+            proposed_by=Actor(type="ai", id="claude"),
+            suggestion_type="proactive",
+        )
+        assert d.suggestion_type == "proactive"
+
+    def test_suggestion_type_roundtrip(self) -> None:
+        d = DecisionData(
+            description="Test",
+            proposed_by=Actor(type="ai", id="claude"),
+            suggestion_type="requested",
+        )
+        data = d.model_dump(mode="json")
+        restored = DecisionData.model_validate(data)
+        assert restored.suggestion_type == "requested"
+
+
 # ── Round-trip ───────────────────────────────────────────────────────────────
 
 
@@ -220,7 +310,7 @@ class TestRoundTrip:
                     mcp_servers=["corpus-search"],
                     client="claude-code",
                     os="Darwin",
-                    trace_version="0.1.0",
+                    trace_version="0.2.0",
                 ),
                 tags=["test"],
             ),
@@ -250,6 +340,84 @@ class TestRoundTrip:
 
 
 # ── JSON Schema Generation ──────────────────────────────────────────────────
+
+
+class TestCorrectionAnnotation:
+    def test_correction_category(self) -> None:
+        evt = TraceEvent(
+            id="evt_010",
+            session_id="s001",
+            type="annotation",
+            actor=Actor(type="human", id="researcher"),
+            annotation=AnnotationData(
+                category="correction",
+                content="AI was using wrong conda env; correct env is ml-dev",
+                corrects_event_ids=["evt_007", "evt_008", "evt_009"],
+            ),
+        )
+        assert evt.annotation is not None
+        assert evt.annotation.category == "correction"
+        assert len(evt.annotation.corrects_event_ids) == 3
+
+    def test_correction_empty_corrects(self) -> None:
+        a = AnnotationData(
+            category="correction",
+            content="Minor fix, no linked events",
+        )
+        assert a.corrects_event_ids == []
+
+    def test_corrects_event_ids_on_non_correction(self) -> None:
+        """corrects_event_ids can be set on any category (not restricted)."""
+        a = AnnotationData(
+            category="gotcha",
+            content="Found a bug",
+            corrects_event_ids=["evt_001"],
+        )
+        assert a.corrects_event_ids == ["evt_001"]
+
+    def test_correction_roundtrip_json(self) -> None:
+        a = AnnotationData(
+            category="correction",
+            content="Wrong env used",
+            corrects_event_ids=["evt_001", "evt_002"],
+            tags=["env", "conda"],
+        )
+        data = a.model_dump(mode="json")
+        restored = AnnotationData.model_validate(data)
+        assert restored.category == "correction"
+        assert restored.corrects_event_ids == ["evt_001", "evt_002"]
+
+
+class TestToolCallRetries:
+    def test_retries_event_id(self) -> None:
+        tc = ToolCallData(
+            server="bash",
+            name="run_command",
+            input={"command": "conda activate ml-dev"},
+            status="error",
+            error_message="CondaError: environment not found",
+            retries_event_id="evt_001",
+        )
+        assert tc.retries_event_id == "evt_001"
+
+    def test_retries_event_id_none_by_default(self) -> None:
+        tc = ToolCallData(
+            server="bash",
+            name="run_command",
+            input={"command": "echo hello"},
+        )
+        assert tc.retries_event_id is None
+
+    def test_retries_roundtrip_json(self) -> None:
+        tc = ToolCallData(
+            server="bash",
+            name="run_command",
+            input={"command": "test"},
+            retries_event_id="evt_005",
+        )
+        data = tc.model_dump(mode="json")
+        restored = ToolCallData.model_validate(data)
+        assert restored.retries_event_id == "evt_005"
 
 
 class TestJsonSchema:

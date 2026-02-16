@@ -17,6 +17,6 @@ PROV_MAPPING = {
 
 PROV_CONTEXT = {
     "prov": "http://www.w3.org/ns/prov#",
-    "trace": "https://trace-protocol.org/ns/v0.1#",
+    "trace": "https://trace-protocol.org/ns/v0.2#",
     "xsd": "http://www.w3.org/2001/XMLSchema#",
 }

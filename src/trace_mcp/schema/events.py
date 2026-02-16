@@ -19,6 +19,7 @@ class EventContext(BaseModel):
     conversation_turn: int | None = None
     parent_event_id: str | None = None
     reasoning_summary: str | None = None
+    conversation_snippet: str | None = None
     related_event_ids: list[str] = Field(default_factory=list)
 
 
@@ -35,6 +36,7 @@ class ToolCallData(BaseModel):
     duration_ms: int | None = None
     status: Literal["success", "error", "timeout"] = "success"
     error_message: str | None = None
+    retries_event_id: str | None = None
 
 
 class DecisionData(BaseModel):
@@ -47,6 +49,7 @@ class DecisionData(BaseModel):
     resolved_by: Actor | None = None
     revision_note: str | None = None
     revises_event_id: str | None = None
+    suggestion_type: Literal["proactive", "requested", "collaborative"] | None = None
     tags: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
@@ -63,11 +66,27 @@ class DecisionData(BaseModel):
 
 
 class AnnotationData(BaseModel):
-    """Free-form observations, learnings, gotchas, todos."""
+    """Free-form observations, learnings, gotchas, corrections, todos."""
 
-    category: Literal["learning", "gotcha", "observation", "todo", "question", "other"]
+    category: Literal["learning", "gotcha", "observation", "correction", "todo", "question", "other"]
     content: str
+    corrects_event_ids: list[str] = Field(default_factory=list)
     related_event_ids: list[str] = Field(default_factory=list)
+    tags: list[str] = Field(default_factory=list)
+
+
+class ContributionData(BaseModel):
+    """Records a contribution with direction-vs-execution attribution.
+
+    Captures who had the idea (direction) vs who did the work (execution),
+    linking back to the decisions that motivated this contribution.
+    """
+
+    description: str
+    artifact: str | None = None
+    direction: Literal["human", "ai", "collaborative"]
+    execution: Literal["human", "ai", "collaborative"]
+    related_decision_ids: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
 
 
@@ -87,13 +106,14 @@ class TraceEvent(BaseModel):
     id: str = ""
     timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     session_id: str
-    type: Literal["tool_call", "decision", "annotation", "state_change"]
+    type: Literal["tool_call", "decision", "annotation", "state_change", "contribution"]
     actor: Actor
 
     tool_call: ToolCallData | None = None
     decision: DecisionData | None = None
     annotation: AnnotationData | None = None
     state_change: StateChangeData | None = None
+    contribution: ContributionData | None = None
 
     context: EventContext = Field(default_factory=EventContext)
 
@@ -107,6 +127,7 @@ class TraceEvent(BaseModel):
             "decision": "decision",
             "annotation": "annotation",
             "state_change": "state_change",
+            "contribution": "contribution",
         }
         expected_field = type_to_field[self.type]
         if getattr(self, expected_field) is None:

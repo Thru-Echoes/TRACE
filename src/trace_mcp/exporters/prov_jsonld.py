@@ -84,6 +84,12 @@ def _build_bundle(session: Session) -> dict[str, Any]:
             }
             if tc.duration_ms is not None:
                 bundle["activity"][activity_id]["trace:durationMs"] = tc.duration_ms
+            if tc.retries_event_id:
+                retried_id = f"trace:{tc.retries_event_id}"
+                bundle["wasRevisionOf"][f"trace:retry_{evt.id}"] = {
+                    "prov:generatedEntity": activity_id,
+                    "prov:usedEntity": retried_id,
+                }
 
             # Input entity
             input_id = f"trace:{evt.id}_input"
@@ -139,6 +145,31 @@ def _build_bundle(session: Session) -> dict[str, Any]:
                 "prov:entity": entity_id,
                 "prov:agent": actor_id,
             }
+            # Link corrections to the events they correct
+            for corrected_id in a.corrects_event_ids:
+                bundle["wasRevisionOf"][f"trace:corr_{evt.id}_{corrected_id}"] = {
+                    "prov:generatedEntity": entity_id,
+                    "prov:usedEntity": f"trace:{corrected_id}",
+                }
+
+        elif evt.type == "contribution" and evt.contribution:
+            c = evt.contribution
+            bundle["activity"][activity_id] = {
+                "prov:type": "trace:Contribution",
+                "prov:startTime": _iso(evt.timestamp),
+                "trace:description": c.description,
+                "trace:direction": c.direction,
+                "trace:execution": c.execution,
+            }
+            if c.artifact:
+                bundle["activity"][activity_id]["trace:artifact"] = c.artifact
+            # Link to related decisions
+            for dec_id in c.related_decision_ids:
+                rel_id = f"trace:{dec_id}"
+                bundle["used"][f"trace:used_{evt.id}_{dec_id}"] = {
+                    "prov:activity": activity_id,
+                    "prov:entity": rel_id,
+                }
 
         elif evt.type == "state_change" and evt.state_change:
             sc = evt.state_change

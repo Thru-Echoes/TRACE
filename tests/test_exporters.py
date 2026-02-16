@@ -10,6 +10,7 @@ from trace_mcp.exporters import export_markdown, export_prov_jsonld
 from trace_mcp.schema import (
     Actor,
     AnnotationData,
+    ContributionData,
     DecisionData,
     Environment,
     Session,
@@ -36,7 +37,7 @@ def sample_session() -> Session:
                 mcp_servers=["corpus-search-mcp"],
                 client="claude-code",
                 os="Darwin",
-                trace_version="0.1.0",
+                trace_version="0.2.0",
             ),
             tags=["ipcc", "adaptation"],
         ),
@@ -100,9 +101,24 @@ def sample_session() -> Session:
                     tags=["preprocessing"],
                 ),
             ),
-            # State change
+            # Contribution
             TraceEvent(
                 id="evt_005",
+                session_id="trace_20260205_abc123",
+                type="contribution",
+                actor=Actor(type="ai", id="claude-sonnet-4"),
+                contribution=ContributionData(
+                    description="Implemented cosine similarity function",
+                    artifact="src/similarity.py",
+                    direction="human",
+                    execution="ai",
+                    related_decision_ids=["evt_002"],
+                    tags=["implementation"],
+                ),
+            ),
+            # State change
+            TraceEvent(
+                id="evt_006",
                 session_id="trace_20260205_abc123",
                 type="state_change",
                 actor=Actor(type="human", id="researcher-jane"),
@@ -162,6 +178,13 @@ class TestMarkdownExport:
         md = export_markdown(sample_session)
         assert "\U0001f525" in md  # fire for gotcha
 
+    def test_contains_contributions(self, sample_session: Session) -> None:
+        md = export_markdown(sample_session)
+        assert "## Contributions" in md
+        assert "cosine similarity" in md
+        assert "src/similarity.py" in md
+        assert "human" in md  # direction
+
     def test_summary_section(self, sample_session: Session) -> None:
         md = export_markdown(sample_session)
         assert "## Summary" in md
@@ -203,6 +226,18 @@ class TestProvJsonLdExport:
         assert "wasRevisionOf" in bundle
         revisions = bundle["wasRevisionOf"]
         assert len(revisions) > 0
+
+    def test_contribution_activity(self, sample_session: Session) -> None:
+        raw = export_prov_jsonld(sample_session)
+        doc = json.loads(raw)
+        bundle_key = list(doc["bundle"].keys())[0]
+        bundle = doc["bundle"][bundle_key]
+        # evt_005 is a contribution
+        assert "trace:evt_005" in bundle["activity"]
+        activity = bundle["activity"]["trace:evt_005"]
+        assert activity["prov:type"] == "trace:Contribution"
+        assert activity["trace:direction"] == "human"
+        assert activity["trace:execution"] == "ai"
 
     def test_valid_json(self, sample_session: Session) -> None:
         raw = export_prov_jsonld(sample_session)
