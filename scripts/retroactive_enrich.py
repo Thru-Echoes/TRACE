@@ -144,15 +144,18 @@ def enrich_20260206_ed3db3(s: dict) -> None:
 
     # The annotation confirms tests were written: "When mocking Playwright locators..."
     # AI proposed the strategy and executed it
-    s["events"].append(make_contribution(
-        s["id"], s["events"],
-        description="Implemented test suite for scraper with mocked Playwright objects",
-        artifact="tests/",
-        direction="ai",
-        execution="ai",
-        related_decision_ids=["evt_001"],
-        tags=["testing", "scraper"],
-    ))
+    s["events"].append(
+        make_contribution(
+            s["id"],
+            s["events"],
+            description="Implemented test suite for scraper with mocked Playwright objects",
+            artifact="tests/",
+            direction="ai",
+            execution="ai",
+            related_decision_ids=["evt_001"],
+            tags=["testing", "scraper"],
+        )
+    )
 
 
 def enrich_20260209_2f6b35(s: dict) -> None:
@@ -165,15 +168,18 @@ def enrich_20260209_2f6b35(s: dict) -> None:
             add_suggestion_type(evt, "proactive")
 
     # Annotation evt_002 explicitly says AI added the documentation to all 4 versions
-    s["events"].append(make_contribution(
-        s["id"], s["events"],
-        description="Added Likert thematic phrases documentation (Supplementary Table S4) to 4 manuscript versions",
-        artifact="NHB2026/, ACM2026/, general_manuscript/, arxiv/",
-        direction="ai",
-        execution="ai",
-        related_decision_ids=["evt_001"],
-        tags=["manuscript", "likert-phrases", "supplementary"],
-    ))
+    s["events"].append(
+        make_contribution(
+            s["id"],
+            s["events"],
+            description="Added Likert thematic phrases documentation (Supplementary Table S4) to 4 manuscript versions",
+            artifact="NHB2026/, ACM2026/, general_manuscript/, arxiv/",
+            direction="ai",
+            execution="ai",
+            related_decision_ids=["evt_001"],
+            tags=["manuscript", "likert-phrases", "supplementary"],
+        )
+    )
 
 
 def enrich_20260209_99430f(s: dict) -> None:
@@ -187,15 +193,18 @@ def enrich_20260209_99430f(s: dict) -> None:
             add_suggestion_type(evt, "proactive")
 
     # Annotation confirms 55 replacements across 4 files
-    s["events"].append(make_contribution(
-        s["id"], s["events"],
-        description="Fixed 55 natbib citation commands across 4 NHB2026 manuscript sections",
-        artifact="NHB2026/sections/",
-        direction="ai",
-        execution="ai",
-        related_decision_ids=["evt_001"],
-        tags=["natbib", "citations", "latex"],
-    ))
+    s["events"].append(
+        make_contribution(
+            s["id"],
+            s["events"],
+            description="Fixed 55 natbib citation commands across 4 NHB2026 manuscript sections",
+            artifact="NHB2026/sections/",
+            direction="ai",
+            execution="ai",
+            related_decision_ids=["evt_001"],
+            tags=["natbib", "citations", "latex"],
+        )
+    )
 
 
 def enrich_20260209_ee5541(s: dict) -> None:
@@ -206,15 +215,18 @@ def enrich_20260209_ee5541(s: dict) -> None:
         if evt["type"] == "decision":
             add_suggestion_type(evt, "proactive")
 
-    s["events"].append(make_contribution(
-        s["id"], s["events"],
-        description="Fixed natbib citation commands in arxiv/main.tex using NHB2026 patterns as reference",
-        artifact="arxiv/main.tex",
-        direction="ai",
-        execution="ai",
-        related_decision_ids=["evt_001"],
-        tags=["natbib", "citations", "latex", "arxiv"],
-    ))
+    s["events"].append(
+        make_contribution(
+            s["id"],
+            s["events"],
+            description="Fixed natbib citation commands in arxiv/main.tex using NHB2026 patterns as reference",
+            artifact="arxiv/main.tex",
+            direction="ai",
+            execution="ai",
+            related_decision_ids=["evt_001"],
+            tags=["natbib", "citations", "latex", "arxiv"],
+        )
+    )
 
 
 def enrich_20260209_76cdd0(s: dict) -> None:
@@ -225,14 +237,17 @@ def enrich_20260209_76cdd0(s: dict) -> None:
         ensure_contribution_field(evt)
 
     # Annotation says "Successfully synced arxiv/main.tex to match NHB2026 figure/table structure"
-    s["events"].append(make_contribution(
-        s["id"], s["events"],
-        description="Synced arxiv/main.tex figure/table structure to match NHB2026 sections",
-        artifact="arxiv/main.tex",
-        direction="human",
-        execution="ai",
-        tags=["manuscript", "sync", "arxiv"],
-    ))
+    s["events"].append(
+        make_contribution(
+            s["id"],
+            s["events"],
+            description="Synced arxiv/main.tex figure/table structure to match NHB2026 sections",
+            artifact="arxiv/main.tex",
+            direction="human",
+            execution="ai",
+            tags=["manuscript", "sync", "arxiv"],
+        )
+    )
 
 
 def enrich_20260211_694ff3(s: dict) -> None:
@@ -264,39 +279,51 @@ def enrich_20260211_cc217f(s: dict) -> None:
 
     # Session summary explicitly lists files created and artifacts generated
     # Human directed (asked for projection head), AI executed everything
-    s["events"].append(make_contribution(
-        s["id"], s["events"],
-        description="Implemented consensus UMAP target generation pipeline (30-seed, distance-matrix consensus)",
-        artifact="hye_in/projection/generate_targets.py",
-        direction="human",
-        execution="ai",
-        tags=["consensus-umap", "target-generation"],
-    ))
-    s["events"].append(make_contribution(
-        s["id"], s["events"],
-        description="Implemented ProjectionHead (384->15) and VisualizationHead (15->2) PyTorch models with custom loss",
-        artifact="hye_in/projection/model.py",
-        direction="collaborative",
-        execution="ai",
-        related_decision_ids=[],  # Decisions are in trace_20260211_ac652b, different session
-        tags=["neural-network", "pytorch", "model"],
-    ))
-    s["events"].append(make_contribution(
-        s["id"], s["events"],
-        description="Implemented 5-fold stratified CV training pipeline with early stopping",
-        artifact="hye_in/projection/train.py",
-        direction="collaborative",
-        execution="ai",
-        tags=["training", "cross-validation"],
-    ))
-    s["events"].append(make_contribution(
-        s["id"], s["events"],
-        description="Implemented inference pipeline and deliverable builder for Hye-In",
-        artifact="hye_in/projection/inference.py",
-        direction="human",
-        execution="ai",
-        tags=["inference", "deliverable"],
-    ))
+    s["events"].append(
+        make_contribution(
+            s["id"],
+            s["events"],
+            description="Implemented consensus UMAP target generation pipeline (30-seed, distance-matrix consensus)",
+            artifact="hye_in/projection/generate_targets.py",
+            direction="human",
+            execution="ai",
+            tags=["consensus-umap", "target-generation"],
+        )
+    )
+    s["events"].append(
+        make_contribution(
+            s["id"],
+            s["events"],
+            description="Implemented ProjectionHead (384->15) and VisualizationHead (15->2) PyTorch models with custom loss",
+            artifact="hye_in/projection/model.py",
+            direction="collaborative",
+            execution="ai",
+            related_decision_ids=[],  # Decisions are in trace_20260211_ac652b, different session
+            tags=["neural-network", "pytorch", "model"],
+        )
+    )
+    s["events"].append(
+        make_contribution(
+            s["id"],
+            s["events"],
+            description="Implemented 5-fold stratified CV training pipeline with early stopping",
+            artifact="hye_in/projection/train.py",
+            direction="collaborative",
+            execution="ai",
+            tags=["training", "cross-validation"],
+        )
+    )
+    s["events"].append(
+        make_contribution(
+            s["id"],
+            s["events"],
+            description="Implemented inference pipeline and deliverable builder for Hye-In",
+            artifact="hye_in/projection/inference.py",
+            direction="human",
+            execution="ai",
+            tags=["inference", "deliverable"],
+        )
+    )
 
 
 def enrich_20260213_058f4f(s: dict) -> None:
@@ -393,15 +420,15 @@ def main() -> None:
 
         # Count decisions before
         old_suggestion_types = sum(
-            1 for e in s.get("events", [])
-            if e.get("decision", {}) and e["decision"].get("suggestion_type")
+            1 for e in s.get("events", []) if e.get("decision", {}) and e["decision"].get("suggestion_type")
         )
 
         enrich_fn(s)
 
         new_event_count = len(s.get("events", []))
         new_suggestion_types = sum(
-            1 for e in s.get("events", [])
+            1
+            for e in s.get("events", [])
             if e.get("decision") and e["decision"] and e["decision"].get("suggestion_type")
         )
 
@@ -415,7 +442,7 @@ def main() -> None:
             print(f"  +{st_added} suggestion_type fields")
             suggestion_types_added += st_added
         if added == 0 and st_added == 0:
-            print(f"  Schema fields updated (no substantive changes)")
+            print("  Schema fields updated (no substantive changes)")
 
         save(session_id, s)
         enriched += 1

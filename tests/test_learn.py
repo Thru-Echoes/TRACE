@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-
 from typing import Literal
 
 from trace_mcp.extensions.learn.extraction import extract_from_session
@@ -27,7 +26,6 @@ from trace_mcp.schema.events import (
     TraceEvent,
 )
 from trace_mcp.schema.session import Actor, SessionMetadata
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -104,17 +102,23 @@ class TestKnowledgeStoreModel:
         assert ks.next_learning_id() == "lrn_001"
 
     def test_id_generation_sequential(self):
-        ks = KnowledgeStore(project="test", learnings=[
-            Learning(id="lrn_001", content="first"),
-            Learning(id="lrn_002", content="second"),
-        ])
+        ks = KnowledgeStore(
+            project="test",
+            learnings=[
+                Learning(id="lrn_001", content="first"),
+                Learning(id="lrn_002", content="second"),
+            ],
+        )
         assert ks.next_learning_id() == "lrn_003"
 
     def test_id_generation_with_gap(self):
-        ks = KnowledgeStore(project="test", learnings=[
-            Learning(id="lrn_001", content="first"),
-            Learning(id="lrn_005", content="fifth"),
-        ])
+        ks = KnowledgeStore(
+            project="test",
+            learnings=[
+                Learning(id="lrn_001", content="first"),
+                Learning(id="lrn_005", content="fifth"),
+            ],
+        )
         assert ks.next_learning_id() == "lrn_006"
 
     def test_json_roundtrip(self):
@@ -246,7 +250,9 @@ class TestExtraction:
     def test_extract_correction_annotation(self):
         events = [
             _make_annotation_event(
-                "evt_001", "correction", "Wrong conda env — use ml-dev",
+                "evt_001",
+                "correction",
+                "Wrong conda env — use ml-dev",
                 corrects_event_ids=["evt_000"],
             )
         ]
@@ -260,7 +266,8 @@ class TestExtraction:
     def test_extract_rejected_decision(self):
         events = [
             _make_decision_event(
-                "evt_001", "Use base conda env",
+                "evt_001",
+                "Use base conda env",
                 disposition="rejected",
                 revision_note="Always use ml-dev for this project",
             )
@@ -294,9 +301,7 @@ class TestExtraction:
         assert len(ks.learnings) == 0
 
     def test_skip_accepted_decision(self):
-        events = [
-            _make_decision_event("evt_001", "Use pandas for analysis", disposition="accepted")
-        ]
+        events = [_make_decision_event("evt_001", "Use pandas for analysis", disposition="accepted")]
         session = _make_session(events)
         ks = KnowledgeStore(project="test")
 
@@ -313,18 +318,25 @@ class TestLearnIntegration:
         # 1. Create a session with extractable events
         events = [
             _make_annotation_event(
-                "evt_001", "correction", "Use ml-dev conda env, not base",
+                "evt_001",
+                "correction",
+                "Use ml-dev conda env, not base",
                 tags=["conda", "env"],
             ),
             _make_annotation_event(
-                "evt_002", "learning", "Always activate env before pip install",
+                "evt_002",
+                "learning",
+                "Always activate env before pip install",
                 tags=["conda", "pip"],
             ),
             _make_annotation_event(
-                "evt_003", "observation", "Pipeline took 45 minutes",
+                "evt_003",
+                "observation",
+                "Pipeline took 45 minutes",
             ),
             _make_decision_event(
-                "evt_004", "Use GPU instance for training",
+                "evt_004",
+                "Use GPU instance for training",
                 disposition="revised",
                 revision_note="Use CPU — GPU quota exhausted",
                 tags=["compute"],

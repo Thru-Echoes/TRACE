@@ -263,9 +263,7 @@ class TestProjectSummary:
         )
 
         # Log an annotation
-        await logging_tools.log_annotation(
-            storage, session, category="learning", content="Method A works well"
-        )
+        await logging_tools.log_annotation(storage, session, category="learning", content="Method A works well")
 
         await session_tools.end_session(storage, active, session_id=session_id)
 
@@ -295,9 +293,7 @@ class TestProjectSummary:
     ) -> None:
         # Create two sessions for the same project
         for i in range(2):
-            await session_tools.start_session(
-                storage, active, project="multi-test"
-            )
+            await session_tools.start_session(storage, active, project="multi-test")
             session_id = list(active.keys())[-1]
             session = active[session_id]
 
@@ -347,14 +343,17 @@ class TestCorrectionWorkflow:
     ) -> None:
         # Start session
         result = await session_tools.start_session(
-            storage, active, project="correction-test",
+            storage,
+            active,
+            project="correction-test",
         )
         session_id = result.split("Session: ")[1].split("\n")[0]
         session = active[session_id]
 
         # AI proposes to use conda env "base"
         dec_id = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Use conda env 'base' for running analysis",
             proposed_by_type="ai",
             proposed_by_id="claude",
@@ -364,7 +363,8 @@ class TestCorrectionWorkflow:
 
         # Attempt 1: AI tries wrong conda env — fails
         tc1_id = await logging_tools.log_tool_call(
-            storage, session,
+            storage,
+            session,
             server="bash",
             tool_name="run_command",
             input={"command": "conda activate base && python analyze.py"},
@@ -375,7 +375,8 @@ class TestCorrectionWorkflow:
 
         # Attempt 2: AI retries same wrong env — fails again
         tc2_id = await logging_tools.log_tool_call(
-            storage, session,
+            storage,
+            session,
             server="bash",
             tool_name="run_command",
             input={"command": "conda activate base && pip install pandas && python analyze.py"},
@@ -387,7 +388,8 @@ class TestCorrectionWorkflow:
 
         # Attempt 3: AI tries yet another wrong approach — fails
         tc3_id = await logging_tools.log_tool_call(
-            storage, session,
+            storage,
+            session,
             server="bash",
             tool_name="run_command",
             input={"command": "pip install --user pandas && python analyze.py"},
@@ -399,7 +401,8 @@ class TestCorrectionWorkflow:
 
         # Human intervenes: rejects the AI's env decision
         result = await decision_tools.resolve_decision(
-            storage, session,
+            storage,
+            session,
             event_id=dec_id,
             disposition="rejected",
             resolved_by_type="human",
@@ -410,11 +413,12 @@ class TestCorrectionWorkflow:
 
         # Human logs a correction annotation linking to the failed attempts
         corr_id = await logging_tools.log_annotation(
-            storage, session,
+            storage,
+            session,
             category="correction",
             content="Human caught that AI was using wrong conda env 3 times. "
-                    "Correct env is 'ml-dev', not 'base'. Human had forgotten "
-                    "to activate it before starting the session.",
+            "Correct env is 'ml-dev', not 'base'. Human had forgotten "
+            "to activate it before starting the session.",
             corrects_event_ids=[tc1_id, tc2_id, tc3_id],
             tags=["env", "conda", "human-intervention"],
             actor_type="human",
@@ -424,7 +428,8 @@ class TestCorrectionWorkflow:
 
         # AI now proposes correct env (revises original decision)
         dec2_id = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Use conda env 'ml-dev' for running analysis",
             proposed_by_type="human",
             proposed_by_id="researcher",
@@ -435,7 +440,8 @@ class TestCorrectionWorkflow:
 
         # Human accepts
         await decision_tools.resolve_decision(
-            storage, session,
+            storage,
+            session,
             event_id=dec2_id,
             disposition="accepted",
             resolved_by_type="human",
@@ -444,7 +450,8 @@ class TestCorrectionWorkflow:
 
         # Final successful attempt with correct env
         tc4_id = await logging_tools.log_tool_call(
-            storage, session,
+            storage,
+            session,
             server="bash",
             tool_name="run_command",
             input={"command": "conda activate ml-dev && python analyze.py"},
@@ -480,33 +487,47 @@ class TestCorrectionWorkflow:
     ) -> None:
         """Verify project_summary includes human_interventions metrics."""
         result = await session_tools.start_session(
-            storage, active, project="correction-metrics-test",
+            storage,
+            active,
+            project="correction-metrics-test",
         )
         session_id = result.split("Session: ")[1].split("\n")[0]
         session = active[session_id]
 
         # Log a failed tool call chain (3 retries)
         tc1 = await logging_tools.log_tool_call(
-            storage, session,
-            server="bash", tool_name="cmd", input={"c": "1"},
-            status="error", error_message="fail 1",
+            storage,
+            session,
+            server="bash",
+            tool_name="cmd",
+            input={"c": "1"},
+            status="error",
+            error_message="fail 1",
         )
         tc2 = await logging_tools.log_tool_call(
-            storage, session,
-            server="bash", tool_name="cmd", input={"c": "2"},
-            status="error", error_message="fail 2",
+            storage,
+            session,
+            server="bash",
+            tool_name="cmd",
+            input={"c": "2"},
+            status="error",
+            error_message="fail 2",
             retries_event_id=tc1,
         )
         await logging_tools.log_tool_call(
-            storage, session,
-            server="bash", tool_name="cmd", input={"c": "3"},
+            storage,
+            session,
+            server="bash",
+            tool_name="cmd",
+            input={"c": "3"},
             status="success",
             retries_event_id=tc2,
         )
 
         # Log a correction annotation
         await logging_tools.log_annotation(
-            storage, session,
+            storage,
+            session,
             category="correction",
             content="Human corrected the command",
             corrects_event_ids=[tc1, tc2],
@@ -516,13 +537,15 @@ class TestCorrectionWorkflow:
 
         # Log a decision that gets rejected
         dec_id = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Use approach X",
             proposed_by_type="ai",
             proposed_by_id="claude",
         )
         await decision_tools.resolve_decision(
-            storage, session,
+            storage,
+            session,
             event_id=dec_id,
             disposition="rejected",
             resolved_by_type="human",
@@ -532,13 +555,15 @@ class TestCorrectionWorkflow:
 
         # Log a decision that gets revised
         dec2_id = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Use approach Y",
             proposed_by_type="ai",
             proposed_by_id="claude",
         )
         await decision_tools.resolve_decision(
-            storage, session,
+            storage,
+            session,
             event_id=dec2_id,
             disposition="revised",
             resolved_by_type="human",
