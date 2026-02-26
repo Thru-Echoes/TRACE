@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
 from typing import Any
 
+import trace_mcp
 from trace_mcp.schema import Session
 from trace_mcp.storage.base import TraceStorage
 
@@ -263,4 +266,81 @@ async def project_summary(
             "intervention_rate": intervention_rate,
         },
         "participants": sorted(participants),
+    }
+
+
+async def health_check(
+    storage: TraceStorage,
+    *,
+    project: str | None = None,
+    session_id: str | None = None,
+) -> dict[str, Any]:
+    """Return system health info and event-level statistics.
+
+    Optionally scoped to a single project or session.
+    """
+    # Storage paths
+    sessions_dir = str(storage._dir) if hasattr(storage, "_dir") else "unknown"
+    sessions_dir_exists = Path(sessions_dir).is_dir() if sessions_dir != "unknown" else False
+
+    try:
+        from trace_mcp.extensions.learn.store import _get_directory
+
+        knowledge_dir = str(_get_directory())
+    except Exception:
+        knowledge_dir = str(Path(os.environ.get("TRACE_KNOWLEDGE_DIR", "~/.trace/knowledge")).expanduser())
+    knowledge_dir_exists = Path(knowledge_dir).is_dir()
+
+    try:
+        from trace_mcp.extensions.evolve.store import _get_directory as _get_evolution_dir
+
+        evolution_dir = str(_get_evolution_dir())
+    except Exception:
+        evolution_dir = str(Path(os.environ.get("TRACE_EVOLUTION_DIR", "~/.trace/evolution")).expanduser())
+    evolution_dir_exists = Path(evolution_dir).is_dir()
+
+    # Load sessions
+    sessions: list[Session] = []
+    if session_id:
+        try:
+            sessions.append(await storage.get_session(session_id))
+        except FileNotFoundError:
+            pass
+    else:
+        summaries = await storage.list_sessions(project=project, limit=10000)
+        for s in summaries:
+            try:
+                sessions.append(await storage.get_session(s["id"]))
+            except FileNotFoundError:
+                continue
+
+    # Tally events
+    total = 0
+    by_type: dict[str, int] = {}
+    by_actor_type: dict[str, int] = {}
+
+    for session in sessions:
+        for evt in session.events:
+            total += 1
+            by_type[evt.type] = by_type.get(evt.type, 0) + 1
+            by_actor_type[evt.actor.type] = by_actor_type.get(evt.actor.type, 0) + 1
+
+    return {
+        "version": trace_mcp.__version__,
+        "storage": {
+            "sessions_dir": sessions_dir,
+            "sessions_dir_exists": sessions_dir_exists,
+            "knowledge_dir": knowledge_dir,
+            "knowledge_dir_exists": knowledge_dir_exists,
+            "evolution_dir": evolution_dir,
+            "evolution_dir_exists": evolution_dir_exists,
+        },
+        "session_count": len(sessions),
+        "project_filter": project,
+        "session_filter": session_id,
+        "events": {
+            "total": total,
+            "by_type": by_type,
+            "by_actor_type": by_actor_type,
+        },
     }

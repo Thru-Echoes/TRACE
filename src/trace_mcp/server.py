@@ -446,6 +446,26 @@ async def trace_project_summary(
         return f"Error generating project summary: {e}"
 
 
+@mcp.tool()
+async def trace_health_check(
+    project: str | None = None,
+    session_id: str | None = None,
+) -> str:
+    """Return system health info and event-level statistics.
+
+    Reports TRACE version, storage paths, session count, and event breakdown
+    (total, by type, by actor type). Optionally scoped to a project or session.
+    """
+    try:
+        result = await query_tools.health_check(
+            storage, project=project, session_id=session_id
+        )
+        return json.dumps(result, indent=2, default=str)
+    except Exception as e:
+        logger.exception("Error running health check")
+        return f"Error running health check: {e}"
+
+
 # ── Export ───────────────────────────────────────────────────────────────────
 
 
