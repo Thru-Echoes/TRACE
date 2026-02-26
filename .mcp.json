@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "trace": {
-      "command": "trace-mcp",
+      "command": "/Users/echoes/Documents/Berkeley/Research/TRACE/.venv/bin/trace-mcp",
       "args": []
     }
   }

@@ -590,6 +590,114 @@ class TestCorrectionWorkflow:
         assert summary["annotations_by_category"]["correction"] == 1
 
 
+class TestHealthCheck:
+    async def test_health_check_empty(self, storage: JsonFileStorage, tmp_path: Path) -> None:
+        result = await query_tools.health_check(storage)
+        assert result["version"] == "0.2.0"
+        assert result["session_count"] == 0
+        assert result["events"]["total"] == 0
+        assert result["events"]["by_type"] == {}
+        assert result["events"]["by_actor_type"] == {}
+        assert result["project_filter"] is None
+        assert result["session_filter"] is None
+
+    async def test_health_check_with_sessions(
+        self, storage: JsonFileStorage, active: dict[str, Session], tmp_path: Path
+    ) -> None:
+        msg = await session_tools.start_session(storage, active, project="hc-test")
+        session_id = msg.split("Session: ")[1].split("\n")[0]
+        session = active[session_id]
+
+        await logging_tools.log_tool_call(
+            storage, session, server="test", tool_name="foo", input={"a": 1},
+            actor_type="ai", actor_id="claude",
+        )
+        await logging_tools.log_annotation(
+            storage, session, category="learning", content="something interesting",
+            actor_type="human", actor_id="researcher",
+        )
+        await session_tools.end_session(storage, active, session_id=session_id)
+
+        result = await query_tools.health_check(storage)
+        assert result["session_count"] == 1
+        assert result["events"]["total"] == 2
+        assert result["events"]["by_type"]["tool_call"] == 1
+        assert result["events"]["by_type"]["annotation"] == 1
+        assert result["events"]["by_actor_type"]["ai"] == 1
+        assert result["events"]["by_actor_type"]["human"] == 1
+
+    async def test_health_check_project_filter(
+        self, storage: JsonFileStorage, active: dict[str, Session], tmp_path: Path
+    ) -> None:
+        msg1 = await session_tools.start_session(storage, active, project="proj-a")
+        sid1 = msg1.split("Session: ")[1].split("\n")[0]
+        session1 = active[sid1]
+        await logging_tools.log_tool_call(
+            storage, session1, server="s", tool_name="t", input={},
+            actor_type="ai", actor_id="claude",
+        )
+        await session_tools.end_session(storage, active, session_id=sid1)
+
+        msg2 = await session_tools.start_session(storage, active, project="proj-b")
+        sid2 = msg2.split("Session: ")[1].split("\n")[0]
+        session2 = active[sid2]
+        await logging_tools.log_tool_call(
+            storage, session2, server="s", tool_name="t", input={},
+            actor_type="ai", actor_id="claude",
+        )
+        await logging_tools.log_tool_call(
+            storage, session2, server="s", tool_name="t2", input={},
+            actor_type="ai", actor_id="claude",
+        )
+        await session_tools.end_session(storage, active, session_id=sid2)
+
+        result = await query_tools.health_check(storage, project="proj-b")
+        assert result["session_count"] == 1
+        assert result["events"]["total"] == 2
+        assert result["project_filter"] == "proj-b"
+
+    async def test_health_check_session_filter(
+        self, storage: JsonFileStorage, active: dict[str, Session], tmp_path: Path
+    ) -> None:
+        msg1 = await session_tools.start_session(storage, active, project="hc-sf")
+        sid1 = msg1.split("Session: ")[1].split("\n")[0]
+        session1 = active[sid1]
+        await logging_tools.log_tool_call(
+            storage, session1, server="s", tool_name="t", input={},
+            actor_type="ai", actor_id="claude",
+        )
+        await session_tools.end_session(storage, active, session_id=sid1)
+
+        msg2 = await session_tools.start_session(storage, active, project="hc-sf")
+        sid2 = msg2.split("Session: ")[1].split("\n")[0]
+        session2 = active[sid2]
+        await logging_tools.log_tool_call(
+            storage, session2, server="s", tool_name="t", input={},
+            actor_type="ai", actor_id="claude",
+        )
+        await logging_tools.log_tool_call(
+            storage, session2, server="s", tool_name="t2", input={},
+            actor_type="ai", actor_id="claude",
+        )
+        await session_tools.end_session(storage, active, session_id=sid2)
+
+        result = await query_tools.health_check(storage, session_id=sid2)
+        assert result["session_count"] == 1
+        assert result["events"]["total"] == 2
+        assert result["session_filter"] == sid2
+
+    async def test_health_check_nonexistent_session(self, storage: JsonFileStorage, tmp_path: Path) -> None:
+        result = await query_tools.health_check(storage, session_id="nonexistent_id")
+        assert result["session_count"] == 0
+        assert result["events"]["total"] == 0
+
+    async def test_health_check_storage_paths(self, storage: JsonFileStorage, tmp_path: Path) -> None:
+        result = await query_tools.health_check(storage)
+        assert result["storage"]["sessions_dir"] == str(tmp_path)
+        assert result["storage"]["sessions_dir_exists"] is True
+        assert "knowledge_dir" in result["storage"]
+
+
 class TestErrorCases:
     async def test_log_to_nonexistent_session(self, storage: JsonFileStorage, active: dict[str, Session]) -> None:
         result = await session_tools.end_session(storage, active, session_id="nonexistent")

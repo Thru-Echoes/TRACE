@@ -50,12 +50,18 @@ src/trace_mcp/
         export_tools.py     # export formatters
     extensions/
         __init__.py         # Package marker
-        learn/              # trace-learn: cross-session knowledge persistence
+        learn/              # trace-learn: cross-session knowledge persistence (default)
             __init__.py     # register(mcp, storage) — registers 5 MCP tools
             models.py       # Learning, KnowledgeStore
             store.py        # File I/O for ~/.trace/knowledge/{project}.json
             extraction.py   # Extract learnings from session events
             matching.py     # Jaccard token similarity + tag-boosted recall
+        evolve/             # trace-evolve: evolution-themed adaptive persistence (legacy)
+            __init__.py     # register(mcp, storage) — registers 5 MCP tools
+            models.py       # Adaptation, Genome
+            store.py        # File I/O for ~/.trace/evolution/{project}.json
+            selection.py    # Natural selection: extract adaptations from session events
+            fitness.py      # Fitness scoring: Jaccard similarity + tag-boosted recall
     exporters/
         markdown_export.py  # Human-readable Markdown
         prov_jsonld.py      # W3C PROV JSON-LD
@@ -69,13 +75,14 @@ tests/
     test_tools.py
     test_exporters.py
     test_learn.py
+    test_evolve.py
 scripts/
     generate_schema.py     # Regenerate JSON Schema from models
 ```
 
-## Available Tools (22 total)
+## Available Tools (28 total)
 
-### Core Tools (17)
+### Core Tools (18)
 
 | Tool | Description |
 |------|-------------|
@@ -95,8 +102,9 @@ scripts/
 | `trace_export` | Export as JSON, Markdown, or PROV JSON-LD |
 | `trace_list_sessions` | List all sessions |
 | `trace_project_summary` | Aggregated metrics across all sessions for a project |
+| `trace_health_check` | System health info and event-level statistics (version, storage paths, event breakdown) |
 
-### Extension: trace-learn (5)
+### Extension: trace-learn (5) — DEFAULT for new sessions
 
 | Tool | Description |
 |------|-------------|
@@ -105,6 +113,22 @@ scripts/
 | `trace_learn_list` | List all learnings (optionally filtered by category) |
 | `trace_learn_forget` | Remove a learning by ID |
 | `trace_learn_extract` | Extract learnings from session annotations/decisions (idempotent) |
+
+**Storage**: `~/.trace/knowledge/{project}.json` (env var: `TRACE_KNOWLEDGE_DIR`)
+
+### Extension: trace-evolve (5) — legacy, for existing projects
+
+Uses evolution-themed terminology: genomes contain adaptations that are mutated, expressed, selected, and go extinct.
+
+| Tool | Evolution Concept | Description |
+|------|-------------------|-------------|
+| `trace_evolve_express` | Gene expression | Find relevant past adaptations for a context (fitness scoring) |
+| `trace_evolve_mutate` | Mutation | Add a new adaptation to the project's genome |
+| `trace_evolve_list` | — | List all adaptations in a genome (optionally filtered by category) |
+| `trace_evolve_extinct` | Extinction | Remove an adaptation from the genome |
+| `trace_evolve_select` | Natural selection | Extract adaptations from session annotations/decisions (idempotent) |
+
+**Storage**: `~/.trace/evolution/{project}.json` (env var: `TRACE_EVOLUTION_DIR`)
 
 ## Core Concept: Decision Provenance
 
@@ -140,7 +164,7 @@ This creates a provenance DAG of decisions, not just a flat log.
 
 ```bash
 pip install -e ".[dev]"
-pytest                    # Run tests (~96 tests)
+pytest                    # Run tests (~131 tests)
 python scripts/generate_schema.py  # Regenerate JSON Schema
 ```
 
