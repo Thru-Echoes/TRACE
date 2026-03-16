@@ -662,3 +662,47 @@ class TestBackendThresholds:
             ALL_LEARNINGS, "conda environment", threshold=None, backend=backend,
         )
         assert len(results_low) >= len(results_default)
+
+
+# ── Recall tracking tests ────────────────────────────────────────────────
+
+
+class TestRecallTracking:
+    """Tests that recall_learnings increments recall_count and sets last_surfaced."""
+
+    async def test_recall_count_incremented(self):
+        """Matched learnings should have recall_count incremented."""
+        lrn = Learning(id="lrn_001", content="use ml-dev conda environment")
+        assert lrn.recall_count == 0
+        results = await recall_learnings(
+            [lrn], "conda environment", threshold=0.0, backend=BM25Backend(),
+        )
+        assert len(results) > 0
+        assert lrn.recall_count == 1
+
+    async def test_last_surfaced_set(self):
+        """Matched learnings should have last_surfaced set."""
+        lrn = Learning(id="lrn_001", content="use ml-dev conda environment")
+        assert lrn.last_surfaced is None
+        await recall_learnings(
+            [lrn], "conda environment", threshold=0.0, backend=BM25Backend(),
+        )
+        assert lrn.last_surfaced is not None
+
+    async def test_below_threshold_not_tracked(self):
+        """Learnings that don't match (below threshold) should not be tracked."""
+        lrn = Learning(id="lrn_001", content="best pasta recipe with tomatoes")
+        await recall_learnings(
+            [lrn], "conda environment ml-dev", threshold=0.5, backend=BM25Backend(),
+        )
+        assert lrn.recall_count == 0
+        assert lrn.last_surfaced is None
+
+    async def test_multiple_recalls_accumulate(self):
+        """Multiple recalls should accumulate recall_count."""
+        lrn = Learning(id="lrn_001", content="use ml-dev conda environment")
+        for _ in range(3):
+            await recall_learnings(
+                [lrn], "conda environment", threshold=0.0, backend=BM25Backend(),
+            )
+        assert lrn.recall_count == 3

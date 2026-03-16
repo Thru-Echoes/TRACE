@@ -16,8 +16,8 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from trace_mcp.extensions.learn.models import KnowledgeStore
-from trace_mcp.extensions.learn.store import add_learning
+from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, LearningCategory
+from trace_mcp.extensions.learn.store import add_learning, add_learning_dedup
 from trace_mcp.schema import Session
 
 if TYPE_CHECKING:
@@ -47,10 +47,60 @@ def _already_extracted(store: KnowledgeStore, session_id: str, event_id: str) ->
     )
 
 
+def _add_with_optional_dedup(
+    store: KnowledgeStore,
+    *,
+    content: str,
+    category: LearningCategory,
+    source_session: str,
+    source_event: str | None,
+    corrects_event_ids: list[str] | None = None,
+    tags: list[str] | None = None,
+    dedup_threshold: float | None = None,
+) -> Learning | None:
+    """Add a learning, optionally checking for content duplicates first.
+
+    Returns the new Learning, or None if a content duplicate was found.
+    """
+    if dedup_threshold is not None:
+        result = add_learning_dedup(
+            store,
+            content=content,
+            category=category,
+            source_session=source_session,
+            source_event=source_event,
+            corrects_event_ids=corrects_event_ids,
+            tags=tags,
+            dedup_threshold=dedup_threshold,
+        )
+        if result.is_duplicate:
+            logger.debug(
+                "Skipping duplicate learning (similar to %s): %.60s…",
+                result.duplicate_of,
+                content,
+            )
+            return None
+        return result.learning
+    return add_learning(
+        store,
+        content=content,
+        category=category,
+        source_session=source_session,
+        source_event=source_event,
+        corrects_event_ids=corrects_event_ids,
+        tags=tags,
+    )
+
+
 # ── Rule-based extraction (fallback) ─────────────────────────────────────
 
 
-def extract_from_session(store: KnowledgeStore, session: Session) -> list[str]:
+def extract_from_session(
+    store: KnowledgeStore,
+    session: Session,
+    *,
+    dedup_threshold: float | None = None,
+) -> list[str]:
     """Extract learnings from a session's events using rule-based logic.
 
     Processes:
@@ -59,6 +109,7 @@ def extract_from_session(store: KnowledgeStore, session: Session) -> list[str]:
     - Contributions with collaborative direction (emergent insights)
 
     Idempotent: skips events that have already been extracted.
+    When *dedup_threshold* is set, also skips content-duplicate learnings.
     Returns list of new learning IDs.
     """
     new_ids: list[str] = []
@@ -71,7 +122,7 @@ def extract_from_session(store: KnowledgeStore, session: Session) -> list[str]:
         if evt.type == "annotation" and evt.annotation:
             ann = evt.annotation
             if ann.category in _EXTRACTABLE_CATEGORIES:
-                lrn = add_learning(
+                lrn = _add_with_optional_dedup(
                     store,
                     content=ann.content,
                     category=ann.category,
@@ -79,8 +130,10 @@ def extract_from_session(store: KnowledgeStore, session: Session) -> list[str]:
                     source_event=evt.id,
                     corrects_event_ids=list(ann.corrects_event_ids) if ann.corrects_event_ids else None,
                     tags=list(ann.tags),
+                    dedup_threshold=dedup_threshold,
                 )
-                new_ids.append(lrn.id)
+                if lrn is not None:
+                    new_ids.append(lrn.id)
 
         # ── Rejected/revised decisions ──
         elif evt.type == "decision" and evt.decision:
@@ -97,15 +150,17 @@ def extract_from_session(store: KnowledgeStore, session: Session) -> list[str]:
                 if d.suggestion_type and d.suggestion_type not in tags:
                     tags.append(d.suggestion_type)
 
-                lrn = add_learning(
+                lrn = _add_with_optional_dedup(
                     store,
                     content=content,
                     category="decision",
                     source_session=session.id,
                     source_event=evt.id,
                     tags=tags,
+                    dedup_threshold=dedup_threshold,
                 )
-                new_ids.append(lrn.id)
+                if lrn is not None:
+                    new_ids.append(lrn.id)
 
         # ── Contributions with collaborative direction ──
         elif evt.type == "contribution" and evt.contribution:
@@ -114,15 +169,17 @@ def extract_from_session(store: KnowledgeStore, session: Session) -> list[str]:
                 content = contrib.description
                 if contrib.artifact:
                     content += f" (artifact: {contrib.artifact})"
-                lrn = add_learning(
+                lrn = _add_with_optional_dedup(
                     store,
                     content=content,
                     category="observation",
                     source_session=session.id,
                     source_event=evt.id,
                     tags=list(contrib.tags),
+                    dedup_threshold=dedup_threshold,
                 )
-                new_ids.append(lrn.id)
+                if lrn is not None:
+                    new_ids.append(lrn.id)
 
     return new_ids
 
@@ -181,6 +238,8 @@ async def extract_from_session_llm(
     store: KnowledgeStore,
     session: Session,
     config: LearnConfig,
+    *,
+    dedup_threshold: float | None = None,
 ) -> list[str]:
     """Extract learnings from a session using an LLM.
 
@@ -189,7 +248,7 @@ async def extract_from_session_llm(
     Falls back to rule-based extraction on any error.
     """
     if not _HAS_OPENAI or not config.openai_api_key:
-        return extract_from_session(store, session)
+        return extract_from_session(store, session, dedup_threshold=dedup_threshold)
 
     events_text = _format_events_for_llm(session)
     if not events_text.strip():
@@ -243,7 +302,7 @@ async def extract_from_session_llm(
             source_event = item.get("source_event", "")
             if source_event and _already_extracted(store, session.id, source_event):
                 continue
-            lrn = add_learning(
+            lrn = _add_with_optional_dedup(
                 store,
                 content=item.get("content", ""),
                 category=item.get("category", "learning"),
@@ -251,14 +310,16 @@ async def extract_from_session_llm(
                 source_event=source_event or None,
                 corrects_event_ids=item.get("corrects_event_ids"),
                 tags=item.get("tags", []),
+                dedup_threshold=dedup_threshold,
             )
-            new_ids.append(lrn.id)
+            if lrn is not None:
+                new_ids.append(lrn.id)
 
         return new_ids
 
     except Exception:
         logger.warning("LLM extraction failed — falling back to rule-based", exc_info=True)
-        return extract_from_session(store, session)
+        return extract_from_session(store, session, dedup_threshold=dedup_threshold)
 
 
 # ── Auto-selection ────────────────────────────────────────────────────────
@@ -275,6 +336,10 @@ async def extract_from_session_auto(
 
         config = load_config()
 
+    dedup_threshold = config.dedup_threshold if config.dedup_enabled else None
+
     if config.llm_enabled and config.openai_api_key and _HAS_OPENAI:
-        return await extract_from_session_llm(store, session, config)
-    return extract_from_session(store, session)
+        return await extract_from_session_llm(
+            store, session, config, dedup_threshold=dedup_threshold
+        )
+    return extract_from_session(store, session, dedup_threshold=dedup_threshold)

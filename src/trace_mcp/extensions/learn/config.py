@@ -49,6 +49,12 @@ class LearnConfig:
     bm25_k1: float = 1.5
     bm25_b: float = 0.75
     tag_weight: float = 0.3
+    decay_enabled: bool = True
+    decay_half_life_days: float = 365.0
+    evergreen_recall_threshold: int = 3
+    evergreen_floor: float = 0.8
+    dedup_enabled: bool = True
+    dedup_threshold: float = 0.85
 
 
 def load_config() -> LearnConfig:
@@ -71,6 +77,12 @@ def load_config() -> LearnConfig:
         "TRACE_BM25_K1",
         "TRACE_BM25_B",
         "TRACE_TAG_WEIGHT",
+        "TRACE_DECAY_ENABLED",
+        "TRACE_DECAY_HALF_LIFE_DAYS",
+        "TRACE_EVERGREEN_RECALL_THRESHOLD",
+        "TRACE_EVERGREEN_FLOOR",
+        "TRACE_DEDUP_ENABLED",
+        "TRACE_DEDUP_THRESHOLD",
     ):
         env_val = os.environ.get(key)
         if env_val is not None:
@@ -86,6 +98,9 @@ def load_config() -> LearnConfig:
         )
         llm_enabled = False
 
+    decay_enabled = merged.get("TRACE_DECAY_ENABLED", "true").lower() in ("true", "1", "yes")
+    dedup_enabled = merged.get("TRACE_DEDUP_ENABLED", "true").lower() in ("true", "1", "yes")
+
     return LearnConfig(
         openai_api_key=api_key,
         llm_model=merged.get("TRACE_LLM_MODEL", "gpt-5-nano"),
@@ -94,4 +109,10 @@ def load_config() -> LearnConfig:
         bm25_k1=float(merged.get("TRACE_BM25_K1", "1.5")),
         bm25_b=float(merged.get("TRACE_BM25_B", "0.75")),
         tag_weight=float(merged.get("TRACE_TAG_WEIGHT", "0.3")),
+        decay_enabled=decay_enabled,
+        decay_half_life_days=float(merged.get("TRACE_DECAY_HALF_LIFE_DAYS", "365.0")),
+        evergreen_recall_threshold=int(merged.get("TRACE_EVERGREEN_RECALL_THRESHOLD", "3")),
+        evergreen_floor=float(merged.get("TRACE_EVERGREEN_FLOOR", "0.8")),
+        dedup_enabled=dedup_enabled,
+        dedup_threshold=float(merged.get("TRACE_DEDUP_THRESHOLD", "0.85")),
     )

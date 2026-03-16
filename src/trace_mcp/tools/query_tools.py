@@ -149,6 +149,56 @@ def search_events(
     return results
 
 
+def _compute_knowledge_metrics(project: str) -> dict[str, Any]:
+    """Compute knowledge store metrics for a project.
+
+    Returns total learnings, category breakdown, most-surfaced learnings,
+    never-surfaced count, and average recall count.
+    """
+    from trace_mcp.extensions.learn.store import load_store
+
+    store = load_store(project)
+    if not store.learnings:
+        return {
+            "total": 0,
+            "by_category": {},
+            "most_surfaced": [],
+            "never_surfaced": 0,
+            "avg_recall_count": 0.0,
+        }
+
+    by_category: dict[str, int] = {}
+    never_surfaced = 0
+    total_recall = 0
+
+    for lrn in store.learnings:
+        by_category[lrn.category] = by_category.get(lrn.category, 0) + 1
+        total_recall += lrn.recall_count
+        if lrn.recall_count == 0:
+            never_surfaced += 1
+
+    # Top 5 most surfaced
+    sorted_learnings = sorted(store.learnings, key=lambda l: l.recall_count, reverse=True)
+    most_surfaced = [
+        {
+            "id": lrn.id,
+            "content": lrn.content[:100],
+            "recall_count": lrn.recall_count,
+            "category": lrn.category,
+        }
+        for lrn in sorted_learnings[:5]
+        if lrn.recall_count > 0
+    ]
+
+    return {
+        "total": len(store.learnings),
+        "by_category": by_category,
+        "most_surfaced": most_surfaced,
+        "never_surfaced": never_surfaced,
+        "avg_recall_count": round(total_recall / len(store.learnings), 2),
+    }
+
+
 async def project_summary(
     storage: TraceStorage,
     project: str,
@@ -156,7 +206,8 @@ async def project_summary(
     """Aggregate metrics across all sessions for a project.
 
     Returns counts by event type, decision disposition, contribution
-    direction/execution matrix, annotation categories, and unique participants.
+    direction/execution matrix, annotation categories, unique participants,
+    and knowledge store metrics.
     """
     session_summaries = await storage.list_sessions(project=project, limit=1000)
     sessions: list[Session] = []
@@ -266,6 +317,7 @@ async def project_summary(
             "intervention_rate": intervention_rate,
         },
         "participants": sorted(participants),
+        "knowledge": _compute_knowledge_metrics(project),
     }
 
 

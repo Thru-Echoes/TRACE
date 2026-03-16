@@ -21,6 +21,8 @@ import logging
 import math
 import re
 from collections import Counter
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from trace_mcp.extensions.learn.models import Learning
@@ -403,6 +405,53 @@ def get_default_backend(config: LearnConfig | None = None) -> MatchingBackend:
     )
 
 
+# ── Decay ────────────────────────────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class DecayParams:
+    """Configuration for time-based decay of learning scores."""
+
+    enabled: bool = True
+    half_life_days: float = 365.0
+    evergreen_recall_threshold: int = 3
+    evergreen_floor: float = 0.8
+
+
+def compute_decay(
+    learning: Learning,
+    *,
+    half_life_days: float = 365.0,
+    evergreen_recall_threshold: int = 3,
+    evergreen_floor: float = 0.8,
+    now: datetime | None = None,
+) -> float:
+    """Compute a decay multiplier in [0, 1] for a learning.
+
+    Uses exponential decay based on time since *last_surfaced* (or *created*
+    if never surfaced).  If recall_count >= evergreen_recall_threshold,
+    the multiplier is floored at *evergreen_floor*.
+
+    A learning surfaced yesterday decays negligibly.  A never-surfaced
+    learning created a year ago gets multiplier ~0.5.  An evergreen
+    learning (surfaced 3+ times) never drops below *evergreen_floor*.
+    """
+    if now is None:
+        now = datetime.now(UTC)
+
+    reference = learning.last_surfaced or learning.created
+    age_days = max((now - reference).total_seconds() / 86400.0, 0.0)
+
+    # 2^(-age / half_life) — halves every half_life_days
+    multiplier = 2.0 ** (-age_days / half_life_days) if half_life_days > 0 else 1.0
+
+    # Evergreen floor: proven learnings don't fade below the floor
+    if learning.recall_count >= evergreen_recall_threshold:
+        multiplier = max(multiplier, evergreen_floor)
+
+    return multiplier
+
+
 # ── Main recall function ─────────────────────────────────────────────────
 
 
@@ -413,6 +462,7 @@ async def recall_learnings(
     threshold: float | None = None,
     limit: int = 10,
     backend: MatchingBackend | None = None,
+    decay_config: DecayParams | None = None,
 ) -> list[dict]:
     """Find relevant learnings for a given context.
 
@@ -422,6 +472,11 @@ async def recall_learnings(
 
     When *threshold* is None, the backend's ``default_threshold`` is used
     (BM25: 0.15, LLM: 0.2, Jaccard: 0.1).
+
+    When *decay_config* is provided and enabled, scores are multiplied by
+    a time-based decay factor.  Matched learnings (above threshold) have
+    their ``recall_count`` incremented and ``last_surfaced`` set — callers
+    should save the store afterward.
     """
     if not learnings:
         return []
@@ -432,10 +487,32 @@ async def recall_learnings(
 
     scored_pairs = await backend.score_batch(learnings, context, context_tags)
 
+    # Apply decay if configured
+    if decay_config is not None and decay_config.enabled:
+        now = datetime.now(UTC)
+        scored_pairs = [
+            (
+                idx,
+                score
+                * compute_decay(
+                    learnings[idx],
+                    half_life_days=decay_config.half_life_days,
+                    evergreen_recall_threshold=decay_config.evergreen_recall_threshold,
+                    evergreen_floor=decay_config.evergreen_floor,
+                    now=now,
+                ),
+            )
+            for idx, score in scored_pairs
+        ]
+
     # Filter by threshold, sort, limit
     results: list[dict] = []
+    now = datetime.now(UTC)
     for idx, score in scored_pairs:
         if score >= threshold:
+            # Track recall on matched learnings
+            learnings[idx].recall_count += 1
+            learnings[idx].last_surfaced = now
             results.append({
                 "learning": learnings[idx].model_dump(mode="json"),
                 "score": round(score, 4),

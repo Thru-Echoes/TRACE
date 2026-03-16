@@ -179,3 +179,44 @@ class TestIDGeneration:
         ks = KnowledgeStore.model_validate(raw)
         assert len(ks.learnings) == 1
         assert ks.learnings[0].corrects_event_ids == []  # New field gets default
+
+
+class TestRecallTrackingFields:
+    """Tests for recall_count and last_surfaced fields on Learning."""
+
+    def test_defaults(self):
+        lrn = Learning(content="test")
+        assert lrn.recall_count == 0
+        assert lrn.last_surfaced is None
+
+    def test_explicit_values(self):
+        now = datetime.now(UTC)
+        lrn = Learning(content="test", recall_count=5, last_surfaced=now)
+        assert lrn.recall_count == 5
+        assert lrn.last_surfaced == now
+
+    def test_backward_compat_loading(self):
+        """Old JSON without recall_count/last_surfaced loads fine."""
+        raw = {
+            "id": "lrn_001",
+            "content": "old learning",
+            "category": "learning",
+            "tags": [],
+            "created": "2026-02-24T00:00:00Z",
+        }
+        lrn = Learning.model_validate(raw)
+        assert lrn.recall_count == 0
+        assert lrn.last_surfaced is None
+
+    def test_json_roundtrip_with_recall_fields(self):
+        now = datetime.now(UTC)
+        lrn = Learning(
+            id="lrn_001",
+            content="test",
+            recall_count=3,
+            last_surfaced=now,
+        )
+        data = json.loads(lrn.model_dump_json())
+        restored = Learning.model_validate(data)
+        assert restored.recall_count == 3
+        assert restored.last_surfaced is not None

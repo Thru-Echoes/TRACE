@@ -18,6 +18,7 @@ from typing import cast, get_args
 
 from trace_mcp.extensions.learn import extraction, matching, store
 from trace_mcp.extensions.learn.config import load_config
+from trace_mcp.extensions.learn.matching import DecayParams
 from trace_mcp.extensions.learn.models import LearningCategory
 from trace_mcp.hooks import register_extract_hook, register_recall_hook
 
@@ -36,6 +37,12 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
 
     _config = load_config()
     _backend = matching.get_default_backend(_config)
+    _decay_params = DecayParams(
+        enabled=_config.decay_enabled,
+        half_life_days=_config.decay_half_life_days,
+        evergreen_recall_threshold=_config.evergreen_recall_threshold,
+        evergreen_floor=_config.evergreen_floor,
+    )
 
     # ── Register hooks so core tools can auto-recall/extract ──
 
@@ -48,14 +55,18 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         ks = store.load_store(project)
         if not ks.learnings:
             return []
-        return await matching.recall_learnings(
+        results = await matching.recall_learnings(
             ks.learnings,
             context=context,
             context_tags=tags,
             threshold=None,  # Use backend's default_threshold
             limit=limit,
             backend=_backend,
+            decay_config=_decay_params,
         )
+        if results:
+            store.save_store(ks)
+        return results
 
     async def _extract_hook(project: str, session_id: str) -> list[str]:
         ks = store.load_store(project)
@@ -97,7 +108,10 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                 threshold=threshold,
                 limit=limit,
                 backend=_backend,
+                decay_config=_decay_params,
             )
+            if results:
+                store.save_store(ks)
             return json.dumps({"project": project, "results": results, "total": len(results)})
         except Exception:
             logger.exception("Error recalling learnings")
@@ -123,14 +137,32 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                     "error": f"Invalid category '{category}'. Must be one of: {_VALID_CATEGORIES}",
                 })
             ks = store.load_store(project)
-            lrn = store.add_learning(
-                ks,
-                content=content,
-                category=cast(LearningCategory, category),
-                source_session=source_session,
-                source_event=source_event,
-                tags=tags,
-            )
+            if _config.dedup_enabled:
+                result = store.add_learning_dedup(
+                    ks,
+                    content=content,
+                    category=cast(LearningCategory, category),
+                    source_session=source_session,
+                    source_event=source_event,
+                    tags=tags,
+                    dedup_threshold=_config.dedup_threshold,
+                )
+                if result.is_duplicate:
+                    return json.dumps({
+                        "duplicate": True,
+                        "similar_to": result.duplicate_of,
+                        "existing": result.learning.model_dump(mode="json"),
+                    })
+                lrn = result.learning
+            else:
+                lrn = store.add_learning(
+                    ks,
+                    content=content,
+                    category=cast(LearningCategory, category),
+                    source_session=source_session,
+                    source_event=source_event,
+                    tags=tags,
+                )
             store.save_store(ks)
             return json.dumps({"added": lrn.model_dump(mode="json")})
         except Exception:
