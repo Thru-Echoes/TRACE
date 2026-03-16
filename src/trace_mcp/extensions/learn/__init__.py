@@ -1,11 +1,11 @@
 """trace-learn: Cross-session knowledge persistence for TRACE.
 
 Registers 5 MCP tools on the existing TRACE server:
-- trace_learn_recall
-- trace_learn_add
-- trace_learn_list
-- trace_learn_forget
-- trace_learn_extract
+- trace_learn_recall   — find relevant past learnings (LLM or BM25)
+- trace_learn_add      — manually add a learning
+- trace_learn_list     — list all learnings
+- trace_learn_forget   — remove a learning
+- trace_learn_extract  — extract learnings from session events (LLM or rule-based)
 """
 
 from __future__ import annotations
@@ -14,7 +14,14 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from typing import cast, get_args
+
 from trace_mcp.extensions.learn import extraction, matching, store
+from trace_mcp.extensions.learn.config import load_config
+from trace_mcp.extensions.learn.models import LearningCategory
+from trace_mcp.hooks import register_extract_hook, register_recall_hook
+
+_VALID_CATEGORIES = get_args(LearningCategory)
 
 if TYPE_CHECKING:
     from mcp.server.fastmcp import FastMCP
@@ -25,20 +32,56 @@ logger = logging.getLogger(__name__)
 
 
 def register(mcp: FastMCP, storage: TraceStorage) -> None:
-    """Register trace-learn tools on the MCP server."""
+    """Register trace-learn tools and hooks on the MCP server."""
+
+    _config = load_config()
+    _backend = matching.get_default_backend(_config)
+
+    # ── Register hooks so core tools can auto-recall/extract ──
+
+    async def _recall_hook(
+        project: str,
+        context: str,
+        tags: list[str] | None,
+        limit: int,
+    ) -> list[dict]:
+        ks = store.load_store(project)
+        if not ks.learnings:
+            return []
+        return await matching.recall_learnings(
+            ks.learnings,
+            context=context,
+            context_tags=tags,
+            threshold=None,  # Use backend's default_threshold
+            limit=limit,
+            backend=_backend,
+        )
+
+    async def _extract_hook(project: str, session_id: str) -> list[str]:
+        ks = store.load_store(project)
+        sess = await storage.get_session(session_id)
+        new_ids = await extraction.extract_from_session_auto(ks, sess, _config)
+        if new_ids:
+            store.save_store(ks)
+        return new_ids
+
+    register_recall_hook(_recall_hook)
+    register_extract_hook(_extract_hook)
 
     @mcp.tool()
     async def trace_learn_recall(
         project: str,
         context: str | None = None,
         tags: list[str] | None = None,
-        threshold: float = 0.1,
+        threshold: float | None = None,
         limit: int = 10,
     ) -> str:
         """Find relevant past learnings for a given context.
 
         Searches the project's knowledge store using text similarity
         and tag matching. Returns scored results above the threshold.
+
+        When threshold is None, uses the backend's default (BM25: 0.15, LLM: 0.2).
         """
         try:
             ks = store.load_store(project)
@@ -47,17 +90,18 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             if not context and not tags:
                 results = store.list_learnings(ks)
                 return json.dumps({"project": project, "results": results[:limit], "total": len(results)})
-            results = matching.recall_learnings(
+            results = await matching.recall_learnings(
                 ks.learnings,
                 context=context or "",
                 context_tags=tags,
                 threshold=threshold,
                 limit=limit,
+                backend=_backend,
             )
             return json.dumps({"project": project, "results": results, "total": len(results)})
-        except Exception as e:
+        except Exception:
             logger.exception("Error recalling learnings")
-            return f"Error recalling learnings: {e}"
+            return json.dumps({"error": "Failed to recall learnings", "project": project})
 
     @mcp.tool()
     async def trace_learn_add(
@@ -74,20 +118,24 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         persist across sessions.
         """
         try:
+            if category not in _VALID_CATEGORIES:
+                return json.dumps({
+                    "error": f"Invalid category '{category}'. Must be one of: {_VALID_CATEGORIES}",
+                })
             ks = store.load_store(project)
             lrn = store.add_learning(
                 ks,
                 content=content,
-                category=category,
+                category=cast(LearningCategory, category),
                 source_session=source_session,
                 source_event=source_event,
                 tags=tags,
             )
             store.save_store(ks)
             return json.dumps({"added": lrn.model_dump(mode="json")})
-        except Exception as e:
+        except Exception:
             logger.exception("Error adding learning")
-            return f"Error adding learning: {e}"
+            return json.dumps({"error": "Failed to add learning", "project": project})
 
     @mcp.tool()
     async def trace_learn_list(
@@ -102,9 +150,9 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             ks = store.load_store(project)
             results = store.list_learnings(ks, category=category)
             return json.dumps({"project": project, "learnings": results, "total": len(results)})
-        except Exception as e:
+        except Exception:
             logger.exception("Error listing learnings")
-            return f"Error listing learnings: {e}"
+            return json.dumps({"error": "Failed to list learnings", "project": project})
 
     @mcp.tool()
     async def trace_learn_forget(
@@ -122,9 +170,9 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                 return json.dumps({"removed": False, "error": f"Learning '{learning_id}' not found"})
             store.save_store(ks)
             return json.dumps({"removed": True, "learning_id": learning_id})
-        except Exception as e:
+        except Exception:
             logger.exception("Error removing learning")
-            return f"Error removing learning: {e}"
+            return json.dumps({"error": "Failed to remove learning", "project": project})
 
     @mcp.tool()
     async def trace_learn_extract(
@@ -137,6 +185,8 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         decisions into persistent knowledge entries. Idempotent — running twice
         on the same session produces no duplicates.
 
+        Uses LLM-enhanced extraction when configured, otherwise rule-based.
+
         If session_id is provided, extracts from that session only.
         Otherwise, extracts from all sessions for the project.
         """
@@ -146,14 +196,14 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
 
             if session_id:
                 session = await storage.get_session(session_id)
-                new_ids = extraction.extract_from_session(ks, session)
+                new_ids = await extraction.extract_from_session_auto(ks, session, _config)
                 all_new_ids.extend(new_ids)
             else:
                 summaries = await storage.list_sessions(project=project, limit=1000)
                 for s in summaries:
                     try:
                         session = await storage.get_session(s["id"])
-                        new_ids = extraction.extract_from_session(ks, session)
+                        new_ids = await extraction.extract_from_session_auto(ks, session, _config)
                         all_new_ids.extend(new_ids)
                     except FileNotFoundError:
                         continue
@@ -169,6 +219,6 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                     "total_learnings": len(ks.learnings),
                 }
             )
-        except Exception as e:
+        except Exception:
             logger.exception("Error extracting learnings")
-            return f"Error extracting learnings: {e}"
+            return json.dumps({"error": "Failed to extract learnings", "project": project})

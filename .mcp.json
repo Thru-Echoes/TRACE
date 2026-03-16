@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "trace": {
-      "command": "/Users/echoes/Documents/Berkeley/Research/TRACE/.venv/bin/trace-mcp",
-      "args": []
+      "command": "uv",
+      "args": ["run", "--reinstall-package", "trace-mcp", "--directory", "/Users/echoes/Documents/Berkeley/Research/TRACE", "trace-mcp"]
     }
   }
 }

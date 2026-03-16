@@ -517,9 +517,11 @@ TRIGGER_PATTERNS = {
             "caution",
             "warning",
             "trap",
+            "by default",
         ],
         "patterns": [
             r"(?:does|doesn't|won't|can't|shouldn't|wouldn't).*(?:expect|think|assume)",
+            r"(?:doesn't|does not|won't|can't).*(?:raise|throw|check|validate|handle)",
             r"(?:silently|quietly).*(?:fail|drop|ignore|skip)",
             r"(?:docs?|documentation).*(?:wrong|incorrect|outdated|misleading)",
             r"(?:must|need to|have to|should).*(?:before|after|first)",
@@ -576,7 +578,7 @@ TRIGGER_PATTERNS = {
             "understood",
             "figured out",
             "turns out",
-            "TIL",
+            "til",
             "insight",
             "aha",
             "interesting",
@@ -622,8 +624,8 @@ TRIGGER_PATTERNS = {
             "future",
             "later",
             "eventually",
-            "TODO",
-            "FIXME",
+            "todo",
+            "fixme",
             "refactor",
         ],
         "patterns": [
@@ -705,20 +707,20 @@ TRIGGER_PATTERNS = {
             "stack trace",
             "raised",
             "thrown",
-            "TypeError",
-            "ValueError",
-            "RuntimeError",
-            "AttributeError",
+            "typeerror",
+            "valueerror",
+            "runtimeerror",
+            "attributeerror",
             "null",
             "undefined",
-            "NaN",
+            "nan",
             "infinite loop",
             "timeout",
         ],
         "patterns": [
             r"(?:error|exception|crash|failure).*(?:occurred|happened|raised)",
-            r"(?:TypeError|ValueError|RuntimeError|KeyError|AttributeError)",
-            r"(?:returned|got|received).*(?:null|None|undefined|NaN)",
+            r"(?:typeerror|valueerror|runtimeerror|keyerror|attributeerror)",
+            r"(?:returned|got|received).*(?:null|none|undefined|nan)",
         ],
         "description": "Errors, exceptions, or failures encountered",
     },
@@ -1148,6 +1150,8 @@ def refresh_context_for_topics(
             ]
             for entry in recent[:2]:  # Add up to 2 recent per category
                 results[category].append({"entry": entry, "relevance_score": 1, "recent": True})
+            # Re-apply limit after adding recent entries
+            results[category] = results[category][:max_items]
 
     return results
 
