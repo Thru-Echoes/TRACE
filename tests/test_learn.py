@@ -95,7 +95,7 @@ class TestKnowledgeStoreModel:
         ks = KnowledgeStore(project="test")
         assert ks.project == "test"
         assert ks.learnings == []
-        assert ks.version == "0.1"
+        assert ks.version == "0.2"
 
     def test_id_generation_empty(self):
         ks = KnowledgeStore(project="test")
@@ -219,13 +219,13 @@ class TestMatching:
         score_with_tags = score_learning(lrn, "conda environment setup", context_tags=["conda"])
         assert score_with_tags > score_no_tags
 
-    def test_recall_threshold_and_limit(self):
+    async def test_recall_threshold_and_limit(self):
         learnings = [
             Learning(id="lrn_001", content="use conda env ml-dev for ML tasks"),
             Learning(id="lrn_002", content="completely unrelated topic about cooking"),
             Learning(id="lrn_003", content="conda activate ml-dev before running"),
         ]
-        results = recall_learnings(learnings, "conda ml-dev environment", threshold=0.1, limit=2)
+        results = await recall_learnings(learnings, "conda ml-dev environment", threshold=0.1, limit=2)
         # Should find relevant ones but not the cooking one
         ids = [r["learning"]["id"] for r in results]
         assert "lrn_002" not in ids
@@ -313,7 +313,7 @@ class TestExtraction:
 
 
 class TestLearnIntegration:
-    def test_full_workflow(self, tmp_path):
+    async def test_full_workflow(self, tmp_path):
         """End-to-end: session → corrections → extract → recall → persist."""
         # 1. Create a session with extractable events
         events = [
@@ -355,7 +355,7 @@ class TestLearnIntegration:
         assert len(loaded.learnings) == 3
 
         # 4. Recall relevant learnings
-        results = recall_learnings(
+        results = await recall_learnings(
             loaded.learnings,
             context="which conda environment should I use",
             context_tags=["conda"],

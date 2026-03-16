@@ -17,6 +17,7 @@ from mcp.server.fastmcp import FastMCP
 from trace_mcp import __version__
 from trace_mcp.schema import Session
 from trace_mcp.storage.json_file import JsonFileStorage
+from trace_mcp import hooks
 from trace_mcp.tools import (
     decision_tools,
     export_tools,
@@ -48,14 +49,20 @@ async def trace_start_session(
     description: str | None = None,
     participants: list[dict[str, Any]] | None = None,
     tags: list[str] | None = None,
+    recall_learnings: bool = True,
+    recall_limit: int = 5,
 ) -> str:
     """Start a new TRACE audit session.
 
     Call this at the beginning of any scientific workflow or experiment.
     Returns a session ID to use in all subsequent TRACE calls.
+
+    When recall_learnings is True (default), automatically surfaces the
+    most relevant past learnings based on the session description and tags.
+    Only the top recall_limit results are returned (default 5).
     """
     try:
-        return await session_tools.start_session(
+        result = await session_tools.start_session(
             storage,
             active_sessions,
             project=project,
@@ -64,6 +71,16 @@ async def trace_start_session(
             participants=participants,
             tags=tags,
         )
+
+        # Layer 1: Auto-recall relevant learnings at session start
+        if recall_learnings and description:
+            recalled = await hooks.recall_if_available(
+                project, description, tags, recall_limit
+            )
+            if recalled:
+                result += hooks.format_recalled_learnings(recalled)
+
+        return result
     except Exception as e:
         logger.exception("Error starting session")
         return f"Error starting session: {e}"
@@ -73,19 +90,43 @@ async def trace_start_session(
 async def trace_end_session(
     session_id: str,
     summary: str | None = None,
+    extract_learnings: bool = True,
 ) -> str:
     """End a TRACE audit session.
 
     Call this when the workflow is complete.
     Optionally provide a summary of what was accomplished.
+
+    When extract_learnings is True (default), automatically extracts
+    learnings from the session's annotations and decisions into the
+    project's knowledge store.
     """
     try:
-        return await session_tools.end_session(
+        # Grab project before end_session pops the session from memory
+        project: str | None = None
+        if extract_learnings:
+            try:
+                session = await session_tools.get_or_load_session(
+                    storage, active_sessions, session_id
+                )
+                project = session.metadata.project
+            except FileNotFoundError:
+                pass
+
+        result = await session_tools.end_session(
             storage,
             active_sessions,
             session_id=session_id,
             summary=summary,
         )
+
+        # Auto-extract learnings from the completed session
+        if extract_learnings and project:
+            new_ids = await hooks.extract_if_available(project, session_id)
+            if new_ids:
+                result += f"\nExtracted {len(new_ids)} new learnings: {', '.join(new_ids)}"
+
+        return result
     except Exception as e:
         logger.exception("Error ending session")
         return f"Error ending session: {e}"
@@ -306,7 +347,17 @@ async def trace_propose_decision(
             suggestion_type=suggestion_type,
             tags=tags,
         )
-        return f"Decision proposed: {event_id}"
+        result = f"Decision proposed: {event_id}"
+
+        # Layer 3: Auto-recall related learnings for this decision
+        project = session.metadata.project
+        related = await hooks.recall_if_available(
+            project, description, tags, limit=3
+        )
+        if related:
+            result += hooks.format_decision_warnings(related)
+
+        return result
     except Exception as e:
         logger.exception("Error proposing decision")
         return f"Error proposing decision: {e}"

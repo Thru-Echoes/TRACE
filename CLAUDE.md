@@ -3,7 +3,7 @@
 > **TRACE**: Transparent Recording of AI-assisted Collaboration Experiments
 > **Version**: 0.2.0
 > **Schema**: `https://trace-protocol.org/v0.2`
-> **Last Updated**: 2026-02-16
+> **Last Updated**: 2026-03-16
 
 ---
 
@@ -51,11 +51,12 @@ src/trace_mcp/
     extensions/
         __init__.py         # Package marker
         learn/              # trace-learn: cross-session knowledge persistence (default)
-            __init__.py     # register(mcp, storage) — registers 5 MCP tools
+            __init__.py     # register(mcp, storage) — registers 5 MCP tools + hooks
+            config.py       # Config from env vars and ~/.trace/.env
             models.py       # Learning, KnowledgeStore
             store.py        # File I/O for ~/.trace/knowledge/{project}.json
-            extraction.py   # Extract learnings from session events
-            matching.py     # Jaccard token similarity + tag-boosted recall
+            extraction.py   # Rule-based + LLM extraction backends
+            matching.py     # BM25 (with stemming) + LLM + Jaccard matching backends
         evolve/             # trace-evolve: evolution-themed adaptive persistence (legacy)
             __init__.py     # register(mcp, storage) — registers 5 MCP tools
             models.py       # Adaptation, Genome
@@ -108,7 +109,7 @@ scripts/
 
 | Tool | Description |
 |------|-------------|
-| `trace_learn_recall` | Find relevant past learnings for a context (Jaccard + tag matching) |
+| `trace_learn_recall` | Find relevant past learnings for a context (LLM or BM25 with stemming + tag matching) |
 | `trace_learn_add` | Manually add a learning to the knowledge store |
 | `trace_learn_list` | List all learnings (optionally filtered by category) |
 | `trace_learn_forget` | Remove a learning by ID |
@@ -160,20 +161,50 @@ This creates a provenance DAG of decisions, not just a flat log.
 - **Tool call retry chains**: `retries_event_id` on `trace_log_tool_call` links repeated failed attempts of the same action
 - **Human intervention metrics**: `trace_project_summary` now includes `human_interventions` block with correction count, retry chains, decision rejection/revision counts, and intervention rate
 
+## Knowledge Matching and Extraction
+
+### Matching Backends (recall)
+
+| Backend | When Used | Default Threshold |
+|---------|-----------|-------------------|
+| **LLM** (primary) | `openai` installed + API key configured | 0.20 |
+| **BM25** (fallback) | No API key or LLM fails | 0.15 |
+| **Jaccard** (legacy) | Backward compatibility | 0.10 |
+
+BM25 includes a lightweight suffix-stripping stemmer: decisions→decision, logging→log, entries→entry.
+
+### Extraction Backends
+
+| Backend | When Used |
+|---------|-----------|
+| **LLM-enhanced** | API key configured — sends events to OpenAI for intelligent extraction |
+| **Rule-based** | No API key — processes annotations, rejected/revised decisions, collaborative contributions |
+
+Both are idempotent. Configure via `~/.trace/.env`:
+
+```
+OPENAI_API_KEY=sk-...
+TRACE_LLM_MODEL=gpt-5-nano
+TRACE_LLM_EXTRACTION_MODEL=gpt-5-mini
+TRACE_LLM_ENABLED=true
+```
+
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest                    # Run tests (~131 tests)
-python scripts/generate_schema.py  # Regenerate JSON Schema
+uv pip install -e ".[dev]"
+uv run pytest                     # Run all 455 tests
+uv run pytest -k llm              # Run real LLM integration tests
+python scripts/generate_schema.py # Regenerate JSON Schema
 ```
 
 ## Design Principles
 
-- **Pydantic v2** for all data models
+- **Pydantic v2** for all data models with strict validation
 - **Async throughout** — MCP servers are async
 - **Fail open** — audit errors warn, never block workflows
 - **Human-readable IDs** — `trace_20260205_a1b2c3`, not UUIDs
 - **UTC ISO 8601 timestamps**
 - **Pretty-printed JSON** — `indent=2`, openable in any editor
-- **No external dependencies** beyond `mcp` and `pydantic`
+- **No external dependencies** beyond `mcp` and `pydantic` (OpenAI optional)
+- **Atomic writes** — temp file + rename prevents corrupt stores

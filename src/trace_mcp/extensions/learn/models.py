@@ -1,8 +1,22 @@
 """Pydantic models for the trace-learn knowledge store."""
 
 from datetime import UTC, datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
+
+# Categories that a Learning can have — superset of AnnotationData categories
+# (includes "decision" for rejected/revised decision learnings).
+LearningCategory = Literal[
+    "learning",
+    "gotcha",
+    "correction",
+    "decision",
+    "observation",
+    "todo",
+    "question",
+    "other",
+]
 
 
 class Learning(BaseModel):
@@ -10,9 +24,10 @@ class Learning(BaseModel):
 
     id: str = ""
     content: str
-    category: str = "learning"
+    category: LearningCategory = "learning"
     source_session: str | None = None
     source_event: str | None = None
+    corrects_event_ids: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     created: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
@@ -21,7 +36,7 @@ class KnowledgeStore(BaseModel):
     """Per-project knowledge store containing accumulated learnings."""
 
     project: str
-    version: str = "0.1"
+    version: str = "0.2"
     updated: datetime = Field(default_factory=lambda: datetime.now(UTC))
     learnings: list[Learning] = Field(default_factory=list)
 
