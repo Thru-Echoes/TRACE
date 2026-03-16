@@ -30,6 +30,8 @@ class Learning(BaseModel):
     corrects_event_ids: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     created: datetime = Field(default_factory=lambda: datetime.now(UTC))
+    recall_count: int = 0
+    last_surfaced: datetime | None = None
 
 
 class KnowledgeStore(BaseModel):

@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from dataclasses import dataclass
+
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning
 
 if TYPE_CHECKING:
@@ -138,3 +140,77 @@ def list_learnings(
     if category:
         learnings = [lrn for lrn in learnings if lrn.category == category]
     return [lrn.model_dump(mode="json") for lrn in learnings]
+
+
+# ── Deduplication ────────────────────────────────────────────────────────
+
+
+@dataclass
+class DedupResult:
+    """Result of a deduplicated add attempt."""
+
+    learning: Learning
+    is_duplicate: bool
+    duplicate_of: str | None = None
+
+
+def find_duplicate(
+    store: KnowledgeStore,
+    content: str,
+    threshold: float = 0.85,
+) -> Learning | None:
+    """Find an existing learning that is near-duplicate of *content*.
+
+    Uses Jaccard token-overlap similarity, which returns 1.0 for exact
+    matches and naturally handles near-duplicates.  More appropriate for
+    dedup than BM25 (which is a retrieval ranker, not a similarity metric).
+
+    Returns the best match above *threshold*, or None.
+    """
+    if not store.learnings or not content.strip():
+        return None
+
+    from trace_mcp.extensions.learn.matching import jaccard_similarity
+
+    best_score = 0.0
+    best_idx = -1
+    for i, lrn in enumerate(store.learnings):
+        score = jaccard_similarity(lrn.content, content)
+        if score > best_score:
+            best_score = score
+            best_idx = i
+
+    if best_score >= threshold and best_idx >= 0:
+        return store.learnings[best_idx]
+    return None
+
+
+def add_learning_dedup(
+    store: KnowledgeStore,
+    content: str,
+    category: LearningCategory = "learning",
+    source_session: str | None = None,
+    source_event: str | None = None,
+    corrects_event_ids: list[str] | None = None,
+    tags: list[str] | None = None,
+    dedup_threshold: float = 0.85,
+) -> DedupResult:
+    """Add a learning with content deduplication.
+
+    If an existing learning scores above *dedup_threshold*, returns the
+    existing one as a duplicate without adding.  Otherwise adds normally.
+    """
+    existing = find_duplicate(store, content, threshold=dedup_threshold)
+    if existing is not None:
+        return DedupResult(learning=existing, is_duplicate=True, duplicate_of=existing.id)
+
+    lrn = add_learning(
+        store,
+        content=content,
+        category=category,
+        source_session=source_session,
+        source_event=source_event,
+        corrects_event_ids=corrects_event_ids,
+        tags=tags,
+    )
+    return DedupResult(learning=lrn, is_duplicate=False)

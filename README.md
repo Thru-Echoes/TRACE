@@ -233,6 +233,12 @@ Environment variables take precedence over `.env` file values for CI/container u
 | `TRACE_BM25_K1` | `1.5` | BM25 term frequency saturation parameter |
 | `TRACE_BM25_B` | `0.75` | BM25 document length normalization parameter |
 | `TRACE_TAG_WEIGHT` | `0.3` | Weight given to tag overlap in scoring (0.0–1.0) |
+| `TRACE_DECAY_ENABLED` | `true` | Enable time-based decay for learning scores |
+| `TRACE_DECAY_HALF_LIFE_DAYS` | `365.0` | Half-life for exponential decay (days) |
+| `TRACE_EVERGREEN_RECALL_THRESHOLD` | `3` | Recalls needed for evergreen floor protection |
+| `TRACE_EVERGREEN_FLOOR` | `0.8` | Minimum decay multiplier for evergreen learnings |
+| `TRACE_DEDUP_ENABLED` | `true` | Enable content deduplication on add |
+| `TRACE_DEDUP_THRESHOLD` | `0.85` | Jaccard similarity threshold for dedup |
 
 ## Export Formats
 
@@ -291,11 +297,9 @@ src/trace_mcp/
 
 ### Overview
 
-**455 tests, 0 failures** across 20 test files.
-
 ```bash
-uv run pytest                                      # Run all tests
-uv run pytest tests/test_trace_triggers.py -k llm   # Run real LLM tests only
+uv run pytest                     # Run all tests
+uv run pytest -k llm              # Run real LLM integration tests only
 ```
 
 ### What the Test Suite Covers
@@ -309,14 +313,14 @@ uv run pytest tests/test_trace_triggers.py -k llm   # Run real LLM tests only
 | **trace-learn models** | 16 | Learning/KnowledgeStore validation, ID generation, serialization |
 | **trace-learn store** | 25 | Load/save with atomic writes, add/remove/list learnings |
 | **trace-learn extraction** | 27 | Rule-based extraction from annotations, decisions, contributions; LLM extraction (mocked); idempotency |
-| **trace-learn matching** | 70 | Stemmer (13 tests), BM25 with stemming (4), BM25 index/normalization (9), Jaccard (8), LLM scoring (mocked, 3), backend selection (4), recall integration (7), BM25 vs Jaccard comparison (1), per-backend thresholds (5), tag overlap (5) |
+| **trace-learn matching** | 74 | Stemmer (13), BM25 with stemming (4), BM25 index/normalization (9), Jaccard (8), LLM scoring (mocked, 3), backend selection (4), recall integration (7), BM25 vs Jaccard (1), per-backend thresholds (5), tag overlap (5), recall tracking (4), decay (12) |
+| **trace-learn dedup** | 14 | find_duplicate, add_learning_dedup, dedup in extraction, threshold configurability |
+| **Knowledge metrics** | 7 | project_summary knowledge section: totals, categories, most-surfaced, never-surfaced, averages |
 | **trace-learn E2E** | 12 | Full pipeline: extract → persist → recall across sessions, config loading, correction chain tracking |
 | **Recall layers** | 23 | 3-layer recall architecture (session start, on-demand, decision proposal), hook registration, format functions, auto-extract on session end, cross-session persistence |
-| **Trigger behavior** | 21 | BM25 morphological recall (4), per-backend thresholds (3), recall hook triggers (4), extract hook triggers (3), multi-session E2E with stemming (3), **real LLM integration (4)** |
 | **trace-evolve** | 27 | Evolution-themed extension: mutations, expressions, selections, extinction, fitness scoring |
 | **Installation health** | 34 | Import checks, config resolution, extension loading |
 | **E2E server** | 12 | Full MCP tool invocations through the server layer |
-| **Verification (trace-vv)** | 84 | Integrity chains, snapshots, text analysis, verification engine, git reconciliation |
 
 ### What the Test Suite Does NOT Cover
 
@@ -325,8 +329,6 @@ uv run pytest tests/test_trace_triggers.py -k llm   # Run real LLM tests only
 - **Network failure handling** — LLM backend tests verify fallback on API errors (mocked), but no tests simulate real network timeouts, rate limits, or partial responses.
 - **MCP transport layer** — Tests call tool functions directly, not through the MCP stdio transport. The `test_e2e_server.py` tests use the tool layer but not the actual MCP protocol wire format.
 - **Cross-project knowledge** — No tests for sharing learnings between different projects (planned for Tier 3).
-- **Learning decay/staleness** — No tests for time-based relevance weighting (planned for Tier 2).
-- **Deduplication on add** — No tests for detecting and merging near-duplicate learnings at insertion time (planned for Tier 2).
 - **Feedback loops** — No tests for boosting/demoting learning weights based on decision outcomes (planned for Tier 3).
 
 ## Development
@@ -350,11 +352,12 @@ Development is organized into three tiers, implemented sequentially.
 - **Real LLM integration tests** — 4 tests that call the actual OpenAI API for scoring and extraction, verifying the full LLM pipeline works end-to-end.
 - **Per-backend thresholds** — Each matching backend has a tuned default threshold (BM25: 0.15, LLM: 0.2, Jaccard: 0.1) to reduce false positives.
 
-#### Tier 2: Production Hardening (next)
+#### Tier 2: Production Hardening (completed)
 
-- **Decay and staleness** — Time-based relevance weighting so that 12-month-old learnings score lower than recent ones. Must protect evergreen learnings (e.g., foundational corrections that remain relevant throughout a project's lifetime).
-- **Deduplication** — Similarity check during `add_learning` to merge or skip near-duplicates before they enter the store.
-- **Knowledge store metrics** — `trace_project_summary` should include learning counts, recall hit rates, and which learnings have been surfaced most often.
+- **Decay and staleness** — Exponential decay based on time since last surfaced (not creation date). Frequently-surfaced learnings are protected by an evergreen floor (default 0.8 at 3+ recalls). Configurable half-life (default 365 days).
+- **Deduplication** — Jaccard similarity check during `add_learning` to skip near-duplicates before they enter the store. Integrated into both extraction backends. Default threshold 0.85.
+- **Recall tracking** — `recall_count` and `last_surfaced` fields on Learning, incremented on each recall. Callers save the store after recall.
+- **Knowledge store metrics** — `trace_project_summary` includes a `knowledge` section with total learnings, category breakdown, most-surfaced (top 5), never-surfaced count, and average recall count.
 
 #### Tier 3: Adaptive Learning (future)
 

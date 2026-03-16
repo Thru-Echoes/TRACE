@@ -13,8 +13,11 @@ import pytest
 
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning
 from trace_mcp.extensions.learn.store import (
+    DedupResult,
     StoreLoadError,
     add_learning,
+    add_learning_dedup,
+    find_duplicate,
     list_learnings,
     load_store,
     remove_learning,
@@ -223,6 +226,40 @@ class TestListLearnings:
         ks = KnowledgeStore(project="test")
         add_learning(ks, content="a", category="learning")
         assert list_learnings(ks, category="correction") == []
+
+
+class TestFindDuplicate:
+    """Basic find_duplicate tests (detailed tests in test_learn_dedup.py)."""
+
+    def test_finds_exact_duplicate(self):
+        ks = KnowledgeStore(project="test")
+        add_learning(ks, content="use ml-dev conda env")
+        assert find_duplicate(ks, "use ml-dev conda env") is not None
+
+    def test_returns_none_for_novel(self):
+        ks = KnowledgeStore(project="test")
+        add_learning(ks, content="use ml-dev conda env")
+        assert find_duplicate(ks, "pasta recipe with tomatoes") is None
+
+
+class TestAddLearningDedup:
+    """Basic add_learning_dedup tests (detailed tests in test_learn_dedup.py)."""
+
+    def test_adds_novel(self):
+        ks = KnowledgeStore(project="test")
+        result = add_learning_dedup(ks, content="new insight")
+        assert not result.is_duplicate
+        assert isinstance(result, DedupResult)
+        assert len(ks.learnings) == 1
+
+    def test_skips_duplicate(self):
+        ks = KnowledgeStore(project="test")
+        add_learning(ks, content="use ml-dev conda environment")
+        result = add_learning_dedup(
+            ks, content="use ml-dev conda environment", dedup_threshold=0.5
+        )
+        assert result.is_duplicate
+        assert len(ks.learnings) == 1
 
 
 class TestEnvironmentVariable:

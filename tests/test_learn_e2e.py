@@ -24,13 +24,11 @@ from trace_mcp.extensions.learn.extraction import (
 )
 from trace_mcp.extensions.learn.matching import (
     BM25Backend,
-    JaccardBackend,
     recall_learnings,
 )
-from trace_mcp.extensions.learn.models import KnowledgeStore, Learning
+from trace_mcp.extensions.learn.models import KnowledgeStore
 from trace_mcp.extensions.learn.store import (
     add_learning,
-    list_learnings,
     load_store,
     remove_learning,
     save_store,
