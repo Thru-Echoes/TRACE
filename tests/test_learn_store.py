@@ -32,7 +32,7 @@ class TestLoadStore:
         ks = load_store("nonexistent", directory=str(tmp_path))
         assert ks.project == "nonexistent"
         assert ks.learnings == []
-        assert ks.version == "0.2"
+        assert ks.version == "0.4"
 
     def test_roundtrip(self, tmp_path):
         ks = KnowledgeStore(project="roundtrip")
@@ -275,3 +275,33 @@ class TestEnvironmentVariable:
         assert (custom_dir / "env_test.json").exists()
         loaded = load_store("env_test", directory=None)
         assert len(loaded.learnings) == 1
+
+
+# ── Path sanitization (Phase 1b) ────────────────────────────────────────
+
+
+class TestStorePathSanitized:
+    """Tests that store paths are sanitized against traversal."""
+
+    def test_traversal_stays_in_directory(self, tmp_path):
+        """Project '../../evil' should not escape the knowledge dir."""
+        from trace_mcp.extensions.learn.store import _store_path
+
+        path = _store_path("../../evil", directory=str(tmp_path))
+        assert str(tmp_path) in str(path)
+        assert ".." not in path.name
+
+    def test_load_corrupt_json_non_strict(self, tmp_path):
+        """Corrupt JSON returns fresh store in default mode."""
+        path = tmp_path / "corrupt.json"
+        path.write_text("{broken json!!!", encoding="utf-8")
+        ks = load_store("corrupt", directory=str(tmp_path))
+        assert ks.project == "corrupt"
+        assert ks.learnings == []
+
+    def test_load_corrupt_json_strict_raises(self, tmp_path):
+        """Corrupt JSON with strict=True raises StoreLoadError."""
+        path = tmp_path / "corrupt.json"
+        path.write_text("{broken json!!!", encoding="utf-8")
+        with pytest.raises(StoreLoadError, match="Corrupt JSON"):
+            load_store("corrupt", directory=str(tmp_path), strict=True)

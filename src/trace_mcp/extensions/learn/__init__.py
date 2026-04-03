@@ -12,14 +12,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
-
-from typing import cast, get_args
+from typing import TYPE_CHECKING, cast, get_args
 
 from trace_mcp.extensions.learn import extraction, matching, store
 from trace_mcp.extensions.learn.config import load_config
+from trace_mcp.extensions.learn.embeddings import get_embedding_provider
 from trace_mcp.extensions.learn.matching import DecayParams
-from trace_mcp.extensions.learn.models import LearningCategory
+from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, LearningCategory
 from trace_mcp.hooks import register_extract_hook, register_recall_hook
 
 _VALID_CATEGORIES = get_args(LearningCategory)
@@ -37,12 +36,37 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
 
     _config = load_config()
     _backend = matching.get_default_backend(_config)
+    _embedding_provider = get_embedding_provider(_config)
     _decay_params = DecayParams(
         enabled=_config.decay_enabled,
         half_life_days=_config.decay_half_life_days,
         evergreen_recall_threshold=_config.evergreen_recall_threshold,
         evergreen_floor=_config.evergreen_floor,
     )
+
+    async def _embed_learnings(learnings: list[Learning]) -> bool:
+        """Generate embeddings for learnings that need them.  Returns True if any were updated."""
+        if _embedding_provider is None or not learnings:
+            return False
+        try:
+            texts = [lrn.content for lrn in learnings]
+            vecs = await _embedding_provider.embed_texts(texts)
+            for lrn, vec in zip(learnings, vecs, strict=True):
+                lrn.embedding = vec
+                lrn.embedding_model = _embedding_provider.model_name
+            return True
+        except Exception:
+            logger.warning("Failed to generate embeddings", exc_info=True)
+            return False
+
+    def _needs_embedding(ks: KnowledgeStore) -> list[Learning]:
+        """Return learnings that need (re-)embedding."""
+        if _embedding_provider is None:
+            return []
+        return [
+            lrn for lrn in ks.learnings
+            if lrn.embedding is None or lrn.embedding_model != _embedding_provider.model_name
+        ]
 
     # ── Register hooks so core tools can auto-recall/extract ──
 
@@ -55,6 +79,8 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         ks = store.load_store(project)
         if not ks.learnings:
             return []
+        stale = _needs_embedding(ks)
+        embedded = await _embed_learnings(stale) if stale else False
         results = await matching.recall_learnings(
             ks.learnings,
             context=context,
@@ -64,7 +90,7 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             backend=_backend,
             decay_config=_decay_params,
         )
-        if results:
+        if results or embedded:
             store.save_store(ks)
         return results
 
@@ -73,6 +99,9 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         sess = await storage.get_session(session_id)
         new_ids = await extraction.extract_from_session_auto(ks, sess, _config)
         if new_ids:
+            new_set = set(new_ids)
+            to_embed = [lrn for lrn in ks.learnings if lrn.id in new_set and lrn.embedding is None]
+            await _embed_learnings(to_embed)
             store.save_store(ks)
         return new_ids
 
@@ -101,6 +130,9 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             if not context and not tags:
                 results = store.list_learnings(ks)
                 return json.dumps({"project": project, "results": results[:limit], "total": len(results)})
+            # Lazy-embed: generate (or regenerate) embeddings for learnings that need them
+            stale = _needs_embedding(ks)
+            embedded = await _embed_learnings(stale) if stale else False
             results = await matching.recall_learnings(
                 ks.learnings,
                 context=context or "",
@@ -110,7 +142,7 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                 backend=_backend,
                 decay_config=_decay_params,
             )
-            if results:
+            if results or embedded:
                 store.save_store(ks)
             return json.dumps({"project": project, "results": results, "total": len(results)})
         except Exception:
@@ -151,7 +183,7 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                     return json.dumps({
                         "duplicate": True,
                         "similar_to": result.duplicate_of,
-                        "existing": result.learning.model_dump(mode="json"),
+                        "existing": store.learning_to_dict(result.learning),
                     })
                 lrn = result.learning
             else:
@@ -163,8 +195,9 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                     source_event=source_event,
                     tags=tags,
                 )
+            await _embed_learnings([lrn])
             store.save_store(ks)
-            return json.dumps({"added": lrn.model_dump(mode="json")})
+            return json.dumps({"added": store.learning_to_dict(lrn)})
         except Exception:
             logger.exception("Error adding learning")
             return json.dumps({"error": "Failed to add learning", "project": project})
@@ -240,7 +273,11 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                     except FileNotFoundError:
                         continue
 
+            # Batch-embed newly extracted learnings
             if all_new_ids:
+                new_set = set(all_new_ids)
+                to_embed = [lrn for lrn in ks.learnings if lrn.id in new_set and lrn.embedding is None]
+                await _embed_learnings(to_embed)
                 store.save_store(ks)
 
             return json.dumps(

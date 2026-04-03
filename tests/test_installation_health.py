@@ -13,12 +13,22 @@ Root cause of recurring failures:
     recreates the venv without properly re-processing .pth files), the
     .pth file exists but Python never adds its path to sys.path.
 
+    Additional failure mode (Python 3.13 + macOS):
+    macOS propagates the UF_HIDDEN file flag to all files inside directories
+    whose names start with "." (like .venv/). Python 3.13's site.addpackage()
+    skips .pth files with UF_HIDDEN set, silently breaking editable installs.
+    The bin/trace-mcp-server launcher script works around this by explicitly
+    adding src/ to sys.path before importing trace_mcp.
+
     Fix: Delete the venv and run `uv venv && uv sync` to recreate from scratch.
+    Or use bin/trace-mcp-server as the entry point (avoids .pth entirely).
 """
 
 from __future__ import annotations
 
 import json
+import os
+import platform
 import subprocess
 from pathlib import Path
 
@@ -29,6 +39,7 @@ TRACE_ROOT = Path(__file__).parent.parent
 VENV_DIR = TRACE_ROOT / ".venv"
 VENV_PYTHON = VENV_DIR / "bin" / "python"
 VENV_TRACE_MCP = VENV_DIR / "bin" / "trace-mcp"
+LAUNCHER_SCRIPT = TRACE_ROOT / "bin" / "trace-mcp-server"
 SITE_PACKAGES_GLOB = VENV_DIR / "lib" / "python*" / "site-packages"
 
 
@@ -114,10 +125,8 @@ class TestPackageImport:
     def test_import_extensions(self) -> None:
         """Extension packages should be importable."""
         import trace_mcp.extensions.learn
-        import trace_mcp.extensions.evolve
 
         assert hasattr(trace_mcp.extensions.learn, "register")
-        assert hasattr(trace_mcp.extensions.evolve, "register")
 
     def test_import_exporters(self) -> None:
         """Exporter modules should be importable."""
@@ -250,6 +259,159 @@ class TestVenvHealth:
         )
 
 
+# ── macOS UF_HIDDEN Flag Tests ─────────────────────────────────────────────
+
+
+class TestUFHiddenFlag:
+    """Detect the Python 3.13 + macOS UF_HIDDEN .pth file skip issue.
+
+    On macOS, directories starting with "." (like .venv/) have the UF_HIDDEN
+    flag set. macOS propagates this flag to all files created inside such
+    directories. Python 3.13 added a check in site.addpackage() that skips
+    .pth files with UF_HIDDEN set (os.stat().st_flags & UF_HIDDEN != 0).
+
+    This means editable installs that rely on .pth files silently break in
+    .venv/ directories on macOS + Python >= 3.13. The fix is to use the
+    bin/trace-mcp-server launcher script, which adds src/ to sys.path
+    explicitly without relying on .pth processing.
+
+    See: https://github.com/python/cpython/issues/121970
+    """
+
+    @pytest.mark.skipif(platform.system() != "Darwin", reason="UF_HIDDEN is macOS-only")
+    def test_pth_files_uf_hidden_flag(self) -> None:
+        """Check if .pth files in site-packages have UF_HIDDEN set.
+
+        If they do, Python 3.13+ will skip them, breaking editable installs.
+        This test warns about the condition and recommends the launcher script.
+        """
+        sp = _find_site_packages()
+        if sp is None:
+            pytest.skip("Could not find site-packages in venv")
+
+        # UF_HIDDEN = 0x8000 on macOS (from <sys/stat.h>)
+        UF_HIDDEN = 0x8000
+
+        pth_files = list(sp.glob("*.pth"))
+        if not pth_files:
+            pytest.skip("No .pth files found in site-packages")
+
+        hidden_pth_files = []
+        for pth in pth_files:
+            try:
+                st = os.stat(pth)
+                if hasattr(st, "st_flags") and (st.st_flags & UF_HIDDEN):
+                    hidden_pth_files.append(pth.name)
+            except OSError:
+                continue
+
+        if hidden_pth_files:
+            # This is a warning, not a hard failure, because the launcher
+            # script works around this. But it explains why the console_scripts
+            # entry point (trace-mcp) may fail.
+            import warnings
+            warnings.warn(
+                f"UF_HIDDEN set on .pth files: {hidden_pth_files}. "
+                f"Python 3.13+ skips these, breaking editable installs. "
+                f"Use bin/trace-mcp-server as the entry point instead.",
+                stacklevel=1,
+            )
+
+    @pytest.mark.skipif(platform.system() != "Darwin", reason="UF_HIDDEN is macOS-only")
+    def test_venv_directory_hidden_flag(self) -> None:
+        """Check if the .venv directory itself has UF_HIDDEN set.
+
+        If it does, all files created inside will inherit the flag.
+        """
+        if not VENV_DIR.exists():
+            pytest.skip(".venv directory does not exist")
+
+        UF_HIDDEN = 0x8000
+        try:
+            st = os.stat(VENV_DIR)
+            if hasattr(st, "st_flags") and (st.st_flags & UF_HIDDEN):
+                # Expected on macOS — the directory starts with "."
+                # This is informational, not a failure
+                pass  # Just documenting the condition
+        except OSError:
+            pytest.skip("Could not stat .venv directory")
+
+    @pytest.mark.skipif(platform.system() != "Darwin", reason="UF_HIDDEN is macOS-only")
+    def test_python_version_affected(self) -> None:
+        """Check if the venv Python version is affected by the UF_HIDDEN bug.
+
+        Python 3.13+ has the check in site.addpackage() that skips hidden
+        .pth files. Earlier versions are not affected.
+        """
+        if not VENV_PYTHON.exists():
+            pytest.skip("venv Python does not exist")
+
+        result = subprocess.run(
+            [str(VENV_PYTHON), "-c", "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            pytest.skip("Could not determine venv Python version")
+
+        major, minor = map(int, result.stdout.strip().split("."))
+        if (major, minor) >= (3, 13):
+            # Check if the .pth file actually has UF_HIDDEN
+            sp = _find_site_packages()
+            if sp is None:
+                pytest.skip("Could not find site-packages")
+
+            pth = sp / "_trace_mcp.pth"
+            if not pth.exists():
+                pytest.skip(".pth file does not exist")
+
+            UF_HIDDEN = 0x8000
+            st = os.stat(pth)
+            if hasattr(st, "st_flags") and (st.st_flags & UF_HIDDEN):
+                pytest.fail(
+                    f"Python {major}.{minor} is affected by the UF_HIDDEN .pth skip bug, "
+                    f"AND the _trace_mcp.pth file has UF_HIDDEN set.\n"
+                    f"The editable install WILL NOT WORK via the console_scripts entry point.\n"
+                    f"Use bin/trace-mcp-server instead, or set PYTHONPATH in .mcp.json."
+                )
+
+    def test_launcher_script_bypasses_pth(self) -> None:
+        """The launcher script should work even if .pth files are broken.
+
+        Verify that bin/trace-mcp-server can import trace_mcp by explicitly
+        adding src/ to sys.path, independent of .pth file processing.
+        """
+        if not LAUNCHER_SCRIPT.exists():
+            pytest.fail(
+                f"Launcher script not found at {LAUNCHER_SCRIPT}. "
+                f"This script is the recommended workaround for the UF_HIDDEN issue."
+            )
+
+        if not VENV_PYTHON.exists():
+            pytest.skip("venv Python does not exist")
+
+        # Run a quick import check using the launcher's path-setup logic
+        # without actually starting the server (which would block on stdin)
+        result = subprocess.run(
+            [
+                str(VENV_PYTHON),
+                "-c",
+                f"import sys; sys.path.insert(0, '{TRACE_ROOT / 'src'}'); "
+                f"import trace_mcp; print(trace_mcp.__version__)",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        assert result.returncode == 0, (
+            f"Failed to import trace_mcp with explicit src/ in sys.path.\n"
+            f"stdout: {result.stdout}\n"
+            f"stderr: {result.stderr}\n"
+            f"This means the source code itself has issues, not just the .pth mechanism."
+        )
+
+
 # ── Binary/Entry Point Tests ────────────────────────────────────────────────
 
 
@@ -284,6 +446,48 @@ class TestEntryPoints:
         assert init_binary.exists(), (
             f"trace-mcp-init binary not found at {init_binary}"
         )
+
+    def test_launcher_script_exists(self) -> None:
+        """The bin/trace-mcp-server launcher script should exist."""
+        assert LAUNCHER_SCRIPT.exists(), (
+            f"Launcher script not found at {LAUNCHER_SCRIPT}. "
+            f"This is the recommended entry point for .mcp.json configs."
+        )
+
+    def test_launcher_script_executable(self) -> None:
+        """The launcher script should have executable permission."""
+        if not LAUNCHER_SCRIPT.exists():
+            pytest.skip("Launcher script does not exist")
+        assert os.access(LAUNCHER_SCRIPT, os.X_OK), (
+            f"Launcher script {LAUNCHER_SCRIPT} is not executable. "
+            f"Run: chmod +x {LAUNCHER_SCRIPT}"
+        )
+
+    def test_launcher_script_shebang(self) -> None:
+        """The launcher script should have a proper Python shebang."""
+        if not LAUNCHER_SCRIPT.exists():
+            pytest.skip("Launcher script does not exist")
+        first_line = LAUNCHER_SCRIPT.read_text().split("\n")[0]
+        assert first_line.startswith("#!/usr/bin/env python3"), (
+            f"Launcher shebang is '{first_line}', expected '#!/usr/bin/env python3'"
+        )
+
+    def test_launcher_script_adds_src_to_path(self) -> None:
+        """The launcher script should add src/ to sys.path."""
+        if not LAUNCHER_SCRIPT.exists():
+            pytest.skip("Launcher script does not exist")
+        content = LAUNCHER_SCRIPT.read_text()
+        assert "sys.path" in content, "Launcher should manipulate sys.path"
+        assert '"src"' in content or "'src'" in content or "/ \"src\"" in content, (
+            "Launcher should reference the src/ directory"
+        )
+
+    def test_launcher_script_imports_main(self) -> None:
+        """The launcher script should import and call main from trace_mcp.server."""
+        if not LAUNCHER_SCRIPT.exists():
+            pytest.skip("Launcher script does not exist")
+        content = LAUNCHER_SCRIPT.read_text()
+        assert "from trace_mcp.server import main" in content
 
 
 # ── MCP Configuration Tests ─────────────────────────────────────────────────
@@ -405,7 +609,7 @@ class TestPyprojectConsistency:
         # Parse version from pyproject.toml
         for line in pyproject.split("\n"):
             if line.strip().startswith("version"):
-                # version = "0.2.0"
+                # version = "0.3.0"
                 pyproject_version = line.split('"')[1]
                 break
         else:

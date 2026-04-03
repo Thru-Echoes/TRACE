@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from trace_mcp.schema import Session
+from trace_mcp.schema import Session, SessionMetadata
 from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import (
     decision_tools,
@@ -26,6 +26,19 @@ def storage(tmp_path: Path) -> JsonFileStorage:
 @pytest.fixture
 def active() -> dict[str, Session]:
     return {}
+
+
+class TestInitProjectMCPConfig:
+    def test_init_project_mcp_config_uses_uv_run(self) -> None:
+        """MCP_CONFIG should use 'uv run --directory ... trace-mcp'."""
+        from trace_mcp.init_project import MCP_CONFIG
+
+        trace_config = MCP_CONFIG["trace"]
+        assert trace_config["command"] == "uv"
+        args = trace_config["args"]
+        assert "run" in args
+        assert "--directory" in args
+        assert "trace-mcp" in args
 
 
 class TestFullWorkflow:
@@ -125,7 +138,7 @@ class TestFullWorkflow:
             related_decision_ids=[dec1_id],
             tags=["implementation"],
         )
-        assert contrib_id == "evt_004"
+        assert contrib_id.split("\n")[0] == "evt_004"
 
         # 8. Log a gotcha annotation
         ann_id = await logging_tools.log_annotation(
@@ -424,7 +437,7 @@ class TestCorrectionWorkflow:
             actor_type="human",
             actor_id="researcher",
         )
-        assert corr_id == "evt_005"
+        assert corr_id.split("\n")[0] == "evt_005"
 
         # AI now proposes correct env (revises original decision)
         dec2_id = await decision_tools.propose_decision(
@@ -593,7 +606,7 @@ class TestCorrectionWorkflow:
 class TestHealthCheck:
     async def test_health_check_empty(self, storage: JsonFileStorage, tmp_path: Path) -> None:
         result = await query_tools.health_check(storage)
-        assert result["version"] == "0.2.0"
+        assert result["version"] == "0.3.0"
         assert result["session_count"] == 0
         assert result["events"]["total"] == 0
         assert result["events"]["by_type"] == {}
@@ -709,12 +722,575 @@ class TestErrorCases:
         session_id = list(active.keys())[0]
         session = active[session_id]
 
-        result = await decision_tools.resolve_decision(
-            storage,
-            session,
-            event_id="evt_999",
-            disposition="accepted",
-            resolved_by_type="human",
-            resolved_by_id="researcher",
+        with pytest.raises(ValueError, match="not found"):
+            await decision_tools.resolve_decision(
+                storage,
+                session,
+                event_id="evt_999",
+                disposition="accepted",
+                resolved_by_type="human",
+                resolved_by_id="researcher",
+            )
+
+
+# ── Conversation Snippet (Phase 2) ──────────────────────────────────────
+
+
+class TestConversationSnippet:
+    async def test_contribution_with_snippet(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        await session_tools.start_session(storage, active, project="snippet-test")
+        session_id = list(active.keys())[0]
+        session = active[session_id]
+
+        await logging_tools.log_contribution(
+            storage, session,
+            description="Wrote analysis code",
+            direction="human", execution="ai",
+            conversation_snippet="User said: please write the analysis code",
         )
-        assert "not found" in result.lower() or "error" in result.lower()
+        evt = session.events[-1]
+        assert evt.context.conversation_snippet == "User said: please write the analysis code"
+
+    async def test_annotation_with_snippet(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        await session_tools.start_session(storage, active, project="snippet-test")
+        session_id = list(active.keys())[0]
+        session = active[session_id]
+
+        await logging_tools.log_annotation(
+            storage, session,
+            category="correction", content="Wrong env",
+            conversation_snippet="User: that's the wrong environment",
+        )
+        evt = session.events[-1]
+        assert evt.context.conversation_snippet == "User: that's the wrong environment"
+
+    async def test_decision_with_snippet(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        await session_tools.start_session(storage, active, project="snippet-test")
+        session_id = list(active.keys())[0]
+        session = active[session_id]
+
+        await decision_tools.propose_decision(
+            storage, session,
+            description="Use BM25",
+            proposed_by_type="ai", proposed_by_id="claude",
+            conversation_snippet="Let's try BM25 for matching",
+        )
+        evt = session.events[-1]
+        assert evt.context.conversation_snippet == "Let's try BM25 for matching"
+
+    async def test_contribution_without_snippet_backward_compat(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        await session_tools.start_session(storage, active, project="snippet-test")
+        session_id = list(active.keys())[0]
+        session = active[session_id]
+
+        await logging_tools.log_contribution(
+            storage, session,
+            description="Code", direction="ai", execution="ai",
+        )
+        evt = session.events[-1]
+        assert evt.context.conversation_snippet is None
+
+    async def test_search_finds_conversation_snippet(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        await session_tools.start_session(storage, active, project="snippet-test")
+        session_id = list(active.keys())[0]
+        session = active[session_id]
+
+        await logging_tools.log_contribution(
+            storage, session,
+            description="Analysis code",
+            direction="human", execution="ai",
+            conversation_snippet="User asked for a correlation analysis",
+        )
+        results = query_tools.search_events(session, query="correlation analysis")
+        assert len(results) >= 1
+
+    async def test_snippet_persists_roundtrip(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        await session_tools.start_session(storage, active, project="snippet-test")
+        session_id = list(active.keys())[0]
+        session = active[session_id]
+
+        await logging_tools.log_contribution(
+            storage, session,
+            description="Code",
+            direction="human", execution="ai",
+            conversation_snippet="roundtrip test snippet",
+        )
+        loaded = await storage.get_session(session_id)
+        evt = loaded.events[-1]
+        assert evt.context.conversation_snippet == "roundtrip test snippet"
+
+
+# ── Attribution Audit (Phase 3) ─────────────────────────────────────────
+
+
+class TestAttributionAudit:
+    async def test_audit_contributions(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        await session_tools.start_session(storage, active, project="audit-test")
+        session_id = list(active.keys())[0]
+        session = active[session_id]
+
+        await logging_tools.log_contribution(
+            storage, session,
+            description="Human-directed code",
+            direction="human", execution="ai",
+            artifact="src/code.py",
+        )
+        await logging_tools.log_contribution(
+            storage, session,
+            description="AI-directed analysis",
+            direction="ai", execution="ai",
+            artifact="src/analysis.py",
+        )
+        result = await session_tools.end_session(storage, active, session_id=session_id)
+        assert "Attribution Audit" in result
+        assert "Contributions (2)" in result
+        assert "direction=human" in result
+        assert "direction=ai" in result
+
+    async def test_audit_decisions(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        await session_tools.start_session(storage, active, project="audit-test")
+        session_id = list(active.keys())[0]
+        session = active[session_id]
+
+        await decision_tools.propose_decision(
+            storage, session,
+            description="Use method A",
+            proposed_by_type="ai", proposed_by_id="claude",
+            suggestion_type="proactive",
+        )
+        await decision_tools.resolve_decision(
+            storage, session,
+            event_id="evt_001", disposition="accepted",
+            resolved_by_type="human", resolved_by_id="researcher",
+        )
+        result = await session_tools.end_session(storage, active, session_id=session_id)
+        assert "Decisions (1)" in result
+        assert "proposed_by=ai" in result
+        assert "disposition=accepted" in result
+
+    async def test_audit_corrections(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        await session_tools.start_session(storage, active, project="audit-test")
+        session_id = list(active.keys())[0]
+        session = active[session_id]
+
+        # First log events that will be corrected
+        await logging_tools.log_annotation(
+            storage, session,
+            category="observation", content="Using env X",
+            actor_type="ai", actor_id="claude",
+        )
+        await logging_tools.log_annotation(
+            storage, session,
+            category="observation", content="Config is Y",
+            actor_type="ai", actor_id="claude",
+        )
+        # Now log a correction referencing the existing events
+        await logging_tools.log_annotation(
+            storage, session,
+            category="correction",
+            content="Wrong env used",
+            corrects_event_ids=["evt_001", "evt_002"],
+            actor_type="human", actor_id="researcher",
+        )
+        result = await session_tools.end_session(storage, active, session_id=session_id)
+        assert "Corrections: 1" in result
+        assert "evt_001" in result
+
+    async def test_audit_human_interventions(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        await session_tools.start_session(storage, active, project="audit-test")
+        session_id = list(active.keys())[0]
+        session = active[session_id]
+
+        # Correction
+        await logging_tools.log_annotation(
+            storage, session,
+            category="correction", content="Fix",
+            actor_type="human", actor_id="researcher",
+        )
+        # Rejected decision
+        await decision_tools.propose_decision(
+            storage, session,
+            description="Bad idea",
+            proposed_by_type="ai", proposed_by_id="claude",
+        )
+        await decision_tools.resolve_decision(
+            storage, session,
+            event_id="evt_002", disposition="rejected",
+            resolved_by_type="human", resolved_by_id="researcher",
+            revision_note="No",
+        )
+        # Revised decision
+        await decision_tools.propose_decision(
+            storage, session,
+            description="Tweakable idea",
+            proposed_by_type="ai", proposed_by_id="claude",
+        )
+        await decision_tools.resolve_decision(
+            storage, session,
+            event_id="evt_003", disposition="revised",
+            resolved_by_type="human", resolved_by_id="researcher",
+            revision_note="Use variant",
+        )
+        result = await session_tools.end_session(storage, active, session_id=session_id)
+        assert "Human interventions: 3" in result
+        assert "1 correction" in result
+        assert "1 revision" in result
+        assert "1 rejection" in result
+
+    async def test_audit_empty_session(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        await session_tools.start_session(storage, active, project="audit-test")
+        session_id = list(active.keys())[0]
+        result = await session_tools.end_session(storage, active, session_id=session_id)
+        assert "No contributions, decisions, or corrections to review." in result
+
+    async def test_audit_mixed_realistic(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        """Realistic session with 8+ events, full audit verification."""
+        await session_tools.start_session(storage, active, project="audit-test")
+        session_id = list(active.keys())[0]
+        session = active[session_id]
+
+        # Tool call
+        await logging_tools.log_tool_call(
+            storage, session, server="bash", tool_name="run",
+            input={"cmd": "test"}, status="success",
+        )
+        # Decision proposed + accepted
+        await decision_tools.propose_decision(
+            storage, session,
+            description="Use cosine similarity",
+            proposed_by_type="ai", proposed_by_id="claude",
+            suggestion_type="proactive",
+        )
+        await decision_tools.resolve_decision(
+            storage, session,
+            event_id="evt_002", disposition="accepted",
+            resolved_by_type="human", resolved_by_id="researcher",
+        )
+        # Contribution
+        await logging_tools.log_contribution(
+            storage, session,
+            description="Similarity function",
+            direction="human", execution="ai",
+            artifact="src/sim.py",
+        )
+        # Annotation
+        await logging_tools.log_annotation(
+            storage, session,
+            category="gotcha", content="Unicode issues",
+        )
+        # Another contribution
+        await logging_tools.log_contribution(
+            storage, session,
+            description="Test suite",
+            direction="ai", execution="ai",
+            artifact="tests/test_sim.py",
+        )
+        # Decision rejected
+        await decision_tools.propose_decision(
+            storage, session,
+            description="Use threshold 0.9",
+            proposed_by_type="ai", proposed_by_id="claude",
+        )
+        await decision_tools.resolve_decision(
+            storage, session,
+            event_id="evt_006", disposition="rejected",
+            resolved_by_type="human", resolved_by_id="researcher",
+            revision_note="Too high",
+        )
+        # State change
+        await logging_tools.log_state_change(
+            storage, session,
+            description="Switched model",
+        )
+
+        result = await session_tools.end_session(storage, active, session_id=session_id)
+        assert "Attribution Audit" in result
+        assert "Contributions (2)" in result
+        assert "Decisions (2)" in result
+        assert "Human interventions: 1" in result
+        assert "1 rejection" in result
+
+
+# ── Decision Chain Edge Case (Phase 5d) ─────────────────────────────────
+
+
+class TestDecisionChainEdgeCases:
+    async def test_circular_chain_terminates(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        """A→B→A cycle should terminate without infinite loop."""
+        await session_tools.start_session(storage, active, project="chain-test")
+        session_id = list(active.keys())[0]
+        session = active[session_id]
+
+        # Create decision A
+        await decision_tools.propose_decision(
+            storage, session,
+            description="Decision A",
+            proposed_by_type="ai", proposed_by_id="claude",
+        )
+        # Create decision B that revises A
+        await decision_tools.propose_decision(
+            storage, session,
+            description="Decision B",
+            proposed_by_type="ai", proposed_by_id="claude",
+            revises_event_id="evt_001",
+        )
+        # Manually create cycle: patch A to revise B
+        for evt in session.events:
+            if evt.id == "evt_001" and evt.decision:
+                evt.decision.revises_event_id = "evt_002"
+                break
+        await storage.update_session(session)
+
+        # Should terminate and return results (not hang)
+        chain = query_tools.get_decision_chain(session, event_id="evt_001")
+        assert len(chain) >= 1
+        assert len(chain) <= 2  # At most both decisions
+
+
+class TestCreateSession:
+    """Tests for the new create_session function used by auto-session."""
+
+    async def test_create_session_returns_session_object(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        """create_session returns a Session, not a formatted string."""
+        session = await session_tools.create_session(
+            storage, active, project="test-project", description="test",
+        )
+        assert isinstance(session, Session)
+        assert session.metadata.project == "test-project"
+        assert session.metadata.description == "test"
+        assert session.id in active
+
+    async def test_create_session_persists_to_disk(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        session = await session_tools.create_session(
+            storage, active, project="persist-test",
+        )
+        # Load from disk independently
+        loaded = await storage.get_session(session.id)
+        assert loaded.metadata.project == "persist-test"
+
+    async def test_create_session_with_tags(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        session = await session_tools.create_session(
+            storage, active, project="tag-test", tags=["auto-session"],
+        )
+        assert "auto-session" in session.metadata.tags
+
+    async def test_start_session_still_returns_string(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        """Existing start_session API is unchanged — returns formatted string."""
+        result = await session_tools.start_session(
+            storage, active, project="compat-test",
+        )
+        assert isinstance(result, str)
+        assert "TRACE audit logging is now active" in result
+        assert "compat-test" in result
+
+
+class TestAutoSession:
+    """Tests for the server-level auto-session infrastructure."""
+
+    async def test_ensure_session_with_explicit_id(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        """_ensure_session with explicit session_id returns that session."""
+        import trace_mcp.server as srv
+
+        # Save original state
+        orig_storage, orig_active = srv.storage, srv.active_sessions
+        orig_current = srv._current_session_id
+        srv.storage, srv.active_sessions = storage, active
+
+        try:
+            session = await session_tools.create_session(
+                storage, active, project="explicit-test",
+            )
+            result_session, auto_msg = await srv._ensure_session(session.id)
+            assert result_session.id == session.id
+            assert auto_msg == ""
+            assert srv._current_session_id == session.id
+        finally:
+            srv.storage, srv.active_sessions = orig_storage, orig_active
+            srv._current_session_id = orig_current
+
+    async def test_ensure_session_reuses_current(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        """_ensure_session with None reuses _current_session_id."""
+        import trace_mcp.server as srv
+
+        orig_storage, orig_active = srv.storage, srv.active_sessions
+        orig_current = srv._current_session_id
+        srv.storage, srv.active_sessions = storage, active
+
+        try:
+            session = await session_tools.create_session(
+                storage, active, project="reuse-test",
+            )
+            srv._current_session_id = session.id
+            result_session, auto_msg = await srv._ensure_session(None)
+            assert result_session.id == session.id
+            assert auto_msg == ""
+        finally:
+            srv.storage, srv.active_sessions = orig_storage, orig_active
+            srv._current_session_id = orig_current
+
+    async def test_ensure_session_auto_creates(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        """_ensure_session auto-creates when no session exists."""
+        import trace_mcp.server as srv
+
+        orig_storage, orig_active = srv.storage, srv.active_sessions
+        orig_current = srv._current_session_id
+        srv.storage, srv.active_sessions = storage, active
+        srv._current_session_id = None
+
+        try:
+            result_session, auto_msg = await srv._ensure_session(None)
+            assert result_session is not None
+            assert "Auto-created" in auto_msg
+            assert result_session.id in active
+            assert srv._current_session_id == result_session.id
+            assert "auto-session" in result_session.metadata.tags
+        finally:
+            srv.storage, srv.active_sessions = orig_storage, orig_active
+            srv._current_session_id = orig_current
+
+    async def test_ensure_session_explicit_not_found_raises(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        """_ensure_session with invalid explicit ID raises FileNotFoundError."""
+        import trace_mcp.server as srv
+
+        orig_storage, orig_active = srv.storage, srv.active_sessions
+        orig_current = srv._current_session_id
+        srv.storage, srv.active_sessions = storage, active
+
+        try:
+            with pytest.raises(FileNotFoundError):
+                await srv._ensure_session("nonexistent_session_id")
+        finally:
+            srv.storage, srv.active_sessions = orig_storage, orig_active
+            srv._current_session_id = orig_current
+
+    async def test_infer_project_from_recent_session(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        """_infer_project falls back to most recent session's project."""
+        import trace_mcp.server as srv
+
+        orig_storage = srv.storage
+        srv.storage = storage
+
+        try:
+            # Create a session so there's something to infer from
+            await session_tools.create_session(
+                storage, active, project="inferred-project",
+            )
+            # Remove env var if set
+            import os
+            old_env = os.environ.pop("TRACE_DEFAULT_PROJECT", None)
+            try:
+                project = await srv._infer_project()
+                assert project == "inferred-project"
+            finally:
+                if old_env is not None:
+                    os.environ["TRACE_DEFAULT_PROJECT"] = old_env
+        finally:
+            srv.storage = orig_storage
+
+    async def test_infer_project_from_env_var(
+        self, storage: JsonFileStorage, active: dict[str, Session],
+    ) -> None:
+        """_infer_project prefers TRACE_DEFAULT_PROJECT env var."""
+        import os
+        import trace_mcp.server as srv
+
+        orig_storage = srv.storage
+        srv.storage = storage
+
+        try:
+            old_env = os.environ.get("TRACE_DEFAULT_PROJECT")
+            os.environ["TRACE_DEFAULT_PROJECT"] = "env-project"
+            try:
+                project = await srv._infer_project()
+                assert project == "env-project"
+            finally:
+                if old_env is not None:
+                    os.environ["TRACE_DEFAULT_PROJECT"] = old_env
+                else:
+                    os.environ.pop("TRACE_DEFAULT_PROJECT", None)
+        finally:
+            srv.storage = orig_storage
+
+
+class TestValidateSession:
+    """Tests for the session validation script."""
+
+    def test_validate_valid_session(self, tmp_path: Path) -> None:
+        """A valid session JSON passes validation."""
+        import importlib.util
+
+        script = Path(__file__).parent.parent / "scripts" / "validate_session.py"
+        spec = importlib.util.spec_from_file_location("validate_session", script)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        session = Session(
+            id="trace_valid_001",
+            metadata=SessionMetadata(project="test"),
+        )
+        session_file = tmp_path / "trace_valid_001.json"
+        session_file.write_text(
+            json.dumps(session.model_dump(mode="json"), indent=2, default=str)
+        )
+        result = mod.main([str(session_file)])
+        assert result == 0
+
+    def test_validate_invalid_session(self, tmp_path: Path) -> None:
+        """An invalid session JSON fails validation."""
+        import importlib.util
+
+        script = Path(__file__).parent.parent / "scripts" / "validate_session.py"
+        spec = importlib.util.spec_from_file_location("validate_session", script)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        invalid_file = tmp_path / "bad.json"
+        invalid_file.write_text('{"not_a_session": true}')
+        result = mod.main([str(invalid_file)])
+        assert result == 1

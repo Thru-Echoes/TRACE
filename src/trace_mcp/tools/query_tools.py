@@ -343,14 +343,6 @@ async def health_check(
         knowledge_dir = str(Path(os.environ.get("TRACE_KNOWLEDGE_DIR", "~/.trace/knowledge")).expanduser())
     knowledge_dir_exists = Path(knowledge_dir).is_dir()
 
-    try:
-        from trace_mcp.extensions.evolve.store import _get_directory as _get_evolution_dir
-
-        evolution_dir = str(_get_evolution_dir())
-    except Exception:
-        evolution_dir = str(Path(os.environ.get("TRACE_EVOLUTION_DIR", "~/.trace/evolution")).expanduser())
-    evolution_dir_exists = Path(evolution_dir).is_dir()
-
     # Load sessions
     sessions: list[Session] = []
     if session_id:
@@ -384,8 +376,6 @@ async def health_check(
             "sessions_dir_exists": sessions_dir_exists,
             "knowledge_dir": knowledge_dir,
             "knowledge_dir_exists": knowledge_dir_exists,
-            "evolution_dir": evolution_dir,
-            "evolution_dir_exists": evolution_dir_exists,
         },
         "session_count": len(sessions),
         "project_filter": project,

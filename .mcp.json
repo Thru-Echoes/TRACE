@@ -2,7 +2,10 @@
   "mcpServers": {
     "trace": {
       "command": "uv",
-      "args": ["run", "--reinstall-package", "trace-mcp", "--directory", "/Users/echoes/Documents/Berkeley/Research/TRACE", "trace-mcp"]
+      "args": ["run", "--directory", "/Users/echoes/Documents/Berkeley/Research/TRACE", "trace-mcp"],
+      "env": {
+        "TRACE_PINNED_VERSION": "0.3.0"
+      }
     }
   }
 }

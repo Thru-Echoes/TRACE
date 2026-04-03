@@ -6,7 +6,7 @@ TRACE is an MCP server that provides a standardized audit trail for AI-assisted 
 
 TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy or intercept calls — the AI client explicitly logs events to TRACE, creating a complete, human-readable provenance record.
 
-**Version:** 0.2.0 | **Schema:** `https://trace-protocol.org/v0.2` | **License:** Apache 2.0
+**Version:** 0.3.0 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
 
 ## Architecture
 
@@ -79,7 +79,7 @@ Claude: -> trace_end_session(summary="Analyzed 47 passages...")
         (learnings auto-extracted and persisted for future sessions)
 ```
 
-## Available Tools (28 total)
+## Available Tools (23 total)
 
 ### Core Tools (18)
 
@@ -116,12 +116,6 @@ Cross-session knowledge persistence. Learnings from one session are automaticall
 | `trace_learn_extract` | Extract learnings from session events (annotations, rejected decisions, contributions) |
 
 **Storage:** `~/.trace/knowledge/{project}.json` (env var: `TRACE_KNOWLEDGE_DIR`)
-
-### Extension: trace-evolve (5) — Legacy
-
-Evolution-themed terminology for projects already using this extension. Same underlying functionality as trace-learn with different naming (mutate/express/select/extinct/fitness).
-
-**Storage:** `~/.trace/evolution/{project}.json` (env var: `TRACE_EVOLUTION_DIR`)
 
 ## Core Concept: Decision Provenance
 
@@ -224,7 +218,6 @@ Environment variables take precedence over `.env` file values for CI/container u
 |----------|---------|-------------|
 | `TRACE_SESSIONS_DIR` | `~/.trace/sessions/` | Directory for session JSON files |
 | `TRACE_KNOWLEDGE_DIR` | `~/.trace/knowledge/` | Directory for trace-learn knowledge stores |
-| `TRACE_EVOLUTION_DIR` | `~/.trace/evolution/` | Directory for trace-evolve genomes |
 | `TRACE_LOG_LEVEL` | `INFO` | Logging verbosity |
 | `OPENAI_API_KEY` | — | OpenAI API key for LLM matching and extraction |
 | `TRACE_LLM_MODEL` | `gpt-5-nano` | Model for LLM relevance scoring |
@@ -246,20 +239,26 @@ Environment variables take precedence over `.env` file values for CI/container u
 - **Markdown** — Human-readable summary with decision log, tool call table, annotations, and statistics.
 - **PROV JSON-LD** — W3C PROV-compatible provenance graph for interoperability with other provenance systems.
 
-## Schema Reference
+## Specification
 
-The formal protocol specification is a JSON Schema generated from the Pydantic models:
+TRACE implements the **Decision Provenance for AI-Assisted Workflows** specification — a technology-agnostic standard defining what to record when humans and AI collaborate on research.
 
-- [`schemas/trace-v0.2.json`](schemas/trace-v0.2.json)
+| Artifact | Location | Role |
+|----------|----------|------|
+| **Specification** | [`docs/specification.md`](docs/specification.md) | Authoritative definition of the data model, semantics, and conformance rules. Technology-neutral. |
+| **JSON Schema** | [`schemas/trace-v0.3.json`](schemas/trace-v0.3.json) | Machine-readable formalization. Any JSON document validating against this schema is a conforming session document. |
+| **Reference implementation** | This repository (`trace-mcp`) | An MCP server that produces conforming documents. One possible implementation — not the only one. |
 
-Regenerate with: `python scripts/generate_schema.py`
+The specification defines five event types (tool invocations, decisions, annotations, state changes, contributions), a decision lifecycle model (proposed / accepted / revised / rejected), and an actor taxonomy (human / ai / system). Any tool that produces JSON documents conforming to the schema implements the standard — no dependency on MCP, Python, or TRACE itself.
+
+Regenerate the schema from models: `python scripts/generate_schema.py`
 
 ## Using with Claude Code
 
 Copy the skill file to teach Claude Code to automatically use TRACE:
 
 ```bash
-cp skill/TRACE.md ~/.claude/skills/
+cp docs/claude-code-skill.md ~/.claude/skills/TRACE.md
 ```
 
 The skill provides detailed guidance on when and how to log events, with five worked examples covering decisions, corrections, contributions, decision chains, and complex multi-event scenarios.
@@ -290,7 +289,6 @@ src/trace_mcp/
             store.py       # File I/O with atomic writes
             extraction.py  # Rule-based + LLM extraction backends
             matching.py    # BM25 (with stemming) + LLM + Jaccard matching backends
-        evolve/            # Legacy evolution-themed extension
 ```
 
 ## Test Suite
@@ -318,7 +316,6 @@ uv run pytest -k llm              # Run real LLM integration tests only
 | **Knowledge metrics** | 7 | project_summary knowledge section: totals, categories, most-surfaced, never-surfaced, averages |
 | **trace-learn E2E** | 12 | Full pipeline: extract → persist → recall across sessions, config loading, correction chain tracking |
 | **Recall layers** | 23 | 3-layer recall architecture (session start, on-demand, decision proposal), hook registration, format functions, auto-extract on session end, cross-session persistence |
-| **trace-evolve** | 27 | Evolution-themed extension: mutations, expressions, selections, extinction, fitness scoring |
 | **Installation health** | 34 | Import checks, config resolution, extension loading |
 | **E2E server** | 12 | Full MCP tool invocations through the server layer |
 
@@ -335,7 +332,7 @@ uv run pytest -k llm              # Run real LLM integration tests only
 
 ```bash
 uv pip install -e ".[dev]"   # Install with dev dependencies
-uv run pytest                 # Run full test suite (455 tests)
+uv run pytest                 # Run full test suite
 uv run pytest -k llm          # Run real LLM integration tests
 uv run ruff check src/        # Lint
 uv run pyright src/            # Type check
@@ -374,6 +371,45 @@ Development is organized into three tiers, implemented sequentially.
 - **Pretty-printed JSON** — `indent=2`, openable in any editor
 - **No external dependencies** beyond `mcp` and `pydantic` (OpenAI optional)
 - **Atomic writes** — Temp file + rename prevents corrupt stores
+
+## Changelog
+
+### v0.3.0 (2026-03-18)
+
+- **Attribution audit**: `trace_end_session` returns a structured attribution audit summarizing contributions (direction/execution), decisions (disposition), corrections, and human interventions
+- **`conversation_snippet`**: `trace_log_contribution`, `trace_log_annotation`, and `trace_propose_decision` accept a `conversation_snippet` parameter (~200 chars of relevant user message)
+- **Path sanitization**: Session IDs and project names sanitized against directory traversal attacks via `sanitize_name()`
+- **Schema cleanup**: Removed dead fields `verification` (TraceEvent) and `parent_event_id` (EventContext)
+- **Error handling**: `resolve_decision()` raises `ValueError` for missing decisions instead of returning error strings
+- **Scratchpad**: Auto-generates human-readable session summaries to `.claude/SCRATCHPAD.md` at session end
+- **Embedding backend**: Cosine similarity on precomputed vectors (OpenAI `text-embedding-3-small` or model2vec `potion-base-8M` local). Sub-millisecond recall after initial embedding.
+- **Version pin checking**: `TRACE_PINNED_VERSION` env var warns on startup if server version doesn't match
+- **50 new tests**: Path traversal, corrupt JSON, conversation_snippet roundtrip, attribution audit, BM25 edge cases, decay, export edge cases
+
+### v0.2.0 (2026-02-15)
+
+- Contribution logging with direction/execution attribution
+- Decision `suggestion_type` (proactive/requested/collaborative)
+- Project summaries with aggregated metrics
+- Correction annotations with `corrects_event_ids`
+- Tool call retry chains via `retries_event_id`
+- Human intervention metrics
+
+### Install Extras
+
+```bash
+pip install trace-mcp              # Core only (BM25 matching)
+pip install trace-mcp[llm]         # + OpenAI embeddings & LLM matching
+pip install trace-mcp[embeddings]  # + model2vec local embeddings
+pip install trace-mcp[all]         # Everything
+```
+
+## Known Limitations
+
+- **Single-client server** — TRACE uses global state in `server.py` (one `active_sessions` dict). It is designed for a single AI client; concurrent clients would need separate server instances.
+- **File-based storage only** — All data is stored as JSON files. There is no database backend. For large-scale deployments, a database adapter would need to be implemented against the `TraceStorage` abstract interface.
+- **No concurrent write protection on Windows** — The atomic write pattern (temp file + `os.replace`) works cross-platform, but there is no file locking on Windows.
+- **LLM matching is optional** — Without an OpenAI API key, knowledge recall uses BM25 (keyword-based). Semantic similarity requires LLM configuration.
 
 ## Paper Context
 

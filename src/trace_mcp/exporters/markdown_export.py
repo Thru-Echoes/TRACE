@@ -103,6 +103,9 @@ def export_markdown(session: Session) -> str:
                 lines.append(f"- **Status**: {emoji} {d.disposition.capitalize()} by {d.resolved_by.id}")
             if d.revision_note:
                 lines.append(f'- **Revision**: "{d.revision_note}"')
+            if d.warnings:
+                for w in d.warnings:
+                    lines.append(f"- **Guard rail**: {w}")
             lines.append("")
 
     # Tool Calls

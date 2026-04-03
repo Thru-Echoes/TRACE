@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from typing import Any
 
@@ -37,6 +38,78 @@ logger = logging.getLogger("trace-mcp")
 mcp = FastMCP("trace")
 storage = JsonFileStorage()
 active_sessions: dict[str, Session] = {}
+_current_session_id: str | None = None
+
+
+# ── Auto-Session Infrastructure ────────────────────────────────────────────
+
+
+async def _infer_project() -> str:
+    """Infer project name from env var or most recent session."""
+    project = os.environ.get("TRACE_DEFAULT_PROJECT")
+    if project:
+        return project
+    try:
+        sessions = await storage.list_sessions(limit=1)
+        if sessions:
+            return sessions[0].get("project", "auto")
+    except Exception:
+        pass
+    return "auto"
+
+
+async def _ensure_session(session_id: str | None) -> tuple[Session, str]:
+    """Get an existing session or auto-create one.
+
+    Returns (session, auto_message). ``auto_message`` is non-empty only
+    when a session was auto-created, so the caller can prepend it to the
+    tool response.
+
+    Raises ``FileNotFoundError`` when an explicit *session_id* is given
+    but does not exist (preserving existing error behaviour).
+    """
+    global _current_session_id
+
+    # 1. Explicit session_id provided — look it up (may raise)
+    if session_id:
+        session = await session_tools.get_or_load_session(
+            storage, active_sessions, session_id
+        )
+        _current_session_id = session_id
+        return session, ""
+
+    # 2. Re-use the current session from earlier in this server process
+    if _current_session_id:
+        try:
+            session = await session_tools.get_or_load_session(
+                storage, active_sessions, _current_session_id
+            )
+            return session, ""
+        except FileNotFoundError:
+            _current_session_id = None
+
+    # 3. Auto-create a new session
+    project = await _infer_project()
+    session = await session_tools.create_session(
+        storage,
+        active_sessions,
+        project=project,
+        description="Auto-created session (no explicit trace_start_session call)",
+        tags=["auto-session"],
+    )
+    _current_session_id = session.id
+
+    auto_msg = (
+        f"⚠️ Auto-created TRACE session: {session.id} (project: {project}). "
+        f"Call trace_start_session with a proper description for better provenance."
+    )
+
+    # Try to recall learnings for the auto-session
+    recalled = await hooks.recall_if_available(project, "", None, 3)
+    if recalled:
+        auto_msg += hooks.format_recalled_learnings(recalled)
+
+    return session, auto_msg
 
 
 # ── Session Management ──────────────────────────────────────────────────────
@@ -61,8 +134,9 @@ async def trace_start_session(
     most relevant past learnings based on the session description and tags.
     Only the top recall_limit results are returned (default 5).
     """
+    global _current_session_id
     try:
-        result = await session_tools.start_session(
+        session = await session_tools.create_session(
             storage,
             active_sessions,
             project=project,
@@ -70,6 +144,16 @@ async def trace_start_session(
             description=description,
             participants=participants,
             tags=tags,
+        )
+        _current_session_id = session.id
+
+        path = storage._session_path(session.id) if hasattr(storage, "_session_path") else "disk"  # type: ignore[attr-defined]
+        result = (
+            f"TRACE audit logging is now active.\n"
+            f"Session: {session.id}\n"
+            f"Project: {project}\n"
+            f"File: {path}\n"
+            f"All tool calls, decisions, and annotations will be recorded."
         )
 
         # Layer 1: Auto-recall relevant learnings at session start
@@ -91,6 +175,7 @@ async def trace_end_session(
     session_id: str,
     summary: str | None = None,
     extract_learnings: bool = True,
+    write_scratchpad: bool = True,
 ) -> str:
     """End a TRACE audit session.
 
@@ -100,7 +185,12 @@ async def trace_end_session(
     When extract_learnings is True (default), automatically extracts
     learnings from the session's annotations and decisions into the
     project's knowledge store.
+
+    When write_scratchpad is True (default), appends a human-readable
+    summary to .claude/SCRATCHPAD.md for context restoration in the
+    next session.
     """
+    global _current_session_id
     try:
         # Grab project before end_session pops the session from memory
         project: str | None = None
@@ -120,11 +210,34 @@ async def trace_end_session(
             summary=summary,
         )
 
+        # Clear current session if it's the one being ended
+        if _current_session_id == session_id:
+            _current_session_id = None
+
         # Auto-extract learnings from the completed session
         if extract_learnings and project:
-            new_ids = await hooks.extract_if_available(project, session_id)
-            if new_ids:
-                result += f"\nExtracted {len(new_ids)} new learnings: {', '.join(new_ids)}"
+            extraction = await hooks.extract_if_available(project, session_id)
+            if extraction.error:
+                result += (
+                    f"\n⚠️ Learning extraction failed: {extraction.error}"
+                    "\nLearnings were NOT extracted from this session. "
+                    "Run trace_learn_extract manually to retry."
+                )
+            elif extraction.new_ids:
+                result += f"\nExtracted {len(extraction.new_ids)} new learnings: {', '.join(extraction.new_ids)}"
+
+        # Write SCRATCHPAD.md with session summary
+        if write_scratchpad:
+            try:
+                # Re-load the completed session for SCRATCHPAD generation
+                completed = await storage.get_session(session_id)
+                from trace_mcp.scratchpad import write_scratchpad as _write_sp
+
+                sp_path = _write_sp(completed)
+                result += f"\nContext saved: {sp_path}"
+            except Exception as e:
+                logger.warning("SCRATCHPAD write failed: %s", e, exc_info=True)
+                result += f"\n⚠️ SCRATCHPAD write failed: {e}"
 
         return result
     except Exception as e:
@@ -137,7 +250,6 @@ async def trace_end_session(
 
 @mcp.tool()
 async def trace_log_tool_call(
-    session_id: str,
     server: str,
     tool_name: str,
     input: dict[str, Any],
@@ -150,17 +262,22 @@ async def trace_log_tool_call(
     actor_id: str = "ai-assistant",
     reasoning: str | None = None,
     conversation_turn: int | None = None,
+    session_id: str | None = None,
 ) -> str:
     """Log a tool call made to another MCP server.
 
     Call this AFTER each tool invocation to record what was called,
     with what inputs, and what was returned.
+
+    session_id is optional — if omitted, uses the current session or
+    auto-creates one.
     """
     try:
-        session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+        session, auto_msg = await _ensure_session(session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
 
+    prefix = f"{auto_msg}\n" if auto_msg else ""
     try:
         event_id = await logging_tools.log_tool_call(
             storage,
@@ -178,7 +295,7 @@ async def trace_log_tool_call(
             reasoning=reasoning,
             conversation_turn=conversation_turn,
         )
-        return f"Logged tool call: {event_id}"
+        return f"{prefix}Logged tool call: {event_id}"
     except Exception as e:
         logger.exception("Error logging tool call")
         return f"Error logging tool call: {e}"
@@ -186,7 +303,6 @@ async def trace_log_tool_call(
 
 @mcp.tool()
 async def trace_log_annotation(
-    session_id: str,
     category: str,
     content: str,
     tags: list[str] | None = None,
@@ -194,6 +310,8 @@ async def trace_log_annotation(
     related_event_ids: list[str] | None = None,
     actor_type: str = "ai",
     actor_id: str = "ai-assistant",
+    conversation_snippet: str | None = None,
+    session_id: str | None = None,
 ) -> str:
     """Log an observation, learning, gotcha, correction, or note.
 
@@ -201,12 +319,16 @@ async def trace_log_annotation(
     useful about the data or tools, or want to record a note for future reference.
     Use category='correction' with corrects_event_ids when a human catches and
     fixes an AI mistake.
+
+    session_id is optional — if omitted, uses the current session or
+    auto-creates one.
     """
     try:
-        session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+        session, auto_msg = await _ensure_session(session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
 
+    prefix = f"{auto_msg}\n" if auto_msg else ""
     try:
         event_id = await logging_tools.log_annotation(
             storage,
@@ -218,8 +340,9 @@ async def trace_log_annotation(
             related_event_ids=related_event_ids,
             actor_type=actor_type,
             actor_id=actor_id,
+            conversation_snippet=conversation_snippet,
         )
-        return f"Logged annotation: {event_id}"
+        return f"{prefix}Logged annotation: {event_id}"
     except Exception as e:
         logger.exception("Error logging annotation")
         return f"Error logging annotation: {e}"
@@ -227,7 +350,6 @@ async def trace_log_annotation(
 
 @mcp.tool()
 async def trace_log_contribution(
-    session_id: str,
     description: str,
     direction: str,
     execution: str,
@@ -236,18 +358,24 @@ async def trace_log_contribution(
     tags: list[str] | None = None,
     actor_type: str = "ai",
     actor_id: str = "ai-assistant",
+    conversation_snippet: str | None = None,
+    session_id: str | None = None,
 ) -> str:
     """Log a contribution with direction-vs-execution attribution.
 
     Records who had the idea (direction) vs who did the work (execution).
     Use 'human', 'ai', or 'collaborative' for each.
     Optionally link to the decision(s) that motivated this contribution.
+
+    session_id is optional — if omitted, uses the current session or
+    auto-creates one.
     """
     try:
-        session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+        session, auto_msg = await _ensure_session(session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
 
+    prefix = f"{auto_msg}\n" if auto_msg else ""
     try:
         event_id = await logging_tools.log_contribution(
             storage,
@@ -260,8 +388,9 @@ async def trace_log_contribution(
             tags=tags,
             actor_type=actor_type,
             actor_id=actor_id,
+            conversation_snippet=conversation_snippet,
         )
-        return f"Logged contribution: {event_id}"
+        return f"{prefix}Logged contribution: {event_id}"
     except Exception as e:
         logger.exception("Error logging contribution")
         return f"Error logging contribution: {e}"
@@ -269,7 +398,6 @@ async def trace_log_contribution(
 
 @mcp.tool()
 async def trace_log_state_change(
-    session_id: str,
     description: str,
     field: str | None = None,
     old_value: Any = None,
@@ -277,17 +405,22 @@ async def trace_log_state_change(
     reason: str | None = None,
     actor_type: str = "ai",
     actor_id: str = "ai-assistant",
+    session_id: str | None = None,
 ) -> str:
     """Log a change in environment, configuration, or tools.
 
     Use when switching models, changing parameters, updating dependencies,
     or any shift in the working context.
+
+    session_id is optional — if omitted, uses the current session or
+    auto-creates one.
     """
     try:
-        session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+        session, auto_msg = await _ensure_session(session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
 
+    prefix = f"{auto_msg}\n" if auto_msg else ""
     try:
         event_id = await logging_tools.log_state_change(
             storage,
@@ -300,7 +433,7 @@ async def trace_log_state_change(
             actor_type=actor_type,
             actor_id=actor_id,
         )
-        return f"Logged state change: {event_id}"
+        return f"{prefix}Logged state change: {event_id}"
     except Exception as e:
         logger.exception("Error logging state change")
         return f"Error logging state change: {e}"
@@ -311,7 +444,6 @@ async def trace_log_state_change(
 
 @mcp.tool()
 async def trace_propose_decision(
-    session_id: str,
     description: str,
     proposed_by_type: str,
     proposed_by_id: str,
@@ -319,6 +451,8 @@ async def trace_propose_decision(
     revises_event_id: str | None = None,
     suggestion_type: str | None = None,
     tags: list[str] | None = None,
+    conversation_snippet: str | None = None,
+    session_id: str | None = None,
 ) -> str:
     """Propose a methodological decision for the workflow.
 
@@ -329,12 +463,16 @@ async def trace_propose_decision(
 
     suggestion_type can be 'proactive' (AI volunteered), 'requested' (human asked),
     or 'collaborative' (emerged from discussion).
+
+    session_id is optional — if omitted, uses the current session or
+    auto-creates one.
     """
     try:
-        session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+        session, auto_msg = await _ensure_session(session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
 
+    prefix = f"{auto_msg}\n" if auto_msg else ""
     try:
         event_id = await decision_tools.propose_decision(
             storage,
@@ -346,8 +484,9 @@ async def trace_propose_decision(
             revises_event_id=revises_event_id,
             suggestion_type=suggestion_type,
             tags=tags,
+            conversation_snippet=conversation_snippet,
         )
-        result = f"Decision proposed: {event_id}"
+        result = f"{prefix}Decision proposed: {event_id}"
 
         # Layer 3: Auto-recall related learnings for this decision
         project = session.metadata.project
@@ -366,24 +505,28 @@ async def trace_propose_decision(
 @mcp.tool()
 async def trace_resolve_decision(
     event_id: str,
-    session_id: str,
     disposition: str,
     resolved_by_type: str,
     resolved_by_id: str,
     revision_note: str | None = None,
+    session_id: str | None = None,
 ) -> str:
     """Resolve a previously proposed decision.
 
     Mark it as accepted, revised, or rejected. Always include a revision_note
     when revising or rejecting — explain why.
+
+    session_id is optional — if omitted, uses the current session or
+    auto-creates one.
     """
     try:
-        session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+        session, auto_msg = await _ensure_session(session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
 
+    prefix = f"{auto_msg}\n" if auto_msg else ""
     try:
-        return await decision_tools.resolve_decision(
+        result = await decision_tools.resolve_decision(
             storage,
             session,
             event_id=event_id,
@@ -392,6 +535,7 @@ async def trace_resolve_decision(
             resolved_by_id=resolved_by_id,
             revision_note=revision_note,
         )
+        return f"{prefix}{result}" if prefix else result
     except Exception as e:
         logger.exception("Error resolving decision")
         return f"Error resolving decision: {e}"
@@ -582,7 +726,7 @@ def _load_extensions() -> None:
 
 
 def main() -> None:
-    """Run the TRACE MCP server (or handle subcommands like 'init')."""
+    """Run the TRACE MCP server (or handle subcommands like 'init' or 'validate')."""
     if len(sys.argv) > 1 and sys.argv[1] == "init":
         from trace_mcp.init_project import init_project
 
@@ -590,7 +734,29 @@ def main() -> None:
         init_project(directory)
         return
 
+    if len(sys.argv) > 1 and sys.argv[1] == "validate":
+        import importlib.util
+        from pathlib import Path as _Path
+
+        script = _Path(__file__).resolve().parent.parent.parent / "scripts" / "validate_session.py"
+        spec = importlib.util.spec_from_file_location("validate_session", script)
+        assert spec and spec.loader
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        raise SystemExit(mod.main(sys.argv[2:]))
+
     _load_extensions()
+
+    # Version pin check: warn if the calling project expects a different version
+    pinned = os.environ.get("TRACE_PINNED_VERSION")
+    if pinned and pinned != __version__:
+        logger.warning(
+            "Version mismatch: project expects TRACE %s but server is %s. "
+            "Update .mcp.json TRACE_PINNED_VERSION or upgrade TRACE.",
+            pinned,
+            __version__,
+        )
+
     logger.info("Starting TRACE MCP server v%s", __version__)
     mcp.run(transport="stdio")
 

@@ -544,3 +544,45 @@ class TestAutoExtraction:
 
         assert len(new_ids) == 1
         assert ks.learnings[0].content == "LLM-enhanced learning"
+
+
+# ── Additional extraction tests (Phase 5e) ──────────────────────────────
+
+
+class TestExtractionEdgeCases:
+    def test_extract_corrections_only(self):
+        """Session with only correction annotations extracts them all."""
+        session = _session([
+            _annotation("evt_001", "correction", "Fix A", corrects_event_ids=["evt_000"]),
+            _annotation("evt_002", "correction", "Fix B", corrects_event_ids=["evt_000"]),
+        ])
+        ks = KnowledgeStore(project="test")
+        new_ids = extract_from_session(ks, session)
+        assert len(new_ids) == 2
+        assert all(lrn.category == "correction" for lrn in ks.learnings)
+
+    def test_extract_empty_session(self):
+        """Empty session → no learnings extracted."""
+        session = _session([])
+        ks = KnowledgeStore(project="test")
+        new_ids = extract_from_session(ks, session)
+        assert new_ids == []
+        assert len(ks.learnings) == 0
+
+    def test_extract_collaborative_contribution(self):
+        """Collaborative direction contributions are extracted as observations."""
+        session = _session([
+            _contribution(
+                "evt_001",
+                "Joint brainstorming produced new approach",
+                direction="collaborative",
+                execution="ai",
+                artifact="src/new_approach.py",
+                tags=["collab"],
+            )
+        ])
+        ks = KnowledgeStore(project="test")
+        new_ids = extract_from_session(ks, session)
+        assert len(new_ids) == 1
+        assert ks.learnings[0].category == "observation"
+        assert "new_approach.py" in ks.learnings[0].content

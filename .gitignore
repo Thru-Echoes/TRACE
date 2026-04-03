@@ -59,6 +59,12 @@ dmypy.json
 .ipynb_checkpoints/
 *.ipynb_checkpoints
 
+# Claude Code (local config, hooks, session state)
+.claude/
+
+# Playwright MCP (runtime downloads, console logs, browser artifacts)
+.playwright-mcp/
+
 # IDEs
 .idea/
 .vscode/

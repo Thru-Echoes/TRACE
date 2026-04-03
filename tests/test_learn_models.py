@@ -97,7 +97,7 @@ class TestKnowledgeStoreModel:
     def test_empty_store(self):
         ks = KnowledgeStore(project="my-project")
         assert ks.project == "my-project"
-        assert ks.version == "0.2"
+        assert ks.version == "0.4"
         assert ks.learnings == []
 
     def test_store_with_learnings(self):
