@@ -37,7 +37,7 @@ def sample_session() -> Session:
                 mcp_servers=["corpus-search-mcp"],
                 client="claude-code",
                 os="Darwin",
-                trace_version="0.2.0",
+                trace_version="0.3.0",
             ),
             tags=["ipcc", "adaptation"],
         ),
@@ -243,3 +243,123 @@ class TestProvJsonLdExport:
         raw = export_prov_jsonld(sample_session)
         doc = json.loads(raw)
         assert isinstance(doc, dict)
+
+
+# ── Export edge cases (Phase 5c) ─────────────────────────────────────────
+
+
+class TestEmptySessionExport:
+    def _empty_session(self) -> Session:
+        return Session(
+            id="trace_empty_001",
+            metadata=SessionMetadata(project="empty-test"),
+            events=[],
+        )
+
+    def test_empty_session_markdown_valid(self) -> None:
+        """Empty session produces valid markdown with header."""
+        md = export_markdown(self._empty_session())
+        assert "# TRACE Session: trace_empty_001" in md
+        assert "Total events" in md
+
+    def test_empty_session_prov_jsonld_valid(self) -> None:
+        """Empty session produces valid JSON-LD."""
+        raw = export_prov_jsonld(self._empty_session())
+        doc = json.loads(raw)
+        assert "@context" in doc
+        assert "bundle" in doc
+
+
+class TestMarkdownEdgeCases:
+    def test_pipe_in_annotation_no_break(self, sample_session: Session) -> None:
+        """A | character in annotation content shouldn't break table layout."""
+        # Add an annotation with pipe characters
+        sample_session.events.append(
+            TraceEvent(
+                id="evt_pipe",
+                session_id=sample_session.id,
+                type="annotation",
+                actor=Actor(type="ai", id="claude"),
+                annotation=AnnotationData(
+                    category="observation",
+                    content="Value is A | B | C in the data",
+                ),
+            )
+        )
+        md = export_markdown(sample_session)
+        # Should still contain the annotation section without crashing
+        assert "Annotations" in md
+        assert "A | B | C" in md
+
+    def test_decision_warnings_in_markdown(self) -> None:
+        """Decision warnings should render as guard rail bullets."""
+        session = Session(
+            id="trace_warnings_001",
+            metadata=SessionMetadata(project="warnings-test"),
+            events=[
+                TraceEvent(
+                    id="evt_001",
+                    session_id="trace_warnings_001",
+                    type="decision",
+                    actor=Actor(type="ai", id="claude"),
+                    decision=DecisionData(
+                        description="Use threshold 0.9",
+                        proposed_by=Actor(type="ai", id="claude"),
+                        warnings=["Previously rejected at 0.9", "Consider recall impact"],
+                    ),
+                ),
+            ],
+        )
+        md = export_markdown(session)
+        assert "**Guard rail**: Previously rejected at 0.9" in md
+        assert "**Guard rail**: Consider recall impact" in md
+
+    def test_decision_warnings_in_prov(self) -> None:
+        """Decision warnings should appear as trace:warnings in PROV."""
+        session = Session(
+            id="trace_warnings_002",
+            metadata=SessionMetadata(project="warnings-test"),
+            events=[
+                TraceEvent(
+                    id="evt_001",
+                    session_id="trace_warnings_002",
+                    type="decision",
+                    actor=Actor(type="ai", id="claude"),
+                    decision=DecisionData(
+                        description="Use threshold 0.9",
+                        proposed_by=Actor(type="ai", id="claude"),
+                        warnings=["Watch out for false positives"],
+                    ),
+                ),
+            ],
+        )
+        raw = export_prov_jsonld(session)
+        doc = json.loads(raw)
+        bundle_key = list(doc["bundle"].keys())[0]
+        bundle = doc["bundle"][bundle_key]
+        activity = bundle["activity"]["trace:evt_001"]
+        assert activity["trace:warnings"] == ["Watch out for false positives"]
+
+    def test_very_long_description_markdown(self) -> None:
+        """A 10K character description doesn't crash markdown export."""
+        long_desc = "x" * 10_000
+        session = Session(
+            id="trace_long_001",
+            metadata=SessionMetadata(project="long-test"),
+            events=[
+                TraceEvent(
+                    id="evt_001",
+                    session_id="trace_long_001",
+                    type="contribution",
+                    actor=Actor(type="ai", id="claude"),
+                    contribution=ContributionData(
+                        description=long_desc,
+                        direction="ai",
+                        execution="ai",
+                    ),
+                ),
+            ],
+        )
+        md = export_markdown(session)
+        assert "Contributions" in md
+        assert long_desc in md

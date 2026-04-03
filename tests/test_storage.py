@@ -165,3 +165,64 @@ class TestDeleteSession:
     async def test_delete_nonexistent_raises(self, storage: JsonFileStorage) -> None:
         with pytest.raises(FileNotFoundError):
             await storage.delete_session("nonexistent")
+
+
+# ── Path Sanitization (Phase 1b) ────────────────────────────────────────
+
+from trace_mcp.storage.json_file import sanitize_name
+
+
+class TestSanitizeName:
+    def test_safe_passthrough(self) -> None:
+        assert sanitize_name("trace_20260205_abc123") == "trace_20260205_abc123"
+
+    def test_strips_path_separators(self) -> None:
+        result = sanitize_name("../../etc/passwd")
+        assert "/" not in result
+        assert ".." not in result
+
+    def test_strips_leading_dots(self) -> None:
+        assert sanitize_name(".hidden") == "hidden"
+
+    def test_empty_raises(self) -> None:
+        with pytest.raises(ValueError, match="empty string"):
+            sanitize_name("////")
+
+    def test_preserves_hyphens_and_dots(self) -> None:
+        assert sanitize_name("my-project.v2") == "my-project.v2"
+
+    def test_replaces_spaces(self) -> None:
+        assert sanitize_name("my project") == "my_project"
+
+
+class TestSessionPathSanitized:
+    async def test_session_path_doesnt_escape(self, storage: JsonFileStorage, tmp_path: Path) -> None:
+        """Session path with traversal attempt stays in directory."""
+        path = storage._session_path("../../etc/passwd")
+        assert str(tmp_path) in str(path)
+        assert ".." not in path.name
+
+
+class TestAtomicWrite:
+    async def test_atomic_write_creates_file(self, storage: JsonFileStorage, tmp_path: Path) -> None:
+        """_write_file creates a file with correct content without fcntl."""
+        test_path = tmp_path / "test_atomic.json"
+        storage._write_file(test_path, '{"test": true}')
+        assert test_path.exists()
+        assert test_path.read_text() == '{"test": true}'
+
+
+class TestCorruptSessionJson:
+    async def test_corrupt_json_raises(self, storage: JsonFileStorage, tmp_path: Path) -> None:
+        """Corrupt JSON in session file raises on get_session."""
+        path = tmp_path / "trace_20260205_abc123.json"
+        path.write_text("{invalid json!!!", encoding="utf-8")
+        with pytest.raises(Exception):  # json.JSONDecodeError
+            await storage.get_session("trace_20260205_abc123")
+
+    async def test_truncated_json_raises(self, storage: JsonFileStorage, tmp_path: Path) -> None:
+        """Truncated JSON in session file raises on get_session."""
+        path = tmp_path / "trace_20260205_abc123.json"
+        path.write_text('{"id": "trace_20260205_abc', encoding="utf-8")
+        with pytest.raises(Exception):
+            await storage.get_session("trace_20260205_abc123")

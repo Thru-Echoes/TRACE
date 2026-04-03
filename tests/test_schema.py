@@ -57,7 +57,7 @@ class TestSession:
         )
         assert s.id == "trace_20260205_abc123"
         assert s.status == "active"
-        assert s.trace_version == "0.2.0"
+        assert s.trace_version == "0.3.0"
         assert isinstance(s.created, datetime)
 
     def test_next_event_id(self) -> None:
@@ -310,7 +310,7 @@ class TestRoundTrip:
                     mcp_servers=["corpus-search"],
                     client="claude-code",
                     os="Darwin",
-                    trace_version="0.2.0",
+                    trace_version="0.3.0",
                 ),
                 tags=["test"],
             ),
@@ -430,3 +430,56 @@ class TestJsonSchema:
     def test_generate_event_schema(self) -> None:
         schema = TraceEvent.model_json_schema()
         assert "type" in schema["properties"]
+
+    def test_json_schema_includes_decision_warnings(self) -> None:
+        """DecisionData schema must include the warnings field."""
+        schema = Session.model_json_schema()
+        defs = schema.get("$defs", {})
+        decision_schema = defs.get("DecisionData", {})
+        props = decision_schema.get("properties", {})
+        assert "warnings" in props, "DecisionData schema missing 'warnings' field"
+        # Should be an array type
+        warnings_schema = props["warnings"]
+        assert warnings_schema.get("type") == "array" or "items" in warnings_schema
+
+    def test_decision_data_warnings_roundtrip(self) -> None:
+        """DecisionData with warnings survives dump → validate."""
+        d = DecisionData(
+            description="Use threshold 0.9",
+            proposed_by=Actor(type="ai", id="claude"),
+            warnings=["Previously rejected at 0.9"],
+        )
+        data = d.model_dump(mode="json")
+        restored = DecisionData.model_validate(data)
+        assert restored.warnings == ["Previously rejected at 0.9"]
+
+
+# ── Dead Field Removal (Phase 1) ────────────────────────────────────────
+
+
+class TestDeadFieldRemoval:
+    def test_trace_event_has_no_verification_field(self) -> None:
+        """verification field was removed from TraceEvent."""
+        assert "verification" not in TraceEvent.model_fields
+
+    def test_event_context_has_no_parent_event_id(self) -> None:
+        """parent_event_id field was removed from EventContext."""
+        from trace_mcp.schema.events import EventContext
+        assert "parent_event_id" not in EventContext.model_fields
+
+    def test_old_json_with_extra_fields_still_loads(self) -> None:
+        """Backward compat: old JSON with removed fields can still be loaded."""
+        raw = {
+            "id": "evt_001",
+            "session_id": "s001",
+            "type": "annotation",
+            "actor": {"type": "ai", "id": "claude"},
+            "annotation": {"category": "observation", "content": "test"},
+            "verification": {"hash": "abc123"},
+            "context": {"parent_event_id": "evt_000"},
+        }
+        # model_validate with extra fields should not raise by default
+        # (Pydantic v2 ignores extra fields unless model is configured to forbid)
+        evt = TraceEvent.model_validate(raw)
+        assert evt.id == "evt_001"
+        assert evt.type == "annotation"

@@ -225,8 +225,8 @@ class TestServerStartup:
                 await _shutdown_server(proc)
 
     async def test_server_loads_extensions(self) -> None:
-        """Extensions (learn, evolve) should register their tools."""
-        extension_tool_prefixes = ["trace_learn_", "trace_evolve_"]
+        """Extensions (learn) should register their tools."""
+        extension_tool_prefixes = ["trace_learn_"]
 
         with tempfile.TemporaryDirectory() as tmpdir:
             proc = await _start_server(tmpdir)
@@ -384,7 +384,7 @@ class TestSessionLifecycleE2E:
 
                 result_text = response["result"]["content"][0]["text"]
                 health = json.loads(result_text)
-                assert health["version"] == "0.2.0"
+                assert health["version"] == "0.3.0"
                 assert health["session_count"] == 1
 
                 # 11. End session

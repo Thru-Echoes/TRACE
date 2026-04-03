@@ -357,30 +357,50 @@ class TestLLMBackend:
 
 
 class TestBackendSelection:
+    """Test backend auto-selection priority: Embedding > LLM > BM25."""
+
+    _NO_EMBEDDING = patch(
+        "trace_mcp.extensions.learn.matching.get_embedding_provider", return_value=None,
+    )
+
     def test_bm25_when_no_api_key(self):
-        config = LearnConfig(openai_api_key=None, llm_enabled=False)
+        config = LearnConfig(openai_api_key=None, llm_enabled=False, embedding_backend="none")
         backend = get_default_backend(config)
         assert isinstance(backend, BM25Backend)
 
     def test_bm25_when_llm_disabled(self):
-        config = LearnConfig(openai_api_key="sk-test", llm_enabled=False)
+        config = LearnConfig(openai_api_key="sk-test", llm_enabled=False, embedding_backend="none")
         backend = get_default_backend(config)
         assert isinstance(backend, BM25Backend)
 
     def test_bm25_when_no_openai_package(self):
-        config = LearnConfig(openai_api_key="sk-test", llm_enabled=True)
+        config = LearnConfig(openai_api_key="sk-test", llm_enabled=True, embedding_backend="none")
         with patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", False):
             backend = get_default_backend(config)
         assert isinstance(backend, BM25Backend)
 
     def test_llm_when_configured(self):
-        config = LearnConfig(openai_api_key="sk-test", llm_enabled=True)
+        config = LearnConfig(openai_api_key="sk-test", llm_enabled=True, embedding_backend="none")
         with patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", True):
             with patch("trace_mcp.extensions.learn.matching.AsyncOpenAI"):
                 backend = get_default_backend(config)
         # Can't check isinstance(LLMBackend) easily due to conditional import
         assert not isinstance(backend, BM25Backend)
         assert not isinstance(backend, JaccardBackend)
+
+    def test_embedding_preferred_over_llm(self):
+        """When model2vec is available, EmbeddingBackend is selected even with API key."""
+        from trace_mcp.extensions.learn.matching import EmbeddingBackend
+
+        config = LearnConfig(openai_api_key=None, llm_enabled=False)
+        # model2vec is installed in dev — auto selection picks it up
+        backend = get_default_backend(config)
+        assert isinstance(backend, EmbeddingBackend)
+
+    def test_embedding_none_falls_through(self):
+        config = LearnConfig(openai_api_key=None, llm_enabled=False, embedding_backend="none")
+        backend = get_default_backend(config)
+        assert isinstance(backend, BM25Backend)
 
 
 # ── recall_learnings integration tests ────────────────────────────────────
@@ -706,3 +726,115 @@ class TestRecallTracking:
                 [lrn], "conda environment", threshold=0.0, backend=BM25Backend(),
             )
         assert lrn.recall_count == 3
+
+
+# ── Additional BM25 tests (Phase 5a) ────────────────────────────────────
+
+
+class TestBM25IndexDetailed:
+    """Additional BM25 index tests for Phase 5a coverage."""
+
+    def test_index_creation_doc_count(self):
+        docs = [["a", "b"], ["c", "d"], ["e", "f"]]
+        index = _BM25Index(docs)
+        assert index.n == 3
+
+    def test_index_creation_avgdl(self):
+        docs = [["a", "b"], ["c", "d", "e", "f"]]
+        index = _BM25Index(docs)
+        assert index.avgdl == 3.0  # (2 + 4) / 2
+
+    def test_idf_common_term(self):
+        """Term in all docs has low IDF."""
+        docs = [["the", "cat"], ["the", "dog"], ["the", "bird"]]
+        index = _BM25Index(docs)
+        idf = index.idf("the")
+        # IDF for term in all docs: log((3 - 3 + 0.5) / (3 + 0.5) + 1) = log(1.143) ≈ 0.13
+        assert idf < 0.2
+
+    def test_idf_rare_term(self):
+        """Term in 1 of 3 docs has high IDF."""
+        docs = [["the", "cat"], ["the", "dog"], ["the", "bird"]]
+        index = _BM25Index(docs)
+        idf = index.idf("cat")
+        assert idf > 0.5
+
+    def test_score_exact_match_high(self):
+        """Query matching doc perfectly gives a high score."""
+        docs = [["conda", "environment", "setup"]]
+        index = _BM25Index(docs)
+        score = index.score(["conda", "environment", "setup"], 0)
+        assert score > 0
+
+    def test_score_no_match_zero(self):
+        """Query with no overlap scores zero."""
+        docs = [["conda", "environment", "setup"]]
+        index = _BM25Index(docs)
+        score = index.score(["pasta", "recipe", "tomato"], 0)
+        assert score == 0.0
+
+    def test_score_partial_match_moderate(self):
+        """Some query overlap gives moderate score."""
+        docs = [["conda", "environment", "setup", "python"]]
+        index = _BM25Index(docs)
+        full = index.score(["conda", "environment", "setup", "python"], 0)
+        partial = index.score(["conda", "environment"], 0)
+        assert 0 < partial < full
+
+
+class TestBM25BackendExtended:
+    """Additional BM25Backend tests for Phase 5a."""
+
+    async def test_score_batch_with_real_learnings(self):
+        """Full backend with realistic learnings."""
+        learnings = [
+            Learning(id="lrn_001", content="Use ml-dev conda environment for machine learning tasks"),
+            Learning(id="lrn_002", content="Log all decisions before implementing code changes"),
+            Learning(id="lrn_003", content="Fresh tomatoes make the best pasta sauce"),
+        ]
+        backend = BM25Backend(tag_weight=0.0)
+        results = await backend.score_batch(learnings, "conda environment ml-dev")
+        scores = dict(results)
+        assert scores[0] > scores[2]  # conda > pasta
+
+    async def test_empty_query_low_scores(self):
+        """Empty or very short query yields near-zero scores."""
+        learnings = [
+            Learning(id="lrn_001", content="Use ml-dev conda environment"),
+            Learning(id="lrn_002", content="Log decisions before implementing"),
+        ]
+        backend = BM25Backend(tag_weight=0.0)
+        results = await backend.score_batch(learnings, "")
+        scores = dict(results)
+        assert scores[0] == pytest.approx(0.0)
+        assert scores[1] == pytest.approx(0.0)
+
+
+class TestNormalizeBM25Extended:
+    """Additional normalization tests."""
+
+    def test_high_score_approaches_one(self):
+        """Very high raw score should approach but not reach 1.0."""
+        normed = _normalize_bm25(1000.0)
+        assert normed > 0.99
+        assert normed < 1.0
+
+
+class TestBM25VsJaccardRankAgreement:
+    """Both backends should agree on top result for obvious data."""
+
+    async def test_both_rank_same_top(self):
+        learnings = [
+            Learning(id="lrn_001", content="conda environment ml-dev activation"),
+            Learning(id="lrn_002", content="tomato pasta recipe Italian cooking"),
+            Learning(id="lrn_003", content="machine learning model training GPU"),
+        ]
+        query = "conda ml-dev environment"
+
+        bm25 = BM25Backend(tag_weight=0.0)
+        jaccard = JaccardBackend(tag_weight=0.0)
+
+        bm25_results = sorted(await bm25.score_batch(learnings, query), key=lambda x: x[1], reverse=True)
+        jaccard_results = sorted(await jaccard.score_batch(learnings, query), key=lambda x: x[1], reverse=True)
+
+        assert bm25_results[0][0] == jaccard_results[0][0]  # Same top result

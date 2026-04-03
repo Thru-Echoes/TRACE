@@ -37,13 +37,14 @@
       "type": "object"
     },
     "AnnotationData": {
-      "description": "Free-form observations, learnings, gotchas, todos.",
+      "description": "Free-form observations, learnings, gotchas, corrections, todos.",
       "properties": {
         "category": {
           "enum": [
             "learning",
             "gotcha",
             "observation",
+            "correction",
             "todo",
             "question",
             "other"
@@ -54,6 +55,13 @@
         "content": {
           "title": "Content",
           "type": "string"
+        },
+        "corrects_event_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Corrects Event Ids",
+          "type": "array"
         },
         "related_event_ids": {
           "items": {
@@ -228,6 +236,13 @@
           },
           "title": "Tags",
           "type": "array"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
         }
       },
       "required": [
@@ -305,18 +320,6 @@
           "default": null,
           "title": "Conversation Turn"
         },
-        "parent_event_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Parent Event Id"
-        },
         "reasoning_summary": {
           "anyOf": [
             {
@@ -328,6 +331,18 @@
           ],
           "default": null,
           "title": "Reasoning Summary"
+        },
+        "conversation_snippet": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Conversation Snippet"
         },
         "related_event_ids": {
           "items": {
@@ -548,6 +563,18 @@
           ],
           "default": null,
           "title": "Error Message"
+        },
+        "retries_event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retries Event Id"
         }
       },
       "required": [
@@ -646,19 +673,6 @@
         },
         "context": {
           "$ref": "#/$defs/EventContext"
-        },
-        "verification": {
-          "anyOf": [
-            {
-              "additionalProperties": true,
-              "type": "object"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Verification"
         }
       },
       "required": [
@@ -670,15 +684,15 @@
       "type": "object"
     }
   },
-  "description": "Schema for a TRACE (Transparent Recording of AI-assisted Collaboration Experiments) session document. One JSON file per session.",
+  "description": "JSON Schema for a session document conforming to the Decision Provenance for AI-Assisted Workflows specification v0.3.0. See: https://trace-protocol.org/v0.3",
   "properties": {
     "context": {
-      "default": "https://trace-protocol.org/v0.2",
+      "default": "https://trace-protocol.org/v0.3",
       "title": "Context",
       "type": "string"
     },
     "trace_version": {
-      "default": "0.2.0",
+      "default": "0.3.0",
       "title": "Trace Version",
       "type": "string"
     },
@@ -741,7 +755,7 @@
     "id",
     "metadata"
   ],
-  "title": "TRACE Session Schema v0.2",
+  "title": "Decision Provenance Session Document v0.3",
   "type": "object",
-  "$id": "https://trace-protocol.org/schemas/trace-v0.2.json"
+  "$id": "https://trace-protocol.org/schemas/trace-v0.3.json"
 }

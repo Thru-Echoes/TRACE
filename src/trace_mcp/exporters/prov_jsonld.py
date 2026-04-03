@@ -124,6 +124,8 @@ def _build_bundle(session: Session) -> dict[str, Any]:
             }
             if d.rationale:
                 bundle["activity"][activity_id]["trace:rationale"] = d.rationale
+            if d.warnings:
+                bundle["activity"][activity_id]["trace:warnings"] = d.warnings
 
             # Revision link
             if d.revises_event_id:

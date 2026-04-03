@@ -143,8 +143,9 @@ class TestHooksRegistry:
         assert results == []
 
     async def test_extract_returns_empty_when_no_hook(self):
-        results = await extract_if_available("test", "sess_001")
-        assert results == []
+        result = await extract_if_available("test", "sess_001")
+        assert result.success
+        assert result.new_ids == []
 
     async def test_recall_with_registered_hook(self, knowledge_dir):
         _seed_knowledge(knowledge_dir)
@@ -166,13 +167,14 @@ class TestHooksRegistry:
         results = await recall_if_available("test", "anything")
         assert results == []  # Fail-open, no exception
 
-    async def test_extract_hook_failure_returns_empty(self):
+    async def test_extract_hook_failure_returns_error(self):
         async def _bad_hook(project: str, session_id: str) -> list[str]:
             raise RuntimeError("Simulated failure")
 
         register_extract_hook(_bad_hook)
-        results = await extract_if_available("test", "sess_001")
-        assert results == []
+        result = await extract_if_available("test", "sess_001")
+        assert not result.success
+        assert "Simulated failure" in result.error
 
     async def test_clear_hooks(self, knowledge_dir):
         _seed_knowledge(knowledge_dir)
@@ -427,8 +429,9 @@ class TestAutoExtract:
         # Simulate what server.py does: end session, then extract
         await end_session(storage, active, session_id=session_id, summary="done")
 
-        new_ids = await extract_if_available("test", session_id)
-        assert new_ids == ["lrn_001", "lrn_002"]
+        result = await extract_if_available("test", session_id)
+        assert result.success
+        assert result.new_ids == ["lrn_001", "lrn_002"]
         assert extracted_calls == [("test", session_id)]
 
     async def test_extract_hook_not_called_when_no_hook(self, storage):
@@ -437,8 +440,9 @@ class TestAutoExtract:
         session_id, _ = await _create_session(storage, active, description="test")
         await end_session(storage, active, session_id=session_id, summary="done")
 
-        new_ids = await extract_if_available("test", session_id)
-        assert new_ids == []
+        result = await extract_if_available("test", session_id)
+        assert result.success
+        assert result.new_ids == []
 
     async def test_extract_real_session(self, storage, knowledge_dir):
         """Extract learnings from a session with real annotations."""
@@ -447,7 +451,20 @@ class TestAutoExtract:
             storage, active, description="test session",
         )
 
-        # Add a correction annotation event
+        # Add an observation that will be corrected
+        obs_event = TraceEvent(
+            session_id=session_id,
+            type="annotation",
+            actor=Actor(type="ai", id="ai-assistant"),
+            annotation=AnnotationData(
+                category="observation",
+                content="Using base conda env for ML pipeline",
+                tags=["conda"],
+            ),
+        )
+        await append_event(storage, session, obs_event)
+
+        # Add a correction annotation event referencing the observation
         event = TraceEvent(
             session_id=session_id,
             type="annotation",
@@ -456,7 +473,7 @@ class TestAutoExtract:
                 category="correction",
                 content="Wrong conda env — always use ml-dev, not base",
                 tags=["conda", "env"],
-                corrects_event_ids=["evt_000"],
+                corrects_event_ids=["evt_001"],
             ),
         )
         await append_event(storage, session, event)
@@ -471,7 +488,7 @@ class TestAutoExtract:
 
         assert len(new_ids) == 1
         assert ks.learnings[0].content == "Wrong conda env — always use ml-dev, not base"
-        assert ks.learnings[0].corrects_event_ids == ["evt_000"]
+        assert ks.learnings[0].corrects_event_ids == ["evt_001"]
 
         # Save and verify recallable via BM25
         save_store(ks, directory=knowledge_dir)

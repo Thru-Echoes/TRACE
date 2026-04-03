@@ -79,22 +79,40 @@ async def recall_if_available(
         return []
 
 
+class ExtractionResult:
+    """Result of a learning extraction attempt."""
+
+    def __init__(
+        self,
+        new_ids: list[str] | None = None,
+        error: str | None = None,
+    ) -> None:
+        self.new_ids = new_ids or []
+        self.error = error
+
+    @property
+    def success(self) -> bool:
+        return self.error is None
+
+
 async def extract_if_available(
     project: str,
     session_id: str,
-) -> list[str]:
+) -> ExtractionResult:
     """Extract learnings from a session if the learn extension is loaded.
 
-    Returns an empty list if no extract hook is registered or if the
-    hook raises an exception (fail-open).
+    Returns an ExtractionResult that explicitly reports success or failure.
+    Never raises — fail-open — but the caller can inspect .error to
+    surface the failure to the user.
     """
     if _extract_hook is None:
-        return []
+        return ExtractionResult()
     try:
-        return await _extract_hook(project, session_id)
-    except Exception:
+        new_ids = await _extract_hook(project, session_id)
+        return ExtractionResult(new_ids=new_ids)
+    except Exception as exc:
         logger.warning("Extract hook failed — continuing without extraction", exc_info=True)
-        return []
+        return ExtractionResult(error=str(exc))
 
 
 # ── Formatting (used by server.py to build response strings) ──────────────

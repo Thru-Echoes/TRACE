@@ -28,6 +28,13 @@ logger = logging.getLogger(__name__)
 # Annotation categories that rule-based extraction processes
 _EXTRACTABLE_CATEGORIES = {"learning", "correction", "gotcha"}
 
+# Keywords that signal a decision is about prompt strategy (for auto-categorization)
+_PROMPT_KEYWORDS = frozenset({
+    "prompt", "few-shot", "zero-shot", "chain-of-thought", "system prompt",
+    "instruction", "few shot", "zero shot", "chain of thought", "cot",
+    "prompting", "prompt engineering", "prompt template", "in-context",
+})
+
 try:
     from openai import AsyncOpenAI
 
@@ -150,10 +157,19 @@ def extract_from_session(
                 if d.suggestion_type and d.suggestion_type not in tags:
                     tags.append(d.suggestion_type)
 
+                # Auto-categorize as prompt_pattern if description
+                # mentions prompt-related keywords
+                desc_lower = d.description.lower()
+                cat: LearningCategory = "decision"
+                if any(kw in desc_lower for kw in _PROMPT_KEYWORDS):
+                    cat = "prompt_pattern"
+                    if "prompt_pattern" not in tags:
+                        tags.append("prompt_pattern")
+
                 lrn = _add_with_optional_dedup(
                     store,
                     content=content,
-                    category="decision",
+                    category=cat,
                     source_session=session.id,
                     source_event=evt.id,
                     tags=tags,
@@ -263,7 +279,7 @@ async def extract_from_session_llm(
         f"Existing learnings (DO NOT duplicate):\n{existing_text}\n\n"
         "Extract NEW learnings from these events. For each learning:\n"
         '- "content": actionable, specific insight (1-3 sentences)\n'
-        '- "category": one of learning, correction, gotcha, decision, observation\n'
+        '- "category": one of learning, correction, gotcha, decision, observation, prompt_pattern\n'
         '- "tags": 2-5 relevant tags for future retrieval\n'
         '- "source_event": the event ID this learning primarily comes from\n'
         '- "corrects_event_ids": list of event IDs being corrected (for corrections only)\n\n'
@@ -282,7 +298,13 @@ async def extract_from_session_llm(
                         "You are a knowledge extraction system for AI-assisted workflow audits. "
                         "You identify actionable learnings from session event logs: corrections "
                         "(human caught an AI mistake), gotchas (surprising findings), decisions "
-                        "(important rejected/revised choices), and general learnings. "
+                        "(important rejected/revised choices), prompt_pattern (prompt strategies "
+                        "that were especially effective or ineffective — e.g., accuracy improvements "
+                        "from prompt changes, failed prompting approaches, effective few-shot "
+                        "patterns), and general learnings. When session events reveal a decision "
+                        "chain about prompt refinement (revisions mentioning prompts, accuracy "
+                        "changes, or strategy shifts), extract a prompt_pattern learning noting "
+                        "what worked, what didn't, and why. "
                         "Be selective — only extract insights that would help in future sessions. "
                         "Do NOT duplicate existing learnings."
                     ),

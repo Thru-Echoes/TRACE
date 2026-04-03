@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from datetime import UTC, datetime
+
 from trace_mcp.schema import Actor, DecisionData, Session, TraceEvent
 from trace_mcp.storage.base import TraceStorage
 from trace_mcp.tools.session_tools import append_event
@@ -18,6 +21,7 @@ async def propose_decision(
     revises_event_id: str | None = None,
     suggestion_type: str | None = None,
     tags: list[str] | None = None,
+    conversation_snippet: str | None = None,
 ) -> str:
     """Propose a methodological decision for the workflow."""
     event = TraceEvent(
@@ -34,6 +38,8 @@ async def propose_decision(
             tags=tags or [],
         ),
     )
+    if conversation_snippet is not None:
+        event.context.conversation_snippet = conversation_snippet
     event_id = await append_event(storage, session, event)
     return event_id
 
@@ -57,15 +63,53 @@ async def resolve_decision(
             break
 
     if target is None:
-        return f"Error: Decision event '{event_id}' not found in session."
+        raise ValueError(f"Decision event '{event_id}' not found in session '{session.id}'")
 
     if target.decision is None:
-        return f"Error: Event '{event_id}' has no decision data."
+        raise ValueError(f"Event '{event_id}' has no decision data")
+
+    # --- Guard rails ---
+    guard_warnings: list[str] = []
+    suppress = os.environ.get("TRACE_SUPPRESS_SELF_RESOLVE_WARNING", "").lower() == "true"
+
+    # FM1: Same-actor self-resolution
+    if target.decision.proposed_by.type == resolved_by_type and resolved_by_type == "ai":
+        if not suppress:
+            guard_warnings.append(
+                "AI resolved its own proposal. Decisions proposed by AI "
+                "should normally be resolved by a human."
+            )
+
+    # FM25: Suspiciously fast resolution (propose + resolve <5s by same AI actor)
+    elapsed = (datetime.now(UTC) - target.timestamp).total_seconds()
+    if (
+        elapsed < 5.0
+        and resolved_by_type == "ai"
+        and target.decision.proposed_by.type == "ai"
+    ):
+        if not suppress:
+            guard_warnings.append(
+                f"Decision proposed and self-resolved in {elapsed:.1f}s. "
+                "Was the human consulted before resolving?"
+            )
+
+    # FM31: Rejection -> suggest correction annotation
+    if disposition == "rejected":
+        guard_warnings.append(
+            "Decision rejected. Consider logging a correction annotation "
+            "(category='correction') linking to this decision, to capture "
+            "the reasoning in the knowledge store."
+        )
 
     resolver = Actor(type=resolved_by_type, id=resolved_by_id)  # type: ignore[arg-type]
     target.decision.disposition = disposition  # type: ignore[assignment]
     target.decision.resolved_by = resolver
     target.decision.revision_note = revision_note
+    target.decision.warnings = guard_warnings
 
     await storage.update_session(session)
-    return f"Decision {event_id} resolved: {disposition}"
+
+    result = f"Decision {event_id} resolved: {disposition}"
+    if guard_warnings:
+        result += "\n" + "\n".join(f"  \u26a0\ufe0f {w}" for w in guard_warnings)
+    return result

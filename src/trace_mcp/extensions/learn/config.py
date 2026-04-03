@@ -55,6 +55,8 @@ class LearnConfig:
     evergreen_floor: float = 0.8
     dedup_enabled: bool = True
     dedup_threshold: float = 0.85
+    embedding_backend: str = "auto"  # "openai" | "model2vec" | "none" | "auto"
+    embedding_model: str = "text-embedding-3-small"
 
 
 def load_config() -> LearnConfig:
@@ -83,6 +85,8 @@ def load_config() -> LearnConfig:
         "TRACE_EVERGREEN_FLOOR",
         "TRACE_DEDUP_ENABLED",
         "TRACE_DEDUP_THRESHOLD",
+        "TRACE_EMBEDDING_BACKEND",
+        "TRACE_EMBEDDING_MODEL",
     ):
         env_val = os.environ.get(key)
         if env_val is not None:
@@ -115,4 +119,6 @@ def load_config() -> LearnConfig:
         evergreen_floor=float(merged.get("TRACE_EVERGREEN_FLOOR", "0.8")),
         dedup_enabled=dedup_enabled,
         dedup_threshold=float(merged.get("TRACE_DEDUP_THRESHOLD", "0.85")),
+        embedding_backend=merged.get("TRACE_EMBEDDING_BACKEND", "auto"),
+        embedding_model=merged.get("TRACE_EMBEDDING_MODEL", "text-embedding-3-small"),
     )

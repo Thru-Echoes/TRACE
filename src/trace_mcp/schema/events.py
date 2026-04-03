@@ -17,7 +17,6 @@ class EventContext(BaseModel):
     """Shared context attached to any event."""
 
     conversation_turn: int | None = None
-    parent_event_id: str | None = None
     reasoning_summary: str | None = None
     conversation_snippet: str | None = None
     related_event_ids: list[str] = Field(default_factory=list)
@@ -51,6 +50,7 @@ class DecisionData(BaseModel):
     revises_event_id: str | None = None
     suggestion_type: Literal["proactive", "requested", "collaborative"] | None = None
     tags: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _validate_resolution(self) -> Self:
@@ -116,8 +116,6 @@ class TraceEvent(BaseModel):
     contribution: ContributionData | None = None
 
     context: EventContext = Field(default_factory=EventContext)
-
-    verification: dict[str, Any] | None = None
 
     @model_validator(mode="after")
     def _validate_type_data_match(self) -> Self:

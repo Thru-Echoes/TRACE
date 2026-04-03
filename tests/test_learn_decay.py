@@ -192,3 +192,48 @@ class TestDecayInRecall:
         )
         scores = {r["learning"]["id"]: r["score"] for r in results}
         assert scores["lrn_fresh"] == pytest.approx(scores["lrn_old"])
+
+
+# ── Additional decay tests (Phase 5b) ───────────────────────────────────
+
+
+class TestComputeDecayExtended:
+    """Additional edge case tests for compute_decay."""
+
+    def test_fresh_learning_is_near_one(self):
+        """Learning created this instant → decay ~1.0."""
+        now = datetime.now(UTC)
+        lrn = Learning(content="brand new", created=now)
+        m = compute_decay(lrn, now=now)
+        assert m == pytest.approx(1.0)
+
+    def test_90_days_old_significant_decay(self):
+        """90 days old with 365-day half-life → noticeable decay."""
+        now = datetime.now(UTC)
+        lrn = Learning(content="3 months old", created=now - timedelta(days=90))
+        m = compute_decay(lrn, half_life_days=365.0, now=now)
+        # 2^(-90/365) ≈ 0.834
+        assert 0.80 < m < 0.90
+
+    def test_evergreen_floor_at_threshold(self):
+        """Exactly at evergreen threshold → floor applies."""
+        now = datetime.now(UTC)
+        lrn = Learning(
+            content="evergreen at threshold",
+            created=now - timedelta(days=3650),
+            recall_count=3,
+        )
+        m = compute_decay(lrn, evergreen_recall_threshold=3, evergreen_floor=0.8, now=now)
+        assert m >= 0.8
+
+    def test_negative_age_clamped(self):
+        """If last_surfaced is in the future (clock skew), age clamped to 0."""
+        now = datetime.now(UTC)
+        lrn = Learning(
+            content="future surfaced",
+            created=now - timedelta(days=10),
+            last_surfaced=now + timedelta(days=1),  # future!
+            recall_count=1,
+        )
+        m = compute_decay(lrn, now=now)
+        assert m == pytest.approx(1.0)

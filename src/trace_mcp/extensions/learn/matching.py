@@ -1,17 +1,18 @@
 """Matching backends for learning recall.
 
-Three backends, tried in order:
+Four backends, tried in order:
 
-1. **LLMBackend** (primary) — OpenAI semantic matching via chat completions.
+1. **EmbeddingBackend** (primary) — Cosine similarity on precomputed vectors.
+   Sub-millisecond, works offline once embeddings are generated.
+2. **LLMBackend** — OpenAI semantic matching via chat completions.
    Understands synonyms, abbreviations, conceptual similarity.
-2. **BM25Backend** (fallback) — Pure-Python BM25 ranking.  Much better than
+3. **BM25Backend** (fallback) — Pure-Python BM25 ranking.  Much better than
    Jaccard for information retrieval; handles term frequency and document
    length normalization.  Zero external dependencies.
-3. **JaccardBackend** (legacy) — Simple token-overlap scoring.  Kept for
+4. **JaccardBackend** (legacy) — Simple token-overlap scoring.  Kept for
    backward compatibility and as an absolute fallback.
 
-Auto-selection: LLM if ``openai`` is installed and an API key is configured,
-otherwise BM25.
+Auto-selection: Embedding > LLM > BM25.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from trace_mcp.extensions.learn.models import Learning
 
 if TYPE_CHECKING:
     from trace_mcp.extensions.learn.config import LearnConfig
+    from trace_mcp.extensions.learn.embeddings import EmbeddingProvider
 
 logger = logging.getLogger(__name__)
 
@@ -383,20 +385,117 @@ class LLMBackend:
         return [float(parsed.get(str(i), 0.0)) for i in range(len(learnings))]
 
 
+# ── Embedding backend ─────────────────────────────────────────────────
+
+
+class EmbeddingBackend:
+    """Cosine-similarity matching using precomputed embeddings.
+
+    Learnings *with* an ``embedding`` field are scored via numpy cosine
+    similarity (sub-millisecond).  Learnings *without* embeddings are
+    scored via a BM25 fallback so mixed stores work seamlessly.
+    """
+
+    default_threshold: float = 0.3
+
+    def __init__(
+        self,
+        provider: EmbeddingProvider,
+        tag_weight: float = 0.3,
+        bm25_fallback_k1: float = 1.5,
+        bm25_fallback_b: float = 0.75,
+    ) -> None:
+        self._provider = provider
+        self._tag_weight = tag_weight
+        self._bm25_fallback = BM25Backend(
+            k1=bm25_fallback_k1, b=bm25_fallback_b, tag_weight=tag_weight,
+        )
+
+    async def score_batch(
+        self,
+        learnings: list[Learning],
+        context: str,
+        context_tags: list[str] | None = None,
+    ) -> list[tuple[int, float]]:
+        if not learnings:
+            return []
+
+        # Partition: learnings with embeddings vs without
+        with_emb: list[tuple[int, Learning]] = []
+        without_emb: list[tuple[int, Learning]] = []
+        for i, lrn in enumerate(learnings):
+            if lrn.embedding is not None:
+                with_emb.append((i, lrn))
+            else:
+                without_emb.append((i, lrn))
+
+        results: list[tuple[int, float]] = []
+
+        # Score embedded learnings via cosine similarity
+        if with_emb:
+            import numpy as np
+
+            from trace_mcp.extensions.learn.embeddings import cosine_similarity_matrix
+
+            query_vecs = await self._provider.embed_texts([context])
+            query_vec = query_vecs[0]
+
+            matrix = np.array(
+                [lrn.embedding for _, lrn in with_emb], dtype=np.float32,
+            )
+            similarities = cosine_similarity_matrix(query_vec, matrix)
+
+            for j, (orig_idx, lrn) in enumerate(with_emb):
+                text_score = max(0.0, min(1.0, float(similarities[j])))
+                tag_score = _tag_overlap(lrn.tags, context_tags)
+                combined = (1 - self._tag_weight) * text_score + self._tag_weight * tag_score
+                results.append((orig_idx, combined))
+
+        # BM25 fallback for learnings without embeddings
+        if without_emb:
+            bm25_learnings = [lrn for _, lrn in without_emb]
+            bm25_scores = await self._bm25_fallback.score_batch(
+                bm25_learnings, context, context_tags,
+            )
+            for bm25_local_idx, score in bm25_scores:
+                orig_idx = without_emb[bm25_local_idx][0]
+                results.append((orig_idx, score))
+
+        return results
+
+
 # ── Backend auto-selection ────────────────────────────────────────────────
 
 
 def get_default_backend(config: LearnConfig | None = None) -> MatchingBackend:
-    """Return the best available matching backend based on *config*."""
+    """Return the best available matching backend based on *config*.
+
+    Priority: Embedding > LLM > BM25.
+    """
     if config is None:
         from trace_mcp.extensions.learn.config import load_config
 
         config = load_config()
 
+    # Tier 1: Embedding backend (cosine similarity on precomputed vectors)
+    from trace_mcp.extensions.learn.embeddings import get_embedding_provider
+
+    provider = get_embedding_provider(config)
+    if provider is not None:
+        logger.debug("Using Embedding matching backend (provider=%s)", provider.model_name)
+        return EmbeddingBackend(
+            provider=provider,
+            tag_weight=config.tag_weight,
+            bm25_fallback_k1=config.bm25_k1,
+            bm25_fallback_b=config.bm25_b,
+        )
+
+    # Tier 2: LLM backend (sends learnings to GPT for scoring)
     if config.llm_enabled and config.openai_api_key and _HAS_OPENAI:
         logger.debug("Using LLM matching backend (model=%s)", config.llm_model)
         return LLMBackend(config)
 
+    # Tier 3: BM25 (always available, zero external deps)
     logger.debug("Using BM25 matching backend (k1=%s, b=%s)", config.bm25_k1, config.bm25_b)
     return BM25Backend(
         k1=config.bm25_k1,
@@ -514,7 +613,9 @@ async def recall_learnings(
             learnings[idx].recall_count += 1
             learnings[idx].last_surfaced = now
             results.append({
-                "learning": learnings[idx].model_dump(mode="json"),
+                "learning": learnings[idx].model_dump(
+                    mode="json", exclude={"embedding", "embedding_model"},
+                ),
                 "score": round(score, 4),
             })
     results.sort(key=lambda x: x["score"], reverse=True)

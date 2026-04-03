@@ -14,9 +14,9 @@ TRACE_CLAUDE_BLOCK = """\
 
 ---
 
-## TRACE Audit Protocol (v0.2)
+## TRACE Audit Protocol (v0.3)
 
-This project uses [TRACE](https://trace-protocol.org) v0.2 for transparent documentation
+This project uses [TRACE](https://trace-protocol.org) v0.3 for transparent documentation
 of AI-human collaboration. The TRACE MCP server is configured in `.mcp.json`.
 
 ### Acknowledgement
@@ -89,10 +89,12 @@ attribution, participant lists).
 - When in doubt, log it
 """
 
+_TRACE_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+
 MCP_CONFIG = {
     "trace": {
-        "command": "trace-mcp",
-        "args": [],
+        "command": "uv",
+        "args": ["run", "--directory", _TRACE_ROOT, "trace-mcp"],
     }
 }
 

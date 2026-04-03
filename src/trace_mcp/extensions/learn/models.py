@@ -13,6 +13,7 @@ LearningCategory = Literal[
     "correction",
     "decision",
     "observation",
+    "prompt_pattern",
     "todo",
     "question",
     "other",
@@ -32,13 +33,15 @@ class Learning(BaseModel):
     created: datetime = Field(default_factory=lambda: datetime.now(UTC))
     recall_count: int = 0
     last_surfaced: datetime | None = None
+    embedding: list[float] | None = None
+    embedding_model: str | None = None
 
 
 class KnowledgeStore(BaseModel):
     """Per-project knowledge store containing accumulated learnings."""
 
     project: str
-    version: str = "0.2"
+    version: str = "0.4"
     updated: datetime = Field(default_factory=lambda: datetime.now(UTC))
     learnings: list[Learning] = Field(default_factory=list)
 

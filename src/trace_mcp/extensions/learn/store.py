@@ -10,15 +10,16 @@ import json
 import logging
 import os
 import tempfile
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from dataclasses import dataclass
-
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning
 
 if TYPE_CHECKING:
+    import numpy as np
+
     from trace_mcp.extensions.learn.models import LearningCategory
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,9 @@ def _get_directory(directory: str | None = None) -> Path:
 
 
 def _store_path(project: str, directory: str | None = None) -> Path:
-    return _get_directory(directory) / f"{project}.json"
+    from trace_mcp.storage.json_file import sanitize_name
+
+    return _get_directory(directory) / f"{sanitize_name(project)}.json"
 
 
 class StoreLoadError(Exception):
@@ -96,6 +99,10 @@ def save_store(store: KnowledgeStore, directory: str | None = None) -> Path:
         except OSError:
             pass
         raise
+
+    # Best-effort sidecar cache for fast embedding search
+    save_embeddings_cache(store, directory)
+
     return path
 
 
@@ -131,6 +138,14 @@ def remove_learning(store: KnowledgeStore, learning_id: str) -> bool:
     return False
 
 
+_TOOL_RESPONSE_EXCLUDE = {"embedding", "embedding_model"}
+
+
+def learning_to_dict(lrn: Learning) -> dict:
+    """Serialize a learning for tool/API responses (excludes bulky embedding)."""
+    return lrn.model_dump(mode="json", exclude=_TOOL_RESPONSE_EXCLUDE)
+
+
 def list_learnings(
     store: KnowledgeStore,
     category: str | None = None,
@@ -139,7 +154,7 @@ def list_learnings(
     learnings = store.learnings
     if category:
         learnings = [lrn for lrn in learnings if lrn.category == category]
-    return [lrn.model_dump(mode="json") for lrn in learnings]
+    return [learning_to_dict(lrn) for lrn in learnings]
 
 
 # ── Deduplication ────────────────────────────────────────────────────────
@@ -214,3 +229,61 @@ def add_learning_dedup(
         tags=tags,
     )
     return DedupResult(learning=lrn, is_duplicate=False)
+
+
+# ── Embedding sidecar cache ─────────────────────────────────────────────
+
+
+def _embeddings_cache_path(project: str, directory: str | None = None) -> Path:
+    """Path to the ``.npy`` sidecar embedding cache."""
+    json_path = _store_path(project, directory)
+    return json_path.with_suffix(".embeddings.npy")
+
+
+def save_embeddings_cache(store: KnowledgeStore, directory: str | None = None) -> Path | None:
+    """Save embedding matrix as a ``.npy`` sidecar file (best-effort).
+
+    Only saves if ``numpy`` is available and at least one learning has an
+    embedding.  Returns the path on success, ``None`` if skipped.
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+
+    embeddings_present = [lrn for lrn in store.learnings if lrn.embedding is not None]
+    if not embeddings_present:
+        return None
+
+    first_emb = embeddings_present[0].embedding
+    assert first_emb is not None  # guaranteed by list comprehension filter above
+    dim = len(first_emb)
+    matrix = np.full((len(store.learnings), dim), np.nan, dtype=np.float32)
+    for i, lrn in enumerate(store.learnings):
+        if lrn.embedding is not None:
+            matrix[i] = lrn.embedding
+
+    path = _embeddings_cache_path(store.project, directory)
+    np.save(str(path), matrix)
+    return path
+
+
+def load_embeddings_cache(
+    store: KnowledgeStore,
+    directory: str | None = None,
+) -> "np.ndarray | None":  # noqa: UP037 — string quote needed for optional dep
+    """Load the ``.npy`` sidecar if it exists and matches the store size."""
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+
+    path = _embeddings_cache_path(store.project, directory)
+    if not path.exists():
+        return None
+
+    matrix = np.load(str(path))
+    if matrix.shape[0] != len(store.learnings):
+        # Stale cache — store was modified since cache was written
+        return None
+    return matrix

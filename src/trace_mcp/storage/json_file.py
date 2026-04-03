@@ -6,10 +6,11 @@ Each file is a self-contained, valid TRACE document.
 
 from __future__ import annotations
 
-import fcntl
 import json
 import logging
 import os
+import re
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -19,6 +20,17 @@ from trace_mcp.storage.base import TraceStorage
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DIR = os.path.expanduser("~/.trace/sessions")
+
+
+def sanitize_name(name: str) -> str:
+    """Sanitize a session ID or project name for safe filesystem use."""
+    cleaned = re.sub(r"[^\w\-.]", "_", name)  # only alphanum, _, -, .
+    cleaned = cleaned.replace("..", "_")  # no parent traversal
+    cleaned = cleaned.lstrip(".")  # no hidden files
+    # Raise if the original had no usable characters (e.g. "////")
+    if not cleaned or not re.search(r"[\w\-.]", name):
+        raise ValueError(f"Name sanitizes to empty string: {name!r}")
+    return cleaned
 
 
 class JsonFileStorage(TraceStorage):
@@ -31,17 +43,22 @@ class JsonFileStorage(TraceStorage):
         self._dir.mkdir(parents=True, exist_ok=True)
 
     def _session_path(self, session_id: str) -> Path:
-        return self._dir / f"{session_id}.json"
+        return self._dir / f"{sanitize_name(session_id)}.json"
 
     def _write_file(self, path: Path, data: str) -> None:
-        """Write data to file with file locking."""
+        """Write data to file using atomic write (temp file + rename)."""
         self._ensure_dir()
-        with open(path, "w") as f:
-            fcntl.flock(f.fileno(), fcntl.LOCK_EX)
-            try:
+        fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
                 f.write(data)
-            finally:
-                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            os.replace(tmp_path, str(path))
+        except BaseException:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
 
     async def create_session(self, session: Session) -> str:
         path = self._session_path(session.id)
