@@ -392,11 +392,12 @@ class TestMultiEventExtraction:
 class TestLLMExtraction:
     """Tests for LLM-enhanced extraction with mocked OpenAI."""
 
-    def _make_config(self) -> LearnConfig:
+    def _make_config(self, strict: bool = False) -> LearnConfig:
         return LearnConfig(
             openai_api_key="test-key",
-            llm_extraction_model="gpt-5-mini",
+            llm_extraction_model="gpt-5.4-mini",
             llm_enabled=True,
+            strict_llm=strict,
         )
 
     async def test_llm_extraction_basic(self):
@@ -442,8 +443,8 @@ class TestLLMExtraction:
         assert ks.learnings[0].content == "Always use ml-dev conda environment, not base"
 
     async def test_llm_extraction_fallback_on_error(self):
-        """When LLM fails, falls back to rule-based extraction."""
-        config = self._make_config()
+        """Permissive mode: when LLM fails, falls back to rule-based extraction."""
+        config = self._make_config(strict=False)
         session = _session([
             _annotation("evt_001", "learning", "Rule-based fallback content"),
         ])
@@ -462,6 +463,27 @@ class TestLLMExtraction:
         # Should have extracted via rule-based fallback
         assert len(new_ids) == 1
         assert ks.learnings[0].content == "Rule-based fallback content"
+
+    async def test_llm_extraction_raises_in_strict_mode(self):
+        """Strict mode: LLM extraction failure raises LLMFallbackError."""
+        from trace_mcp.extensions.learn.config import LLMFallbackError
+
+        config = self._make_config(strict=True)
+        session = _session([
+            _annotation("evt_001", "learning", "Rule-based fallback content"),
+        ])
+        ks = KnowledgeStore(project="test")
+
+        with patch("trace_mcp.extensions.learn.extraction._HAS_OPENAI", True):
+            with patch("trace_mcp.extensions.learn.extraction.AsyncOpenAI") as MockClient:
+                mock_client = AsyncMock()
+                mock_client.chat.completions.create = AsyncMock(
+                    side_effect=Exception("API error")
+                )
+                MockClient.return_value = mock_client
+
+                with pytest.raises(LLMFallbackError, match="LLM extraction failed"):
+                    await extract_from_session_llm(ks, session, config)
 
     async def test_llm_extraction_idempotent(self):
         """LLM extraction skips already-extracted events."""

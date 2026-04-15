@@ -849,7 +849,7 @@ class TestCrossSessionFailures:
                 rid = 2
                 # Create sessions with different project names for same work
                 response = await _call_tool(proc, "trace_start_session", {
-                    "project": "carbon-pulse",
+                    "project": "demo-project",
                     "description": "Analysis session",
                 }, request_id=rid)
                 rid += 1
@@ -858,7 +858,7 @@ class TestCrossSessionFailures:
                 _, rid = await _end_session(proc, sid1, rid)
 
                 response = await _call_tool(proc, "trace_start_session", {
-                    "project": "Carbon-Pulse",  # different casing!
+                    "project": "Demo-Project",  # different casing!
                     "description": "Same project, different name",
                 }, request_id=rid)
                 rid += 1
@@ -1041,7 +1041,7 @@ class TestProtocolViolations:
                     proc, sid, rid,
                     server="analysis-pipeline",
                     tool_name="run_model",
-                    input={"model": "gpt-5-turbo", "data": "fabricated_dataset.csv"},
+                    input={"model": "gpt-5.4-mini", "data": "fabricated_dataset.csv"},
                     output="{'accuracy': 0.99}",
                     status="success",
                     duration_ms=1234,

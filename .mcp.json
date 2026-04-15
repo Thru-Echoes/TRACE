@@ -1,11 +1,8 @@
 {
   "mcpServers": {
     "trace": {
-      "command": "uv",
-      "args": ["run", "--directory", "/Users/echoes/Documents/Berkeley/Research/TRACE", "trace-mcp"],
-      "env": {
-        "TRACE_PINNED_VERSION": "0.3.0"
-      }
+      "command": "uvx",
+      "args": ["--from", ".", "--refresh-package", "trace-mcp", "trace-mcp"]
     }
   }
 }

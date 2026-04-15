@@ -261,9 +261,21 @@ async def extract_from_session_llm(
 
     The model reads all session events and identifies valuable learnings,
     synthesising cross-event patterns and generating quality tags.
-    Falls back to rule-based extraction on any error.
+    Falls back to rule-based extraction on any error (unless strict mode).
     """
+    from trace_mcp.extensions.learn.config import LLMFallbackError
+
     if not _HAS_OPENAI or not config.openai_api_key:
+        if config.strict_llm and config.openai_api_key:
+            logger.error(
+                "LLM extraction requested in strict mode but 'openai' package "
+                "is not installed. Refusing to fall back to rule-based extraction."
+            )
+            raise LLMFallbackError(
+                "LLM extraction unavailable: 'openai' package not installed. "
+                "Install with: pip install 'trace-mcp[llm]'. "
+                "Or set TRACE_STRICT_LLM=false to allow rule-based fallback."
+            )
         return extract_from_session(store, session, dedup_threshold=dedup_threshold)
 
     events_text = _format_events_for_llm(session)
@@ -339,8 +351,24 @@ async def extract_from_session_llm(
 
         return new_ids
 
-    except Exception:
-        logger.warning("LLM extraction failed — falling back to rule-based", exc_info=True)
+    except Exception as exc:
+        if config.strict_llm:
+            logger.error(
+                "LLM extraction failed in strict mode (model=%s) — "
+                "refusing to silently fall back to rule-based extraction.",
+                config.llm_extraction_model,
+            )
+            raise LLMFallbackError(
+                f"LLM extraction failed (model={config.llm_extraction_model}): {exc}. "
+                f"Strict mode is ON — set TRACE_STRICT_LLM=false to allow "
+                f"rule-based fallback."
+            ) from exc
+        logger.warning(
+            "LLM extraction failed (model=%s) — falling back to rule-based. "
+            "Strict mode is OFF.",
+            config.llm_extraction_model,
+            exc_info=True,
+        )
         return extract_from_session(store, session, dedup_threshold=dedup_threshold)
 
 

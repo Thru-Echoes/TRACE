@@ -1,10 +1,11 @@
 """Comprehensive E2E tests for TRACE hardening.
 
 Tests critical fixes (immutability, referential integrity, extraction errors),
-SCRATCHPAD feature, and real-data validation across projects.
+SCRATCHPAD feature, and realistic-workload validation across project patterns.
 
-Uses real session data patterns from green-narrative, When-Algorithms-Meet-Artists,
-hye-in, and trace-meeting-recorder to verify TRACE works correctly in practice.
+Uses generic project names — narrative-analysis, computational-art,
+embeddings-pipeline, and meeting-recorder — as fixtures that exercise the
+schema and tooling against patterns drawn from real research workflows.
 """
 
 from __future__ import annotations
@@ -86,11 +87,11 @@ async def _create_session(
 
 
 def _make_green_narrative_session(session_id: str = "trace_test_gn") -> Session:
-    """Build a session modeled on real green-narrative data."""
+    """Build a session modeled on real narrative-analysis data."""
     return Session(
         id=session_id,
         metadata=SessionMetadata(
-            project="green-narrative",
+            project="narrative-analysis",
             description="Deep review of consensus UMAP + projection head methodology",
             tags=["consensus-umap", "projection-head", "review"],
             environment=Environment(
@@ -105,11 +106,11 @@ def _make_green_narrative_session(session_id: str = "trace_test_gn") -> Session:
 
 
 def _make_wama_session(session_id: str = "trace_test_wama") -> Session:
-    """Build a session modeled on real When-Algorithms-Meet-Artists data."""
+    """Build a session modeled on real computational-art data."""
     return Session(
         id=session_id,
         metadata=SessionMetadata(
-            project="When-Algorithms-Meet-Artists",
+            project="computational-art",
             description="Review manuscript structure and revision guidance",
             tags=["manuscript", "publication"],
             environment=Environment(
@@ -123,11 +124,11 @@ def _make_wama_session(session_id: str = "trace_test_wama") -> Session:
 
 
 def _make_meeting_recorder_session(session_id: str = "trace_test_mr") -> Session:
-    """Build a session modeled on trace-meeting-recorder."""
+    """Build a session modeled on meeting-recorder."""
     return Session(
         id=session_id,
         metadata=SessionMetadata(
-            project="trace-meeting-recorder",
+            project="meeting-recorder",
             description="Recording and transcribing esg-group meeting",
             tags=["meeting", "esg-group", "transcription"],
             environment=Environment(
@@ -447,7 +448,7 @@ class TestScratchpadGeneration:
         session = _make_green_narrative_session()
         session.summary = "Reviewed methodology, made 3 decisions, found 1 gotcha"
 
-        # Add events like the real green-narrative session
+        # Add events like the real narrative-analysis session
         session.events = [
             TraceEvent(
                 id="evt_001", session_id=session.id, type="decision",
@@ -513,7 +514,7 @@ class TestScratchpadGeneration:
 
         # Verify all components present
         assert "## Session: `trace_test_gn`" in section
-        assert "green-narrative" in section
+        assert "narrative-analysis" in section
         assert "### Summary" in section
         assert "Reviewed methodology" in section
         assert "### What Was Accomplished" in section
@@ -541,7 +542,7 @@ class TestScratchpadGeneration:
 
         section = _build_session_section(session)
         assert "## Session:" in section
-        assert "green-narrative" in section
+        assert "narrative-analysis" in section
         # No crash on empty events
         assert "### Summary" not in section  # no summary set
 
@@ -558,7 +559,7 @@ class TestScratchpadGeneration:
             assert path.exists()
             content = path.read_text()
             assert "# SCRATCHPAD" in content
-            assert "green-narrative" in content
+            assert "narrative-analysis" in content
             assert "Test session" in content
         finally:
             os.environ.pop("TRACE_SCRATCHPAD_DIR", None)
@@ -640,22 +641,22 @@ class TestScratchpadGeneration:
 
 # ═══════════════════════════════════════════════════════════════════════════
 # REAL DATA PATTERN VALIDATION
-# Tests modeled on actual green-narrative, WAMA, hye-in, trace-meeting-recorder
+# Tests modeled on actual narrative-analysis, WAMA, embeddings-pipeline, meeting-recorder
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestGreenNarrativePatterns:
-    """Validate TRACE behavior with patterns from real green-narrative sessions."""
+    """Validate TRACE behavior with patterns from real narrative-analysis sessions."""
 
     async def test_comprehensive_session_workflow(
         self, storage: JsonFileStorage, active: dict[str, Session],
     ) -> None:
-        """Full green-narrative workflow: decisions, contributions, learnings.
+        """Full narrative-analysis workflow: decisions, contributions, learnings.
 
         Modeled on trace_20260320_ba3fa7 (20 events).
         """
         sid, session = await _create_session(
-            storage, active, project="green-narrative",
+            storage, active, project="narrative-analysis",
             description="Deep review of consensus UMAP methodology",
             tags=["consensus-umap", "review"],
         )
@@ -724,7 +725,7 @@ class TestGreenNarrativePatterns:
         This test FAILS LOUDLY if snippets are lost.
         """
         sid, session = await _create_session(
-            storage, active, project="green-narrative",
+            storage, active, project="narrative-analysis",
         )
 
         snippet_text = "what metric should we use for evaluating clusters?"
@@ -766,7 +767,7 @@ class TestGreenNarrativePatterns:
         Based on trace_20260316_2e6a9e where 7/7 events had no snippet.
         """
         sid, session = await _create_session(
-            storage, active, project="green-narrative",
+            storage, active, project="narrative-analysis",
         )
 
         # Contribution without snippet should warn
@@ -796,7 +797,7 @@ class TestGreenNarrativePatterns:
         in THIS session — this is intentional for cross-session corrections).
         """
         sid, session = await _create_session(
-            storage, active, project="green-narrative",
+            storage, active, project="narrative-analysis",
             description="Micro-session: correct missing conversation_snippets",
             tags=["correction", "trace-discipline"],
         )
@@ -829,14 +830,14 @@ class TestGreenNarrativePatterns:
 
 
 class TestWhenAlgorithmsMeetArtistsPatterns:
-    """Validate patterns from When-Algorithms-Meet-Artists sessions."""
+    """Validate patterns from computational-art sessions."""
 
     async def test_session_with_mixed_dispositions(
         self, storage: JsonFileStorage, active: dict[str, Session],
     ) -> None:
         """Test a session with accepted, revised, and rejected decisions."""
         sid, session = await _create_session(
-            storage, active, project="When-Algorithms-Meet-Artists",
+            storage, active, project="computational-art",
             description="Review manuscript structure",
         )
 
@@ -890,7 +891,7 @@ class TestWhenAlgorithmsMeetArtistsPatterns:
 
 
 class TestMeetingRecorderPatterns:
-    """Validate patterns specific to trace-meeting-recorder."""
+    """Validate patterns specific to meeting-recorder."""
 
     async def test_transcription_pipeline_session(
         self, storage: JsonFileStorage, active: dict[str, Session],
@@ -898,7 +899,7 @@ class TestMeetingRecorderPatterns:
         """Full transcription pipeline workflow."""
         sid, session = await _create_session(
             storage, active,
-            project="trace-meeting-recorder",
+            project="meeting-recorder",
             description="Recording esg-group meeting 2026-04-02",
             tags=["meeting", "esg-group", "transcription"],
         )
@@ -953,15 +954,15 @@ class TestMeetingRecorderPatterns:
         assert "4 events" not in result or "5 events" not in result  # we logged 5 events total
 
 
-class TestHyeInPatterns:
-    """Validate patterns from hye-in project sessions."""
+class TestEmbeddingsPipelinePatterns:
+    """Validate patterns from embeddings-pipeline project sessions."""
 
     async def test_projection_head_workflow(
         self, storage: JsonFileStorage, active: dict[str, Session],
     ) -> None:
-        """hye-in session: projection head pipeline updates."""
+        """embeddings-pipeline session: projection head pipeline updates."""
         sid, session = await _create_session(
-            storage, active, project="hye-in",
+            storage, active, project="embeddings-pipeline",
             description="Projection head pipeline updates and training",
         )
 
@@ -1013,7 +1014,7 @@ class TestConversationSnippetCompleteness:
     ) -> None:
         """conversation_snippet on contributions must survive write→read roundtrip."""
         sid, session = await _create_session(storage, active)
-        snippet = "create comprehensive data models for all green-narrative domains"
+        snippet = "create comprehensive data models for all narrative-analysis domains"
 
         await logging_tools.log_contribution(
             storage, session,
@@ -1302,7 +1303,7 @@ class TestRealSessionDataIntegrity:
         return Session.model_validate(raw)
 
     def test_green_narrative_ba3fa7_has_snippets(self) -> None:
-        """trace_20260320_ba3fa7 (green-narrative) should have conversation_snippets."""
+        """trace_20260320_ba3fa7 (narrative-analysis) should have conversation_snippets."""
         session = self._load_session("trace_20260320_ba3fa7.json")
         if session is None:
             return

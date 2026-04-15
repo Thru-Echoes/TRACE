@@ -247,10 +247,28 @@ class TestEmbeddingProviderAutoSelection:
         assert provider is None
 
     def test_explicit_openai_without_key_falls_back(self):
-        config = LearnConfig(openai_api_key=None, embedding_backend="openai")
+        """Permissive mode: explicit openai backend without key falls through to None."""
+        config = LearnConfig(
+            openai_api_key=None,
+            embedding_backend="openai",
+            strict_llm=False,
+        )
         with patch("trace_mcp.extensions.learn.embeddings._HAS_MODEL2VEC", False):
             provider = get_embedding_provider(config)
         assert provider is None
+
+    def test_explicit_openai_without_key_raises_in_strict_mode(self):
+        """Strict mode: explicit openai backend without key raises LLMFallbackError."""
+        from trace_mcp.extensions.learn.config import LLMFallbackError
+
+        config = LearnConfig(
+            openai_api_key=None,
+            embedding_backend="openai",
+            strict_llm=True,
+        )
+        with patch("trace_mcp.extensions.learn.embeddings._HAS_MODEL2VEC", False):
+            with pytest.raises(LLMFallbackError, match="OpenAI embeddings requested"):
+                get_embedding_provider(config)
 
     def test_explicit_model2vec(self):
         config = LearnConfig(embedding_backend="model2vec")

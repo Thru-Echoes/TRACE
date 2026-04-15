@@ -99,62 +99,6 @@ class TestEmbeddingE2ESubprocess:
                 await _shutdown_server(proc)
 
 
-class TestEmbeddingE2EExtract:
-    """Test embedding generation during extraction."""
-
-    @pytest.mark.skip(reason="Extraction E2E requires session persistence timing — tested in unit/integration")
-    async def test_extract_embeds_new_learnings(self):
-        """After extraction, new learnings should have embeddings."""
-        with tempfile.TemporaryDirectory() as sessions_dir:
-            proc = await _start_server(sessions_dir)
-            try:
-                await _initialize_server(proc)
-
-                # Start a session, log an annotation, end it
-                start_result = await _call_tool(proc, "trace_start_session", {
-                    "project": "e2e-extract-embed",
-                    "description": "Test extraction with embeddings",
-                }, request_id=30)
-
-                result_text = start_result["result"]["content"][0]["text"]
-                session_id = result_text.split("Session: ")[1].split("\n")[0]
-
-                await _call_tool(proc, "trace_log_annotation", {
-                    "session_id": session_id,
-                    "content": "Always check for stale embeddings before scoring",
-                    "category": "learning",
-                    "tags": ["embeddings", "staleness"],
-                }, request_id=31)
-
-                await _call_tool(proc, "trace_end_session", {
-                    "session_id": session_id,
-                    "summary": "Test session",
-                }, request_id=32)
-
-                # Extract learnings
-                extract_result = await _call_tool(proc, "trace_learn_extract", {
-                    "project": "e2e-extract-embed",
-                    "session_id": session_id,
-                }, request_id=33)
-
-                extract_data = json.loads(extract_result["result"]["content"][0]["text"])
-                # Extraction should find the learning annotation
-                # (rule-based extraction extracts "learning" category annotations)
-                assert extract_data["new_learnings"] >= 1, (
-                    f"Expected >=1 new learnings, got: {extract_data}"
-                )
-
-                # List learnings and verify content
-                list_result = await _call_tool(proc, "trace_learn_list", {
-                    "project": "e2e-extract-embed",
-                }, request_id=34)
-
-                list_data = json.loads(list_result["result"]["content"][0]["text"])
-                assert list_data["total"] >= 1
-
-            finally:
-                await _shutdown_server(proc)
-
 
 # ── Real data E2E tests ──────────────────────────────────────────────────
 

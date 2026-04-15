@@ -18,6 +18,7 @@ import asyncio
 import json
 import os
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -25,8 +26,6 @@ from typing import Any
 import pytest  # noqa: F401 (used by pytest-asyncio for test collection)
 
 TRACE_ROOT = Path(__file__).parent.parent
-VENV_PYTHON = TRACE_ROOT / ".venv" / "bin" / "python"
-VENV_TRACE_MCP = TRACE_ROOT / ".venv" / "bin" / "trace-mcp"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -101,7 +100,7 @@ async def _start_server(sessions_dir: str) -> asyncio.subprocess.Process:
     env["TRACE_SESSIONS_DIR"] = sessions_dir
 
     proc = await asyncio.create_subprocess_exec(
-        str(VENV_PYTHON),
+        sys.executable,
         "-m",
         "trace_mcp.server",
         stdin=asyncio.subprocess.PIPE,
@@ -612,53 +611,49 @@ class TestSessionPersistenceE2E:
 # ── uv run Integration ──────────────────────────────────────────────────────
 
 
-class TestUvRunIntegration:
-    """Test that `uv run` can execute trace-mcp correctly.
+class TestUvxIntegration:
+    """Test that `uvx` can execute trace-mcp correctly.
 
     This tests the exact command that .mcp.json uses.
     """
 
-    def test_uv_run_import(self) -> None:
-        """uv run should be able to import trace_mcp."""
+    def test_uvx_import(self) -> None:
+        """uvx should be able to build and import trace_mcp."""
         result = subprocess.run(
             [
-                "uv",
-                "run",
-                "--directory",
-                str(TRACE_ROOT),
-                "python",
-                "-c",
+                "uvx",
+                "--from", str(TRACE_ROOT),
+                "--refresh-package", "trace-mcp",
+                "--with", "trace-mcp",
+                "python", "-c",
                 "import trace_mcp; print(trace_mcp.__version__)",
             ],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=60,
         )
         assert result.returncode == 0, (
-            f"uv run import failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
+            f"uvx import failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert "0." in result.stdout  # Version should start with 0.
 
-    def test_uv_run_server_entry_point(self) -> None:
-        """uv run should be able to find and start the trace-mcp entry point."""
-        # We can't test the full server start (it blocks on stdio), but we
-        # can verify the entry point resolves by importing and checking main
+    def test_uvx_entry_point_resolves(self) -> None:
+        """uvx should resolve the trace-mcp entry point."""
         result = subprocess.run(
             [
-                "uv",
-                "run",
-                "--directory",
-                str(TRACE_ROOT),
-                "python",
-                "-c",
+                "uvx",
+                "--from", str(TRACE_ROOT),
+                "--refresh-package", "trace-mcp",
+                "--with", "trace-mcp",
+                "python", "-c",
                 "from trace_mcp.server import main; print('entry point OK')",
             ],
             capture_output=True,
             text=True,
-            timeout=30,
+            timeout=60,
         )
         assert result.returncode == 0, (
-            f"uv run entry point check failed.\n"
+            f"uvx entry point check failed.\n"
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert "entry point OK" in result.stdout

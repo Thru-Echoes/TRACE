@@ -747,16 +747,6 @@ def main() -> None:
 
     _load_extensions()
 
-    # Version pin check: warn if the calling project expects a different version
-    pinned = os.environ.get("TRACE_PINNED_VERSION")
-    if pinned and pinned != __version__:
-        logger.warning(
-            "Version mismatch: project expects TRACE %s but server is %s. "
-            "Update .mcp.json TRACE_PINNED_VERSION or upgrade TRACE.",
-            pinned,
-            __version__,
-        )
-
     logger.info("Starting TRACE MCP server v%s", __version__)
     mcp.run(transport="stdio")
 
