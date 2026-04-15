@@ -125,6 +125,8 @@ def get_embedding_provider(config: LearnConfig | None = None) -> EmbeddingProvid
 
         config = load_config()
 
+    from trace_mcp.extensions.learn.config import LLMFallbackError
+
     backend = config.embedding_backend
 
     if backend == "none":
@@ -132,24 +134,55 @@ def get_embedding_provider(config: LearnConfig | None = None) -> EmbeddingProvid
 
     # --- OpenAI ---
     if backend in ("openai", "auto") and _HAS_OPENAI and config.openai_api_key:
-        logger.debug("Using OpenAI embedding provider (model=%s)", config.embedding_model)
+        logger.info("Using OpenAI embedding provider (model=%s)", config.embedding_model)
         return OpenAIEmbeddingProvider(
             api_key=config.openai_api_key,
             model=config.embedding_model,
         )
     if backend == "openai":
-        logger.warning("OpenAI embeddings requested but openai package or API key missing — falling back")
+        # User explicitly asked for OpenAI embeddings but they're unavailable.
+        msg = (
+            f"OpenAI embeddings requested (TRACE_EMBEDDING_BACKEND=openai) but "
+            f"unavailable: openai_package={_HAS_OPENAI}, api_key_present="
+            f"{bool(config.openai_api_key)}."
+        )
+        if config.strict_llm:
+            logger.error("%s Refusing to fall back.", msg)
+            raise LLMFallbackError(
+                f"{msg} Install 'openai' and set OPENAI_API_KEY, or set "
+                f"TRACE_EMBEDDING_BACKEND=auto/model2vec to use a different backend."
+            )
+        logger.warning("%s Falling back to next available backend.", msg)
 
     # --- model2vec ---
     if backend in ("model2vec", "auto") and _HAS_MODEL2VEC:
         # Use config model if it looks like a model2vec model, otherwise default
         m2v_model = config.embedding_model if "potion" in config.embedding_model else "minishlab/potion-base-8M"
-        logger.debug("Using model2vec embedding provider (model=%s)", m2v_model)
+        logger.info("Using model2vec embedding provider (model=%s)", m2v_model)
         return Model2VecEmbeddingProvider(model_name=m2v_model)
     if backend == "model2vec":
-        logger.warning("model2vec requested but not installed")
+        msg = "model2vec embeddings requested but package not installed"
+        if config.strict_llm:
+            logger.error("%s. Refusing to fall back.", msg)
+            raise LLMFallbackError(
+                f"{msg}. Install with: pip install model2vec. "
+                f"Or set TRACE_EMBEDDING_BACKEND=auto."
+            )
+        logger.warning("%s. Falling back.", msg)
 
-    logger.debug("No embedding provider available — falling through to BM25")
+    # auto mode fell through — no embeddings available.
+    # In strict mode with an API key, this is a misconfiguration.
+    if backend == "auto" and config.strict_llm and config.openai_api_key and not _HAS_OPENAI:
+        logger.error(
+            "Strict LLM mode ON with API key set, but 'openai' package missing. "
+            "Refusing to fall through silently to BM25."
+        )
+        raise LLMFallbackError(
+            "Strict LLM mode: 'openai' package required but not installed. "
+            "Install with: pip install 'trace-mcp[llm]'."
+        )
+
+    logger.info("No embedding provider available — falling through to BM25 matching")
     return None
 
 

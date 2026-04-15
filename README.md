@@ -8,6 +8,8 @@ TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy 
 
 **Version:** 0.3.0 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
 
+> The schema URI is an identifier (per W3C PROV convention) and is not currently a resolvable URL. The machine-readable JSON Schema lives at [`schemas/trace-v0.3.json`](schemas/trace-v0.3.json) in this repository.
+
 ## Architecture
 
 ```
@@ -26,6 +28,71 @@ AI Client (Claude Code, Claude Desktop, etc.)
 
 **Core stack:** Python 3.11+, Pydantic v2, async throughout, zero external dependencies beyond `mcp` and `pydantic` (OpenAI optional for LLM-enhanced features).
 
+## Why Decision Provenance?
+
+Current AI observability stacks (LangSmith, Langfuse, OpenTelemetry GenAI semconv) capture call-level traces — what tool an agent called, with what input, with what result. They do not capture decision-level provenance: who proposed each step, whether a human reviewed it, what alternatives were rejected. Methodological decisions in research used to be made only by humans; existing review norms reflect that. Agentic AI now proposes and resolves choices alongside researchers — a new mode of collaboration that documentation norms were not built for.
+
+The cost is empirically visible. A structured rubric audit of recently published agentic-AI deployments in environmental science finds analytical decision provenance averaging less than half the score of basic workflow description. Examples surfaced in the audit (anonymized):
+
+- A peer-reviewed 2026 paper benchmarks five LLMs with uniformly wrong parameter counts, including one model that does not exist as a released variant. Its citation for that model resolves to an unrelated 1993 computer-graphics paper.
+- A 2025 paper repeatedly describes its system as built on one open-weights LLM and even defines a generation function in those terms; the published code uses a different proprietary model with no presence of the named open-weights model anywhere.
+- A 2026 multi-agent paper reports double-digit energy savings derived from a synthetic load formula applied post-hoc to LLM outputs, not from measured energy. The paper claims experiments were conducted "in real smart-home environments."
+
+These are not isolated lapses. They are the predictable consequence of agentic AI being deployed faster than the documentation norms surrounding it have updated.
+
+### Regulatory landscape (a 2026 inflection)
+
+Decision-process documentation for AI-assisted workflows is moving from academic ideal to regulatory requirement:
+
+- **EU AI Act, Articles 12 and 19** (Regulation 2024/1689) — high-risk AI systems must enable automatic event logging over the system's lifetime; logs retained at least six months. **Applicable to high-risk systems August 2, 2026.**
+- **Colorado AI Act (SB 24-205)** — deployers of high-risk AI must maintain three years of audit trails, impact assessments, incident reports, and remediation documentation. **Effective June 30, 2026.**
+- **FDA PCCP final guidance** (December 2024) — marketing submissions for AI-enabled medical devices must document data lineage, performance tied to claims, bias analysis, and the human-AI workflow.
+- **NIST AI Risk Management Framework** — Govern / Map / Measure / Manage functions all require organizations to document system provenance, trustworthiness characteristics, risks, and risk responses.
+- **ISO/IEC 42001:2023** — 20+ mandatory documents under Clause 7.5 covering AI risk assessments, impact assessments, treatment, monitoring, and audits.
+
+TRACE is designed to make the documentation these frameworks require a workflow byproduct rather than an after-the-fact compilation effort.
+
+### Talks and venues
+
+- **UC Open Summit 2026** (March 2026, Oakland CA) — TRACE presented as part of "Open Infrastructure for Collaborative Research."
+- **Agentic AI Summit 2026** (Berkeley RDI, UC Berkeley, August 1–2, 2026) — talk submission in review on decision-provenance infrastructure for agentic AI.
+
+## Preliminary Deployment Results
+
+In the four weeks since the v0.3 release (2026-03-19 → present), TRACE has been actively used across five research workflows. These numbers are a snapshot — they will grow as the protocol matures.
+
+| Project | Domain | Sessions | Events | Decisions | Corrections |
+|---|---|---:|---:|---:|---:|
+| When-Algorithms-Meet-Artists | Computational art / cultural studies | 22 | 114 | 27 | 4 |
+| corp-sus-report-extractor | Corporate sustainability disclosure | 11 | 56 | 17 | 3 |
+| TRACE (self-host / meta) | Protocol research | 9 | 54 | 16 | 6 |
+| REAP | Environmental discourse analysis | 3 | 53 | 22 | 3 |
+| green-narrative | Environmental narrative analysis | 7 | 50 | 19 | 5 |
+| **Total** | | **52** | **327** | **101** | **21** |
+
+### Decision attribution (101 decisions across 5 projects)
+
+| Metric | Count | Share |
+|---|---:|---:|
+| Proposed by AI | 45 | 45% of all decisions |
+| Proposed by human | 56 | 55% of all decisions |
+| Accepted (of resolved) | 55 | 86% of resolved |
+| Revised (of resolved) | 4 | 6% of resolved |
+| Rejected (of resolved) | 5 | 8% of resolved |
+| Pending (no resolution) | 37 | 37% of all decisions |
+
+The 86% acceptance rate is not rubber-stamping. TRACE captures both genuine alignment AND active human steering: 4 revisions, 5 outright rejections, and 21 separately-logged corrections where a human caught and fixed an AI mistake.
+
+### Contribution attribution (146 contributions across 5 projects)
+
+| Direction → Execution | Count | Share |
+|---|---:|---:|
+| Human-directed → AI-executed | 106 | 73% |
+| Collaborative-directed → AI-executed | 29 | 20% |
+| AI-directed → AI-executed | 11 | 8% |
+
+Direction (who had the idea) is tracked separately from execution (who did the work). Pure AI-directed-and-executed contributions are 8% of the total; the dominant pattern is human direction with AI execution — the human-in-the-loop collaboration current attribution norms cannot describe.
+
 ## Quick Start
 
 ### Install
@@ -42,14 +109,14 @@ Add to your project's `.mcp.json`:
 {
   "mcpServers": {
     "trace": {
-      "command": "uv",
-      "args": ["run", "--directory", "/path/to/TRACE", "trace-mcp"]
+      "command": "uvx",
+      "args": ["--from", "/path/to/TRACE", "--refresh-package", "trace-mcp", "trace-mcp"]
     }
   }
 }
 ```
 
-Using `uv run` ensures a consistent virtual environment regardless of system Python changes.
+Using `uvx` builds the package into an isolated environment, avoiding `.venv` breakage from Python upgrades. The `--refresh-package` flag ensures source changes are picked up on next server start.
 
 ### Run a First Session
 
@@ -205,12 +272,29 @@ Place your OpenAI API key in `~/.trace/.env` (shared across all TRACE projects):
 
 ```bash
 OPENAI_API_KEY=sk-...
-TRACE_LLM_MODEL=gpt-5-nano              # Model for matching/scoring
-TRACE_LLM_EXTRACTION_MODEL=gpt-5-mini   # Model for extraction (can be different)
-TRACE_LLM_ENABLED=true                  # Set false to force BM25-only
+TRACE_LLM_MODEL=gpt-5.4-mini             # Model for matching/scoring
+TRACE_LLM_EXTRACTION_MODEL=gpt-5.4-mini  # Model for extraction (can be different)
+TRACE_LLM_ENABLED=true                   # Set false to force BM25-only
+TRACE_STRICT_LLM=true                    # Fail loudly on LLM errors (default: true when key set)
 ```
 
 Environment variables take precedence over `.env` file values for CI/container use.
+
+#### Strict vs Permissive LLM Mode
+
+**Strict mode (default when `OPENAI_API_KEY` is set)** — LLM failures raise
+`LLMFallbackError` instead of silently degrading to BM25/rule-based. This
+ensures you know when LLM features aren't working rather than silently
+getting lower-quality results. Backend selection is logged at `INFO` level
+at startup so you always know which tier is active.
+
+**Permissive mode (`TRACE_STRICT_LLM=false`)** — LLM failures fall back to
+BM25/rule-based with a `WARNING` log. Use this in environments where
+degraded operation is preferable to hard failures (e.g., CI fixtures, or
+environments without reliable network access).
+
+If `OPENAI_API_KEY` is not set at all, strict mode is disabled automatically
+and BM25 is used without error — there's nothing to be strict about.
 
 ## Configuration
 
@@ -220,9 +304,10 @@ Environment variables take precedence over `.env` file values for CI/container u
 | `TRACE_KNOWLEDGE_DIR` | `~/.trace/knowledge/` | Directory for trace-learn knowledge stores |
 | `TRACE_LOG_LEVEL` | `INFO` | Logging verbosity |
 | `OPENAI_API_KEY` | — | OpenAI API key for LLM matching and extraction |
-| `TRACE_LLM_MODEL` | `gpt-5-nano` | Model for LLM relevance scoring |
-| `TRACE_LLM_EXTRACTION_MODEL` | `gpt-5-mini` | Model for LLM learning extraction |
+| `TRACE_LLM_MODEL` | `gpt-5.4-mini` | Model for LLM relevance scoring |
+| `TRACE_LLM_EXTRACTION_MODEL` | `gpt-5.4-mini` | Model for LLM learning extraction |
 | `TRACE_LLM_ENABLED` | `true` | Set `false` to force BM25/rule-based only |
+| `TRACE_STRICT_LLM` | `true` if key set, else `false` | Fail loudly on LLM errors instead of silent BM25 fallback |
 | `TRACE_BM25_K1` | `1.5` | BM25 term frequency saturation parameter |
 | `TRACE_BM25_B` | `0.75` | BM25 document length normalization parameter |
 | `TRACE_TAG_WEIGHT` | `0.3` | Weight given to tag overlap in scoring (0.0–1.0) |
@@ -383,7 +468,6 @@ Development is organized into three tiers, implemented sequentially.
 - **Error handling**: `resolve_decision()` raises `ValueError` for missing decisions instead of returning error strings
 - **Scratchpad**: Auto-generates human-readable session summaries to `.claude/SCRATCHPAD.md` at session end
 - **Embedding backend**: Cosine similarity on precomputed vectors (OpenAI `text-embedding-3-small` or model2vec `potion-base-8M` local). Sub-millisecond recall after initial embedding.
-- **Version pin checking**: `TRACE_PINNED_VERSION` env var warns on startup if server version doesn't match
 - **50 new tests**: Path traversal, corrupt JSON, conversation_snippet roundtrip, attribution audit, BM25 edge cases, decay, export edge cases
 
 ### v0.2.0 (2026-02-15)

@@ -260,11 +260,12 @@ class TestBM25Backend:
 class TestLLMBackend:
     """Tests for LLMBackend with mocked OpenAI client."""
 
-    def _make_config(self) -> LearnConfig:
+    def _make_config(self, strict: bool = False) -> LearnConfig:
         return LearnConfig(
             openai_api_key="test-key-123",
-            llm_model="gpt-5-nano",
+            llm_model="gpt-5.4-mini",
             llm_enabled=True,
+            strict_llm=strict,
         )
 
     async def test_llm_scoring_mocked(self):
@@ -298,8 +299,8 @@ class TestLLMBackend:
         assert scores[2] == pytest.approx(0.05)
 
     async def test_llm_fallback_on_error(self):
-        """When LLM fails, falls back to BM25."""
-        config = self._make_config()
+        """Permissive mode: when LLM fails, falls back to BM25."""
+        config = self._make_config(strict=False)
 
         with patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", True):
             with patch("trace_mcp.extensions.learn.matching.AsyncOpenAI") as MockClient:
@@ -321,6 +322,28 @@ class TestLLMBackend:
         scores = dict(results)
         # BM25 should give conda learning a non-zero score
         assert scores[0] > 0
+
+    async def test_llm_raises_in_strict_mode(self):
+        """Strict mode: LLM failure raises LLMFallbackError instead of silent fallback."""
+        from trace_mcp.extensions.learn.config import LLMFallbackError
+
+        config = self._make_config(strict=True)
+
+        with patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", True):
+            with patch("trace_mcp.extensions.learn.matching.AsyncOpenAI") as MockClient:
+                mock_client = AsyncMock()
+                mock_client.chat.completions.create = AsyncMock(
+                    side_effect=Exception("API error")
+                )
+                MockClient.return_value = mock_client
+
+                from trace_mcp.extensions.learn.matching import LLMBackend
+
+                backend = LLMBackend(config)
+                backend._client = mock_client
+
+                with pytest.raises(LLMFallbackError, match="LLM matching failed"):
+                    await backend.score_batch(ALL_LEARNINGS, "conda environment")
 
     async def test_llm_prefilters_large_stores(self):
         """When store has >50 learnings, BM25 pre-filters before LLM."""
@@ -369,15 +392,39 @@ class TestBackendSelection:
         assert isinstance(backend, BM25Backend)
 
     def test_bm25_when_llm_disabled(self):
-        config = LearnConfig(openai_api_key="sk-test", llm_enabled=False, embedding_backend="none")
+        config = LearnConfig(
+            openai_api_key="sk-test",
+            llm_enabled=False,
+            strict_llm=False,
+            embedding_backend="none",
+        )
         backend = get_default_backend(config)
         assert isinstance(backend, BM25Backend)
 
     def test_bm25_when_no_openai_package(self):
-        config = LearnConfig(openai_api_key="sk-test", llm_enabled=True, embedding_backend="none")
+        config = LearnConfig(
+            openai_api_key="sk-test",
+            llm_enabled=True,
+            strict_llm=False,
+            embedding_backend="none",
+        )
         with patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", False):
             backend = get_default_backend(config)
         assert isinstance(backend, BM25Backend)
+
+    def test_strict_mode_raises_when_no_llm_available(self):
+        """Strict mode with API key set but no backend available → raises."""
+        from trace_mcp.extensions.learn.config import LLMFallbackError
+
+        config = LearnConfig(
+            openai_api_key="sk-test",
+            llm_enabled=True,
+            strict_llm=True,
+            embedding_backend="none",
+        )
+        with patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", False):
+            with pytest.raises(LLMFallbackError, match="Strict LLM mode"):
+                get_default_backend(config)
 
     def test_llm_when_configured(self):
         config = LearnConfig(openai_api_key="sk-test", llm_enabled=True, embedding_backend="none")

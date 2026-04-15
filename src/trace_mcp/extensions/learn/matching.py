@@ -295,6 +295,7 @@ class LLMBackend:
         self._client = AsyncOpenAI(api_key=config.openai_api_key)
         self._model = config.llm_model
         self._tag_weight = config.tag_weight
+        self._strict = config.strict_llm
         self._bm25_fallback = BM25Backend(
             k1=config.bm25_k1,
             b=config.bm25_b,
@@ -326,9 +327,26 @@ class LLMBackend:
 
         try:
             scores = await self._llm_score(candidates, context, context_tags)
-        except Exception:
+        except Exception as exc:
+            from trace_mcp.extensions.learn.config import LLMFallbackError
+
+            if self._strict:
+                logger.error(
+                    "LLM scoring failed in strict mode (model=%s) — "
+                    "refusing to silently fall back to BM25. "
+                    "Set TRACE_STRICT_LLM=false to allow fallback.",
+                    self._model,
+                )
+                raise LLMFallbackError(
+                    f"LLM matching failed (model={self._model}): {exc}. "
+                    f"Strict mode is ON — set TRACE_STRICT_LLM=false to "
+                    f"allow silent fallback to BM25."
+                ) from exc
             logger.warning(
-                "LLM scoring failed — falling back to BM25", exc_info=True
+                "LLM scoring failed (model=%s) — falling back to BM25. "
+                "Strict mode is OFF.",
+                self._model,
+                exc_info=True,
             )
             return await self._bm25_fallback.score_batch(
                 learnings, context, context_tags
@@ -477,12 +495,14 @@ def get_default_backend(config: LearnConfig | None = None) -> MatchingBackend:
 
         config = load_config()
 
+    from trace_mcp.extensions.learn.config import LLMFallbackError
+
     # Tier 1: Embedding backend (cosine similarity on precomputed vectors)
     from trace_mcp.extensions.learn.embeddings import get_embedding_provider
 
     provider = get_embedding_provider(config)
     if provider is not None:
-        logger.debug("Using Embedding matching backend (provider=%s)", provider.model_name)
+        logger.info("Using Embedding matching backend (provider=%s)", provider.model_name)
         return EmbeddingBackend(
             provider=provider,
             tag_weight=config.tag_weight,
@@ -492,11 +512,29 @@ def get_default_backend(config: LearnConfig | None = None) -> MatchingBackend:
 
     # Tier 2: LLM backend (sends learnings to GPT for scoring)
     if config.llm_enabled and config.openai_api_key and _HAS_OPENAI:
-        logger.debug("Using LLM matching backend (model=%s)", config.llm_model)
+        logger.info("Using LLM matching backend (model=%s)", config.llm_model)
         return LLMBackend(config)
 
     # Tier 3: BM25 (always available, zero external deps)
-    logger.debug("Using BM25 matching backend (k1=%s, b=%s)", config.bm25_k1, config.bm25_b)
+    # If strict mode is ON and the user has an API key, they expected LLM or
+    # embedding — refuse to silently degrade to BM25.
+    if config.strict_llm and config.openai_api_key:
+        logger.error(
+            "Strict LLM mode is ON and an OPENAI_API_KEY is set, but neither "
+            "Embedding nor LLM backends are available. Refusing to fall back "
+            "to BM25. Check that the 'openai' package is installed and the "
+            "API key is valid. Set TRACE_STRICT_LLM=false to allow BM25 fallback."
+        )
+        raise LLMFallbackError(
+            "Strict LLM mode is ON but no LLM/Embedding backend is available. "
+            "Install 'openai' package and verify OPENAI_API_KEY, or set "
+            "TRACE_STRICT_LLM=false to allow BM25 fallback."
+        )
+
+    logger.warning(
+        "Using BM25 matching backend (k1=%s, b=%s) — no LLM or embedding provider available",
+        config.bm25_k1, config.bm25_b,
+    )
     return BM25Backend(
         k1=config.bm25_k1,
         b=config.bm25_b,

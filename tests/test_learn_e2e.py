@@ -327,8 +327,8 @@ class TestE2EWithLLM:
     def _make_config(self) -> LearnConfig:
         return LearnConfig(
             openai_api_key="test-key",
-            llm_model="gpt-5-nano",
-            llm_extraction_model="gpt-5-mini",
+            llm_model="gpt-5.4-mini",
+            llm_extraction_model="gpt-5.4-mini",
             llm_enabled=True,
         )
 
@@ -412,14 +412,15 @@ class TestE2EBackendFallback:
     """Tests that demonstrate graceful fallback from LLM to BM25."""
 
     async def test_llm_fails_bm25_succeeds(self, tmp_path):
-        """When LLM API fails, recall still works via BM25 fallback."""
+        """Permissive mode: when LLM API fails, recall still works via BM25 fallback."""
         ks = KnowledgeStore(project="test")
         add_learning(ks, content="Use ml-dev conda env for ML", tags=["conda"])
         add_learning(ks, content="Pasta recipe with basil", tags=["food"])
         save_store(ks, directory=str(tmp_path))
 
         loaded = load_store("test", directory=str(tmp_path))
-        config = LearnConfig(openai_api_key="test-key", llm_enabled=True)
+        # Explicitly permissive: strict_llm=False opts into silent BM25 fallback
+        config = LearnConfig(openai_api_key="test-key", llm_enabled=True, strict_llm=False)
 
         with patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", True):
             with patch("trace_mcp.extensions.learn.matching.AsyncOpenAI") as MockClient:
@@ -462,6 +463,30 @@ class TestE2EConfig:
 
         parsed = _parse_dotenv(env_file)
         assert parsed["OPENAI_API_KEY"] == "sk-from-dotenv"
+
+    def test_parse_dotenv_strips_inline_comments(self, tmp_path):
+        """Inline comments (KEY=value # comment) must not contaminate the value.
+
+        Regression test: a user's .env file had
+            TRACE_LLM_ENABLED=true      # set false to force BM25-only
+        which was being parsed as "true      # set false to force BM25-only"
+        and failing the `.lower() in ("true","1","yes")` check, silently
+        disabling LLM features.
+        """
+        env_file = tmp_path / ".env"
+        env_file.write_text(
+            "TRACE_LLM_ENABLED=true      # set false to force BM25-only\n"
+            'QUOTED_VAL="has # hash inside"   # trailing comment\n'
+            "PLAIN=value\n"
+        )
+
+        from trace_mcp.extensions.learn.config import _parse_dotenv
+
+        parsed = _parse_dotenv(env_file)
+        assert parsed["TRACE_LLM_ENABLED"] == "true"
+        # Inside a quoted value, the # is preserved (not treated as comment)
+        assert parsed["QUOTED_VAL"] == "has # hash inside"
+        assert parsed["PLAIN"] == "value"
 
     def test_config_env_var_overrides(self, monkeypatch):
         """Environment variable takes precedence over .env file."""

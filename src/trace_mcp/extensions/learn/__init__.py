@@ -45,7 +45,14 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
     )
 
     async def _embed_learnings(learnings: list[Learning]) -> bool:
-        """Generate embeddings for learnings that need them.  Returns True if any were updated."""
+        """Generate embeddings for learnings that need them.  Returns True if any were updated.
+
+        Raises ``LLMFallbackError`` in strict mode when the embedding provider
+        fails, rather than silently saving un-embedded learnings (which would
+        degrade future recall quality without any signal to the caller).
+        """
+        from trace_mcp.extensions.learn.config import LLMFallbackError
+
         if _embedding_provider is None or not learnings:
             return False
         try:
@@ -55,8 +62,25 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                 lrn.embedding = vec
                 lrn.embedding_model = _embedding_provider.model_name
             return True
-        except Exception:
-            logger.warning("Failed to generate embeddings", exc_info=True)
+        except Exception as exc:
+            if _config.strict_llm:
+                logger.error(
+                    "Embedding generation failed in strict mode (provider=%s) — "
+                    "refusing to silently save un-embedded learnings.",
+                    getattr(_embedding_provider, "model_name", "unknown"),
+                )
+                raise LLMFallbackError(
+                    f"Embedding generation failed "
+                    f"(provider={getattr(_embedding_provider, 'model_name', 'unknown')}): "
+                    f"{exc}. Strict mode is ON — set TRACE_STRICT_LLM=false to "
+                    f"allow saving un-embedded learnings."
+                ) from exc
+            logger.warning(
+                "Failed to generate embeddings (provider=%s) — "
+                "saving learnings without embeddings. Strict mode is OFF.",
+                getattr(_embedding_provider, "model_name", "unknown"),
+                exc_info=True,
+            )
             return False
 
     def _needs_embedding(ks: KnowledgeStore) -> list[Learning]:
@@ -145,7 +169,16 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             if results or embedded:
                 store.save_store(ks)
             return json.dumps({"project": project, "results": results, "total": len(results)})
-        except Exception:
+        except Exception as exc:
+            from trace_mcp.extensions.learn.config import LLMFallbackError
+
+            if isinstance(exc, LLMFallbackError):
+                logger.error("Strict LLM mode blocked fallback in trace_learn_recall: %s", exc)
+                return json.dumps({
+                    "error": "LLM strict mode: fallback blocked",
+                    "detail": str(exc),
+                    "project": project,
+                })
             logger.exception("Error recalling learnings")
             return json.dumps({"error": "Failed to recall learnings", "project": project})
 
@@ -198,7 +231,16 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             await _embed_learnings([lrn])
             store.save_store(ks)
             return json.dumps({"added": store.learning_to_dict(lrn)})
-        except Exception:
+        except Exception as exc:
+            from trace_mcp.extensions.learn.config import LLMFallbackError
+
+            if isinstance(exc, LLMFallbackError):
+                logger.error("Strict LLM mode blocked fallback in trace_learn_add: %s", exc)
+                return json.dumps({
+                    "error": "LLM strict mode: fallback blocked",
+                    "detail": str(exc),
+                    "project": project,
+                })
             logger.exception("Error adding learning")
             return json.dumps({"error": "Failed to add learning", "project": project})
 
@@ -288,6 +330,15 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                     "total_learnings": len(ks.learnings),
                 }
             )
-        except Exception:
+        except Exception as exc:
+            from trace_mcp.extensions.learn.config import LLMFallbackError
+
+            if isinstance(exc, LLMFallbackError):
+                logger.error("Strict LLM mode blocked fallback in trace_learn_extract: %s", exc)
+                return json.dumps({
+                    "error": "LLM strict mode: fallback blocked",
+                    "detail": str(exc),
+                    "project": project,
+                })
             logger.exception("Error extracting learnings")
             return json.dumps({"error": "Failed to extract learnings", "project": project})
