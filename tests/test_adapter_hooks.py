@@ -18,6 +18,7 @@ import pytest
 _HOOKS = Path(__file__).parent.parent / "src" / "trace_mcp" / "adapters" / "claude_code" / "assets" / "hooks"
 SESSION_REMINDER = _HOOKS / "session-reminder.sh"
 PROMPT_REMINDER = _HOOKS / "prompt-reminder.sh"
+PRETOOL_GUARD = _HOOKS / "pretool-guard.sh"
 
 
 def _today() -> str:
@@ -298,6 +299,100 @@ class TestPromptReminder:
         assert " " not in candidates[0].name
 
 
+# ── pretool-guard.sh ──────────────────────────────────────────────────────
+
+
+class TestPreToolGuard:
+    def _setup(self, tmp_path: Path) -> tuple[Path, Path]:
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        (project_dir / "CLAUDE.md").write_text('TRACE project name: "my-proj"\n')
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        return project_dir, sessions
+
+    def test_soft_mode_silent_with_active_session(self, tmp_path: Path) -> None:
+        project_dir, sessions = self._setup(tmp_path)
+        _make_session(sessions, session_id=f"trace_{_today()}_aaaaaa", project="my-proj", status="active")
+
+        result = _run_hook(PRETOOL_GUARD, project_dir=project_dir, sessions_dir=sessions)
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
+        assert result.stderr.strip() == ""
+
+    def test_soft_mode_warns_without_blocking(self, tmp_path: Path) -> None:
+        project_dir, sessions = self._setup(tmp_path)
+
+        result = _run_hook(PRETOOL_GUARD, project_dir=project_dir, sessions_dir=sessions)
+        assert result.returncode == 0, "soft mode must never block"
+        assert "TRACE:" in result.stdout
+        assert "my-proj" in result.stdout
+        assert result.stderr.strip() == ""
+
+    def test_strict_mode_blocks_without_session(self, tmp_path: Path) -> None:
+        project_dir, sessions = self._setup(tmp_path)
+
+        result = _run_hook(
+            PRETOOL_GUARD,
+            project_dir=project_dir,
+            sessions_dir=sessions,
+            env_overrides={"TRACE_GUARD": "strict"},
+        )
+        assert result.returncode == 2
+        assert "TRACE:" in result.stderr
+        assert "my-proj" in result.stderr
+
+    def test_strict_mode_allows_with_active_session(self, tmp_path: Path) -> None:
+        project_dir, sessions = self._setup(tmp_path)
+        _make_session(sessions, session_id=f"trace_{_today()}_bbbbbb", project="my-proj", status="active")
+
+        result = _run_hook(
+            PRETOOL_GUARD,
+            project_dir=project_dir,
+            sessions_dir=sessions,
+            env_overrides={"TRACE_GUARD": "strict"},
+        )
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
+        assert result.stderr.strip() == ""
+
+    def test_off_mode_is_silent_with_no_session(self, tmp_path: Path) -> None:
+        project_dir, sessions = self._setup(tmp_path)
+
+        result = _run_hook(
+            PRETOOL_GUARD,
+            project_dir=project_dir,
+            sessions_dir=sessions,
+            env_overrides={"TRACE_GUARD": "off"},
+        )
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
+        assert result.stderr.strip() == ""
+
+    def test_default_mode_is_soft(self, tmp_path: Path) -> None:
+        """No TRACE_GUARD env var → behaves like soft mode (warn, don't block)."""
+        project_dir, sessions = self._setup(tmp_path)
+
+        # env_overrides is None → inherit from test env (which has TRACE_GUARD unset
+        # thanks to the autouse fixture)
+        result = _run_hook(PRETOOL_GUARD, project_dir=project_dir, sessions_dir=sessions)
+        assert result.returncode == 0
+        assert "TRACE:" in result.stdout
+
+    def test_ignores_stdin_but_accepts_it(self, tmp_path: Path) -> None:
+        """Claude Code passes JSON on stdin; guard should not choke on it."""
+        project_dir, sessions = self._setup(tmp_path)
+        stdin_payload = json.dumps({"tool_name": "Edit", "tool_input": {"file_path": "x.py"}})
+
+        result = _run_hook(
+            PRETOOL_GUARD,
+            project_dir=project_dir,
+            sessions_dir=sessions,
+            stdin=stdin_payload,
+        )
+        assert result.returncode == 0
+
+
 @pytest.fixture(autouse=True)
 def _no_user_env_leak(monkeypatch: pytest.MonkeyPatch) -> None:
     """Don't let the developer's real ~/.trace/ sneak into test runs."""
@@ -306,3 +401,4 @@ def _no_user_env_leak(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     monkeypatch.delenv("TRACE_PROMPT_MIN_TURNS", raising=False)
     monkeypatch.delenv("TRACE_PROMPT_COOLDOWN_SEC", raising=False)
+    monkeypatch.delenv("TRACE_GUARD", raising=False)

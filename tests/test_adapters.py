@@ -66,12 +66,13 @@ class TestClaudeCodeInstall:
         paths = {r.path.name: r.disposition for r in results}
         assert paths["session-reminder.sh"] == "installed"
         assert paths["prompt-reminder.sh"] == "installed"
+        assert paths["pretool-guard.sh"] == "installed"
         assert paths["decision-audit.sh"] == "installed"
         assert paths["settings.json"] == "installed"
         assert paths["CLAUDE.md"] == "updated"  # pre-existing, now appended
         assert a.validate(tmp_path) == []
 
-    def test_settings_registers_all_three_hook_events(self, tmp_path: Path) -> None:
+    def test_settings_registers_all_four_hook_events(self, tmp_path: Path) -> None:
         a = ClaudeCodeAdapter()
         (tmp_path / "CLAUDE.md").write_text("# Example\n")
         a.install(tmp_path)
@@ -79,6 +80,7 @@ class TestClaudeCodeInstall:
         events = settings["hooks"]
         assert "SessionStart" in events
         assert "UserPromptSubmit" in events
+        assert "PreToolUse" in events
         assert "PostToolUse" in events
 
     def test_install_creates_missing_claude_md(self, tmp_path: Path) -> None:
