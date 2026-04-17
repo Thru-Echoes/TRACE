@@ -340,13 +340,34 @@ Regenerate the schema from models: `python scripts/generate_schema.py`
 
 ## Using with Claude Code
 
-Copy the skill file to teach Claude Code to automatically use TRACE:
+From inside a project directory:
 
 ```bash
-cp docs/claude-code-skill.md ~/.claude/skills/TRACE.md
+uvx --from /path/to/TRACE trace-mcp-init
 ```
 
-The skill provides detailed guidance on when and how to log events, with five worked examples covering decisions, corrections, contributions, decision chains, and complex multi-event scenarios.
+This runs the **Claude Code adapter**, which:
+
+- Writes `.mcp.json` pointing at the TRACE MCP server.
+- Installs hook scripts under `.claude/hooks/`:
+  - `session-reminder.sh` — SessionStart nudge when no active session for this project exists.
+  - `prompt-reminder.sh` — UserPromptSubmit nudge (rate-limited) when the user works without a session.
+  - `pretool-guard.sh` — PreToolUse warning before Edit/Write; set `TRACE_GUARD=strict` to block instead of warn.
+  - `decision-audit.sh` — PostToolUse audit after `trace_end_session`.
+- Merges hook registrations into `.claude/settings.json` (idempotent; preserves existing hooks and permissions).
+- Appends a minimal TRACE block to `CLAUDE.md`.
+
+Flags:
+
+- `--client={claude-code,codex,none,auto}` — pick the host (default: auto-detect).
+- `--dry-run` — show what would be written without touching files.
+
+**Codex** support is scaffolded as a placeholder; see
+[`src/trace_mcp/adapters/codex/README.md`](src/trace_mcp/adapters/codex/README.md)
+for the hook primitives a Codex adapter would need.
+
+Worked examples for logging decisions, corrections, contributions, and
+decision chains live in [`docs/examples.md`](docs/examples.md).
 
 ## File Structure
 
