@@ -29,15 +29,15 @@ def active() -> dict[str, Session]:
 
 
 class TestInitProjectMCPConfig:
-    def test_init_project_mcp_config_uses_uv_run(self) -> None:
-        """MCP_CONFIG should use 'uv run --directory ... trace-mcp'."""
+    def test_init_project_mcp_config_uses_uvx(self) -> None:
+        """MCP_CONFIG should use 'uvx --from ... --refresh-package trace-mcp trace-mcp'."""
         from trace_mcp.init_project import MCP_CONFIG
 
         trace_config = MCP_CONFIG["trace"]
-        assert trace_config["command"] == "uv"
+        assert trace_config["command"] == "uvx"
         args = trace_config["args"]
-        assert "run" in args
-        assert "--directory" in args
+        assert "--from" in args
+        assert "--refresh-package" in args
         assert "trace-mcp" in args
 
 

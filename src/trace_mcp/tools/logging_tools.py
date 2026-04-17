@@ -48,7 +48,7 @@ async def log_tool_call(
         )
 
     # FM23: Hint about exploratory tool calls
-    exploratory_tools = {"read", "glob", "grep", "bash", "cat", "ls", "grep", "find", "head", "tail"}
+    exploratory_tools = {"read", "glob", "grep", "bash", "cat", "ls", "find", "head", "tail"}
     if tool_lower in exploratory_tools:
         warnings.append(
             "Consider whether this exploratory call needs TRACE logging. "

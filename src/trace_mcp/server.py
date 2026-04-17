@@ -16,9 +16,9 @@ from typing import Any
 from mcp.server.fastmcp import FastMCP
 
 from trace_mcp import __version__
+from trace_mcp import extension_hooks as hooks
 from trace_mcp.schema import Session
 from trace_mcp.storage.json_file import JsonFileStorage
-from trace_mcp import hooks
 from trace_mcp.tools import (
     decision_tools,
     export_tools,
