@@ -1,93 +1,20 @@
 """trace-mcp init — set up TRACE in an existing project directory.
 
-Creates/updates .mcp.json and appends TRACE instructions to CLAUDE.md.
+Writes ``.mcp.json`` and dispatches to a host adapter (Claude Code, Codex, ...)
+to install hook scripts, merge settings, and append the minimal CLAUDE.md
+block. Adapters live in ``trace_mcp.adapters`` and contain no runtime code
+imported by the MCP server.
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 from pathlib import Path
 
-# The block that gets appended to CLAUDE.md
-TRACE_CLAUDE_BLOCK = """\
-
----
-
-## TRACE Audit Protocol (v0.3)
-
-This project uses [TRACE](https://github.com/Thru-Echoes/TRACE) v0.3 for transparent
-documentation of AI-human collaboration. The TRACE MCP server is configured in `.mcp.json`.
-
-### Acknowledgement
-
-At the start of every conversation in this project, briefly inform the user that
-TRACE audit logging is active. For example:
-
-> TRACE audit logging is active for this project. Tool calls, decisions,
-> contributions, and annotations will be recorded for transparency and reproducibility.
-
-This acknowledgement should happen once per conversation, not per tool call.
-
-### Required: Every Session
-
-1. **Start**: Call `trace_start_session` at the beginning of every workflow.
-   Include: project name, description of the goal, participants.
-2. **End**: Call `trace_end_session` with a summary when done.
-
-### Required: Tool Call Logging
-
-After every tool call to another MCP server, call `trace_log_tool_call` with:
-- server name, tool name, inputs, outputs, status, duration
-- a `reasoning` note explaining why the tool was called
-- failed calls are especially important to log (status: "error")
-
-### Required: Contribution Logging
-
-After completing a significant piece of work, call `trace_log_contribution` with:
-- `description`: what was contributed
-- `direction`: who had the idea — `"human"`, `"ai"`, or `"collaborative"`
-- `execution`: who did the work — `"human"`, `"ai"`, or `"collaborative"`
-- `artifact`: optional file path or identifier for the output
-- `related_decision_ids`: optional list of decision event IDs that motivated this
-
-### Required: Decision Logging
-
-Before any significant methodological choice, call `trace_propose_decision`:
-- which method/algorithm, parameters, thresholds, data inclusion/exclusion,
-  how to handle messy data, which model, how to interpret ambiguous results
-- include a specific, technical rationale
-- use `suggestion_type`: `"proactive"` (AI volunteered), `"requested"` (human asked), or `"collaborative"`
-- wait for human confirmation on consequential decisions
-- when the human responds, call `trace_resolve_decision` with their disposition
-
-### Required: Annotations
-
-Log observations as they occur with `trace_log_annotation`:
-- **gotcha**: unexpected behavior, data quality issues, encoding problems
-- **learning**: reusable knowledge for future sessions
-- **observation**: interesting but not immediately actionable
-- **todo**: needs follow-up
-- **question**: unresolved questions
-
-### Required: State Changes
-
-When switching models, changing parameters, or updating configuration,
-call `trace_log_state_change` with old and new values.
-
-### Project Summaries
-
-Use `trace_project_summary(project="...")` to get aggregated metrics across all
-sessions for paper-ready statistics (event counts, decision breakdowns, contribution
-attribution, participant lists).
-
-### Principles
-
-- Log methodology decisions, not trivial ones
-- Rationales must be specific: "F1=0.78 at threshold 0.85" not "seemed good"
-- Tag events with domain terms for searchability
-- When in doubt, log it
-"""
+from trace_mcp.adapters import detect_adapter, get_adapter, list_adapters
+from trace_mcp.adapters.base import Adapter
 
 _TRACE_ROOT = str(Path(__file__).resolve().parent.parent.parent)
 
@@ -98,10 +25,51 @@ MCP_CONFIG = {
     }
 }
 
-TRACE_MARKER = "## TRACE Audit Protocol"
+
+def _write_mcp_json(project_dir: Path) -> str:
+    """Write or merge the TRACE entry into ``.mcp.json``. Returns a one-line status."""
+    mcp_path = project_dir / ".mcp.json"
+    if mcp_path.exists():
+        try:
+            config = json.loads(mcp_path.read_text())
+        except json.JSONDecodeError:
+            config = {"mcpServers": {}}
+    else:
+        config = {"mcpServers": {}}
+
+    config.setdefault("mcpServers", {})
+    was_present = "trace" in config["mcpServers"]
+    config["mcpServers"]["trace"] = MCP_CONFIG["trace"]
+
+    mcp_path.write_text(json.dumps(config, indent=2) + "\n")
+    return f"  {'updated' if was_present else 'wrote'}: {mcp_path}"
 
 
-def init_project(directory: str | None = None) -> None:
+def _pick_adapter(project_dir: Path, explicit: str | None) -> Adapter | None:
+    """Resolve which adapter to run, or None to skip host integration."""
+    if explicit == "none":
+        return None
+    if explicit is not None:
+        try:
+            return get_adapter(explicit)
+        except KeyError as exc:
+            print(f"Error: {exc}")
+            sys.exit(1)
+    detected = detect_adapter(project_dir)
+    if detected is None:
+        print(
+            "No host adapter auto-detected. Pass --client="
+            f"{{{','.join(list_adapters())},none}} to pick one explicitly."
+        )
+    return detected
+
+
+def init_project(
+    directory: str | None = None,
+    *,
+    client: str | None = None,
+    dry_run: bool = False,
+) -> None:
     """Initialize TRACE in a project directory."""
     project_dir = Path(directory) if directory else Path.cwd()
 
@@ -109,43 +77,38 @@ def init_project(directory: str | None = None) -> None:
         print(f"Error: {project_dir} is not a directory")
         sys.exit(1)
 
-    # 1. Update .mcp.json
-    mcp_path = project_dir / ".mcp.json"
-    if mcp_path.exists():
-        with open(mcp_path) as f:
-            config = json.load(f)
+    print(f"Initializing TRACE in {project_dir}")
+
+    # 1. .mcp.json (host-independent)
+    if not dry_run:
+        print(_write_mcp_json(project_dir))
     else:
-        config = {"mcpServers": {}}
+        print(f"  [dry-run] would write: {project_dir / '.mcp.json'}")
 
-    if "mcpServers" not in config:
-        config["mcpServers"] = {}
+    # 2. Host adapter
+    adapter = _pick_adapter(project_dir, client)
+    if adapter is None:
+        print("Skipping host adapter installation.")
+        return
 
-    if "trace" in config["mcpServers"]:
-        old = config["mcpServers"]["trace"]
-        print(f"Updating existing TRACE config in .mcp.json (was: {old.get('command', '?')})")
-    else:
-        print("Adding TRACE to .mcp.json")
+    print(f"Installing {adapter.name} adapter...")
+    try:
+        results = adapter.install(project_dir, dry_run=dry_run)
+    except NotImplementedError as exc:
+        print(f"  {adapter.name}: {exc}")
+        return
 
-    config["mcpServers"]["trace"] = MCP_CONFIG["trace"]
+    for r in results:
+        prefix = "[dry-run] " if dry_run else ""
+        print(f"  {prefix}{r.disposition}: {r.path}")
 
-    with open(mcp_path, "w") as f:
-        json.dump(config, f, indent=2)
-        f.write("\n")
-    print(f"  Wrote: {mcp_path}")
-
-    # 2. Append to CLAUDE.md
-    claude_path = project_dir / "CLAUDE.md"
-    if claude_path.exists():
-        existing = claude_path.read_text()
-        if TRACE_MARKER in existing:
-            print(f"TRACE instructions already present in {claude_path} — skipping")
-        else:
-            with open(claude_path, "a") as f:
-                f.write(TRACE_CLAUDE_BLOCK)
-            print(f"  Appended TRACE instructions to: {claude_path}")
-    else:
-        claude_path.write_text(f"# Project Instructions\n{TRACE_CLAUDE_BLOCK}")
-        print(f"  Created: {claude_path}")
+    if not dry_run:
+        errors = adapter.validate(project_dir)
+        if errors:
+            print("Validation errors:")
+            for e in errors:
+                print(f"  - {e}")
+            sys.exit(1)
 
     print()
     print("TRACE is ready. Start Claude Code in this directory and the")
@@ -154,11 +117,27 @@ def init_project(directory: str | None = None) -> None:
 
 def main() -> None:
     """CLI entry point for trace-mcp init."""
-    # Simple arg parsing — just takes an optional directory
+    parser = argparse.ArgumentParser(
+        prog="trace-mcp init",
+        description="Set up TRACE in an existing project directory.",
+    )
+    parser.add_argument("directory", nargs="?", default=None, help="project directory (default: cwd)")
+    parser.add_argument(
+        "--client",
+        choices=[*list_adapters(), "none", "auto"],
+        default="auto",
+        help="host adapter to install (default: auto-detect)",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="show what would be written without touching files",
+    )
+    # Allow legacy `trace-mcp init init .` invocation used by bare `trace-mcp-init`.
     args = sys.argv[1:]
-
     if args and args[0] == "init":
-        args = args[1:]
+        sys.argv[1:] = args[1:]
 
-    directory = args[0] if args else None
-    init_project(directory)
+    ns = parser.parse_args()
+    client = None if ns.client == "auto" else ns.client
+    init_project(ns.directory, client=client, dry_run=ns.dry_run)

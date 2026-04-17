@@ -26,7 +26,7 @@ import pytest
 from trace_mcp.extensions.learn.matching import BM25Backend, recall_learnings
 from trace_mcp.extensions.learn.models import KnowledgeStore
 from trace_mcp.extensions.learn.store import add_learning, load_store, save_store
-from trace_mcp.hooks import (
+from trace_mcp.extension_hooks import (
     clear_hooks,
     extract_if_available,
     format_decision_warnings,
