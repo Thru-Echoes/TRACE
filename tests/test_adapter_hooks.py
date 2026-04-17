@@ -17,6 +17,7 @@ import pytest
 
 _HOOKS = Path(__file__).parent.parent / "src" / "trace_mcp" / "adapters" / "claude_code" / "assets" / "hooks"
 SESSION_REMINDER = _HOOKS / "session-reminder.sh"
+PROMPT_REMINDER = _HOOKS / "prompt-reminder.sh"
 
 
 def _today() -> str:
@@ -47,15 +48,23 @@ def _run_hook(
     *,
     project_dir: Path,
     sessions_dir: Path,
+    runtime_dir: Path | None = None,
+    env_overrides: dict[str, str] | None = None,
+    stdin: str = "",
 ) -> subprocess.CompletedProcess[str]:
     env = {
         **os.environ,
         "CLAUDE_PROJECT_DIR": str(project_dir),
         "TRACE_SESSIONS_DIR": str(sessions_dir),
     }
+    if runtime_dir is not None:
+        env["TRACE_RUNTIME_DIR"] = str(runtime_dir)
+    if env_overrides:
+        env.update(env_overrides)
     return subprocess.run(
         ["bash", str(script)],
         env=env,
+        input=stdin,
         capture_output=True,
         text=True,
         timeout=10,
@@ -165,8 +174,135 @@ class TestSessionReminderProjectAware:
         assert "no active session" in result.stdout
 
 
+# ── prompt-reminder.sh ────────────────────────────────────────────────────
+
+
+class TestPromptReminder:
+    def _setup(self, tmp_path: Path, project: str = "my-proj") -> tuple[Path, Path, Path]:
+        """Return (project_dir, sessions_dir, runtime_dir) with project configured."""
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        (project_dir / "CLAUDE.md").write_text(f'TRACE project name: "{project}"\n')
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        runtime = tmp_path / "runtime"
+        return project_dir, sessions, runtime
+
+    def test_silent_when_active_session_exists(self, tmp_path: Path) -> None:
+        project_dir, sessions, runtime = self._setup(tmp_path)
+        _make_session(sessions, session_id=f"trace_{_today()}_aaaaaa", project="my-proj", status="active")
+
+        result = _run_hook(
+            PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime
+        )
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
+
+    def test_silent_for_first_two_turns_without_session(self, tmp_path: Path) -> None:
+        project_dir, sessions, runtime = self._setup(tmp_path)
+        # Default MIN_TURNS=3 → turns 1 and 2 should be silent
+        for _ in range(2):
+            result = _run_hook(
+                PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime
+            )
+            assert result.stdout.strip() == "", f"unexpected nudge: {result.stdout!r}"
+
+    def test_nudges_on_third_turn_without_session(self, tmp_path: Path) -> None:
+        project_dir, sessions, runtime = self._setup(tmp_path)
+        for _ in range(2):
+            _run_hook(PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime)
+
+        result = _run_hook(
+            PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime
+        )
+        assert "TRACE:" in result.stdout
+        assert "my-proj" in result.stdout
+
+    def test_cooldown_suppresses_follow_up_nudges(self, tmp_path: Path) -> None:
+        project_dir, sessions, runtime = self._setup(tmp_path)
+        # First 3 turns, the 3rd nudges
+        for _ in range(3):
+            _run_hook(PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime)
+
+        # 4th turn within cooldown should be silent (cooldown default 300s)
+        result = _run_hook(
+            PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime
+        )
+        assert result.stdout.strip() == ""
+
+    def test_re_nudges_after_cooldown_expires(self, tmp_path: Path) -> None:
+        project_dir, sessions, runtime = self._setup(tmp_path)
+        # Use a cooldown of 0s so any subsequent turn re-nudges
+        overrides = {"TRACE_PROMPT_COOLDOWN_SEC": "0"}
+        for _ in range(3):
+            _run_hook(
+                PROMPT_REMINDER,
+                project_dir=project_dir,
+                sessions_dir=sessions,
+                runtime_dir=runtime,
+                env_overrides=overrides,
+            )
+
+        result = _run_hook(
+            PROMPT_REMINDER,
+            project_dir=project_dir,
+            sessions_dir=sessions,
+            runtime_dir=runtime,
+            env_overrides=overrides,
+        )
+        assert "TRACE:" in result.stdout
+
+    def test_state_resets_when_session_becomes_active(self, tmp_path: Path) -> None:
+        project_dir, sessions, runtime = self._setup(tmp_path)
+        # Accumulate 2 turns without a session
+        for _ in range(2):
+            _run_hook(PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime)
+
+        state_file = runtime / "my-proj.state.json"
+        assert state_file.is_file()
+        assert json.loads(state_file.read_text())["turn_count"] == 2
+
+        # Session becomes active → next invocation resets state
+        _make_session(sessions, session_id=f"trace_{_today()}_bbbbbb", project="my-proj", status="active")
+        _run_hook(PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime)
+
+        assert json.loads(state_file.read_text())["turn_count"] == 0
+
+    def test_respects_min_turns_override(self, tmp_path: Path) -> None:
+        project_dir, sessions, runtime = self._setup(tmp_path)
+        # MIN_TURNS=1 means even the first turn should nudge
+        result = _run_hook(
+            PROMPT_REMINDER,
+            project_dir=project_dir,
+            sessions_dir=sessions,
+            runtime_dir=runtime,
+            env_overrides={"TRACE_PROMPT_MIN_TURNS": "1"},
+        )
+        assert "TRACE:" in result.stdout
+
+    def test_uses_sanitized_filename_for_state(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        # Project name with characters that need sanitizing
+        (project_dir / "CLAUDE.md").write_text('TRACE project name: "my/weird name"\n')
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        runtime = tmp_path / "runtime"
+
+        _run_hook(PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime)
+
+        # Filename should have / and space replaced
+        candidates = list(runtime.glob("*.state.json"))
+        assert len(candidates) == 1
+        assert "/" not in candidates[0].name
+        assert " " not in candidates[0].name
+
+
 @pytest.fixture(autouse=True)
 def _no_user_env_leak(monkeypatch: pytest.MonkeyPatch) -> None:
     """Don't let the developer's real ~/.trace/ sneak into test runs."""
     monkeypatch.delenv("TRACE_SESSIONS_DIR", raising=False)
+    monkeypatch.delenv("TRACE_RUNTIME_DIR", raising=False)
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
+    monkeypatch.delenv("TRACE_PROMPT_MIN_TURNS", raising=False)
+    monkeypatch.delenv("TRACE_PROMPT_COOLDOWN_SEC", raising=False)
