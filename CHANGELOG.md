@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-04-29
+
 ### Added
 - Host adapter layer in `src/trace_mcp/adapters/` (`base/`, `claude_code/`, `codex/`).
   Adapters are pure installers — they never import into the MCP server runtime.
@@ -116,7 +118,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tool-call logging, session and event queries.
 - Knowledge persistence, behavioral checks, checkpoints.
 
-[Unreleased]: https://github.com/Thru-Echoes/TRACE/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Thru-Echoes/TRACE/releases/tag/v0.1.0
