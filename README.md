@@ -118,6 +118,43 @@ Add to your project's `.mcp.json`:
 
 Using `uvx` builds the package into an isolated environment, avoiding `.venv` breakage from Python upgrades. The `--refresh-package` flag ensures source changes are picked up on next server start.
 
+### Install hooks (Claude Code)
+
+`trace-mcp-init` installs the host-side enforcement: hook scripts under `.claude/hooks/`, registrations merged into `.claude/settings.json`, and a marker block appended to `CLAUDE.md`.
+
+```bash
+trace-mcp-init                          # auto-detect host (default)
+trace-mcp-init --client claude-code     # explicit
+trace-mcp-init --dry-run                # preview, no writes
+```
+
+The Claude Code adapter installs four hooks:
+
+| Hook | Event | Purpose |
+|------|-------|---------|
+| `session-reminder.sh` | `SessionStart` | Reminds you to start a TRACE session if one isn't active for the current project. Project detection: `CLAUDE.md` → git repo basename → cwd basename. |
+| `prompt-reminder.sh` | `UserPromptSubmit` | Periodic nudge after several prompts without a session. Per-project rate-limited. |
+| `pretool-guard.sh` | `PreToolUse` (`Edit\|Write`) | Warns (or blocks) edits when no TRACE session is active. |
+| `decision-audit.sh` | `PostToolUse` (`trace_end_session`) | Echoes the session-end attribution audit into the conversation. |
+
+Project detection uses, in order:
+1. A line in `CLAUDE.md` of the form `TRACE project name: "your-project"`
+2. The git repository basename
+3. The current working directory basename
+
+Add the explicit marker to `CLAUDE.md` if your repo name differs from the project name you want logged.
+
+#### Environment variables
+
+| Variable | Default | Effect |
+|---|---|---|
+| `TRACE_GUARD` | `soft` | `pretool-guard.sh` mode: `off` (no-op), `soft` (warn-only on stderr, never blocks), `strict` (exit 2 to block the tool call when no session is active). |
+| `TRACE_PROMPT_MIN_TURNS` | `3` | Minimum prompt turns since session-start before `prompt-reminder.sh` will nudge. |
+| `TRACE_PROMPT_COOLDOWN_SEC` | `300` | Wall-clock cooldown between nudges from `prompt-reminder.sh`. |
+| `TRACE_RUNTIME_DIR` | `~/.trace/runtime` | Directory where per-project nudge state is stored (`<project>.state.json`). Safe to delete to reset. |
+| `TRACE_KNOWLEDGE_DIR` | `~/.trace/knowledge` | Directory for the trace-learn knowledge store. |
+| `TRACE_SOURCE_PATH` | _unset_ | Override what `trace-mcp-init` writes into `.mcp.json` as the `uvx --from <X>` argument. Pre-PyPI consumers can set this to an absolute path of a local TRACE clone, e.g. `TRACE_SOURCE_PATH=/abs/path/to/TRACE uvx --from /abs/path/to/TRACE trace-mcp-init`. When unset, `trace-mcp-init` uses the source repo for editable installs and the package name `trace-mcp` for wheel installs. |
+
 ### Run a First Session
 
 Once configured, TRACE tools are available to the AI client:
