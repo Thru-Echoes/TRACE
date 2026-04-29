@@ -43,6 +43,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   env var → PyPI package name `trace-mcp` (for wheel installs) → repo root
   (for editable installs).
 
+### Removed (repo split — 2026-04-29)
+- `manuscript/` (gitignored; ~1.7 GB of paper, lit-review, talks) moved to
+  the sibling repo `TRACE-research`. No git history was lost — `manuscript/`
+  was never tracked in TRACE.
+- 4 tracked literature-download scripts (`scripts/batch_proxy_download.py`,
+  `scripts/browser_batch.py`, `scripts/browser_download.py`,
+  `scripts/download_fulltext.py`) moved to `TRACE-research`. Their history
+  remains accessible in this repo's `git log` for archaeology.
+- 15 untracked talk-build / lit-audit / coder-comparison scripts moved.
+- Obsolete research-side `.gitignore` entries pruned (`manuscript/`,
+  `lit_review/`, talk-summary markdown files, manuscript-side scripts).
+- Result: TRACE is now ~7 MB instead of 1.7 GB; the public face of the
+  repo is the package and its tests/docs only. Provenance of the split is
+  recorded in `TRACE-research/PROVENANCE.md`.
+
 ## [0.3.0] — 2026-04-15
 
 ### Added

@@ -5,13 +5,6 @@
 .LSOverride
 ._*
 
-# Some local files for dev
-manuscript/
-lit_review/
-TRACE-summary-uc-ospo-2026.md
-abstract-uc-open-summit-2026.md
-
-
 # Python
 __pycache__/
 *.py[cod]
@@ -64,20 +57,6 @@ dmypy.json
 
 # TRACE local operational data (chain.json, per-repo session state)
 .trace/
-
-# Personal-machine data-quality utilities (operate on local ~/.trace/ data,
-# reference user-specific project name conventions, no public value)
-scripts/fix_data_quality.py
-scripts/find_talk_examples.py
-
-# Literature-audit working artifacts (paper text extractions, manuscript-side
-# comparison scripts — belong to manuscript/, not the TRACE protocol package)
-mdpi_*.txt
-scripts/build_independent_scoring_manifest.py
-scripts/compare_sidd_claude.py
-scripts/compare_sidd_claude_detail.py
-scripts/fill_independent_audit_csv.py
-scripts/merge_prepop_to_audit_csv.py
 
 # Playwright MCP (runtime downloads, console logs, browser artifacts)
 .playwright-mcp/
