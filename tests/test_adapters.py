@@ -242,3 +242,63 @@ class TestInitProjectDispatch:
         assert (tmp_path / ".mcp.json").exists()
         # Nothing host-specific written
         assert not (tmp_path / ".claude" / "hooks").exists()
+
+
+# ── _resolve_trace_source ────────────────────────────────────────────────
+
+
+class TestResolveTraceSource:
+    """`_resolve_trace_source` decides what `--from` value lands in .mcp.json.
+
+    Bug fixed in this PR: when `trace-mcp-init` was invoked via `uvx`, the
+    naive `Path(__file__).parent.parent.parent` resolved to the uvx cache
+    (e.g. `~/.cache/uv/archive-v0/<hash>/lib/python3.13`), producing a
+    `.mcp.json` whose `--from` path was unusable for future invocations.
+    """
+
+    def test_env_override_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from trace_mcp.init_project import _resolve_trace_source
+
+        monkeypatch.setenv("TRACE_SOURCE_PATH", "/explicit/path")
+        assert _resolve_trace_source() == "/explicit/path"
+
+    def test_env_override_wins_even_inside_site_packages(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from trace_mcp import init_project as ip
+
+        fake = tmp_path / "lib" / "python3.13" / "site-packages" / "trace_mcp" / "init_project.py"
+        fake.parent.mkdir(parents=True)
+        fake.touch()
+        monkeypatch.setattr(ip, "__file__", str(fake))
+        monkeypatch.setenv("TRACE_SOURCE_PATH", "/override")
+
+        assert ip._resolve_trace_source() == "/override"
+
+    def test_falls_back_to_package_name_when_inside_site_packages(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from trace_mcp import init_project as ip
+
+        fake = tmp_path / "lib" / "python3.13" / "site-packages" / "trace_mcp" / "init_project.py"
+        fake.parent.mkdir(parents=True)
+        fake.touch()
+        monkeypatch.setattr(ip, "__file__", str(fake))
+        monkeypatch.delenv("TRACE_SOURCE_PATH", raising=False)
+
+        assert ip._resolve_trace_source() == "trace-mcp"
+
+    def test_uses_repo_root_for_editable_install(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from trace_mcp import init_project as ip
+
+        repo = tmp_path / "TRACE-checkout"
+        fake = repo / "src" / "trace_mcp" / "init_project.py"
+        fake.parent.mkdir(parents=True)
+        fake.touch()
+        monkeypatch.setattr(ip, "__file__", str(fake))
+        monkeypatch.delenv("TRACE_SOURCE_PATH", raising=False)
+
+        # Three levels up from src/trace_mcp/init_project.py is the repo root
+        assert ip._resolve_trace_source() == str(repo)

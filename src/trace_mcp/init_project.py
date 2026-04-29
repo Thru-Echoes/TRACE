@@ -10,13 +10,36 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 from trace_mcp.adapters import detect_adapter, get_adapter, list_adapters
 from trace_mcp.adapters.base import Adapter
 
-_TRACE_ROOT = str(Path(__file__).resolve().parent.parent.parent)
+
+def _resolve_trace_source() -> str:
+    """Pick the value to write into `.mcp.json`'s `uvx --from <X>` argument.
+
+    Order:
+    1. ``TRACE_SOURCE_PATH`` env var (explicit override) — useful pre-PyPI to
+       point at a local clone, e.g. `TRACE_SOURCE_PATH=/abs/path/to/TRACE`.
+    2. If this module lives under a ``site-packages`` directory (i.e. it was
+       installed from a wheel / via ``uvx``), fall back to the published
+       package name ``"trace-mcp"`` — ``uvx --from trace-mcp`` resolves to
+       PyPI without baking in a per-machine cache path.
+    3. Otherwise (editable / source checkout), use the repo root, which is
+       three levels above this file (``src/trace_mcp/init_project.py``).
+    """
+    if env_override := os.environ.get("TRACE_SOURCE_PATH"):
+        return env_override
+    here = Path(__file__).resolve()
+    if "site-packages" in here.parts:
+        return "trace-mcp"
+    return str(here.parent.parent.parent)
+
+
+_TRACE_ROOT = _resolve_trace_source()
 
 MCP_CONFIG = {
     "trace": {
