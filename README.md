@@ -1,6 +1,10 @@
-# TRACE
+# Why TRACE? 
 
-**Transparent Recording of AI-assisted Collaboration Experiments**
+In the age of AI, how do we know *who* proposed *what* in a scientific or coding dev workflow? Was the idea for that methodological decision made by *AI* or by a *human*? And when decisions are proposed by AI, are they being accepted, rejected, or iterated on? 
+
+What does the solution to this look like? 
+
+## **TRACE: Transparent Recording of AI-assisted Collaboration Experiments**
 
 TRACE is an MCP server that provides a standardized audit trail for AI-assisted research workflows. It records tool calls, decisions, annotations, contributions, and actor attribution — who proposed what, who accepted or revised it, and why.
 
