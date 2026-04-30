@@ -40,11 +40,12 @@ The cost is empirically visible. A structured rubric audit of recently published
 
 These are not isolated lapses. They are the predictable consequence of agentic AI being deployed faster than the documentation norms surrounding it have updated.
 
-### Regulatory landscape (a 2026 inflection)
+### Regulatory landscape in 2026 
 
 Decision-process documentation for AI-assisted workflows is moving from academic ideal to regulatory requirement:
 
 - **EU AI Act, Articles 12 and 19** (Regulation 2024/1689) — high-risk AI systems must enable automatic event logging over the system's lifetime; logs retained at least six months. **Applicable to high-risk systems August 2, 2026.**
+- **California SB 942 (Transparency AI Act)** - AI needs active audit trails. **APplicable August 2, 2026.** 
 - **Colorado AI Act (SB 24-205)** — deployers of high-risk AI must maintain three years of audit trails, impact assessments, incident reports, and remediation documentation. **Effective June 30, 2026.**
 - **FDA PCCP final guidance** (December 2024) — marketing submissions for AI-enabled medical devices must document data lineage, performance tied to claims, bias analysis, and the human-AI workflow.
 - **NIST AI Risk Management Framework** — Govern / Map / Measure / Manage functions all require organizations to document system provenance, trustworthiness characteristics, risks, and risk responses.
