@@ -4,6 +4,16 @@ In the age of AI, how do we know *who* proposed *what* in a scientific or coding
 
 What does the solution to this look like? 
 
+**One sentence from you, fully-scoped session from Claude:**
+
+<p align="center">
+  <img src="docs/trace-use-case-3.png" width="650" alt="Claude Code: a single prompt — 'start a TRACE session and review the current manuscript for submission readiness' — produces auto-recalled learnings and a five-item task plan.">
+</p>
+
+1. Ask Claude to start a TRACE session and review the manuscript.
+2. Claude orients across repos using past-session memory.
+3. `trace_start_session` runs, learnings auto-recall, and a task plan emerges.
+
 ## **TRACE: Transparent Recording of AI-assisted Collaboration Experiments**
 
 TRACE is an MCP server that provides a standardized audit trail for AI-assisted research workflows. It records tool calls, decisions, annotations, contributions, and actor attribution — who proposed what, who accepted or revised it, and why.
