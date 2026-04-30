@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "trace-mcp"
-version = "0.3.0"
+version = "0.4.0"
 description = "TRACE: Transparent Recording of AI-assisted Collaboration Experiments — MCP audit protocol for scientific workflows"
 requires-python = ">=3.11"
 license = "Apache-2.0"
@@ -43,6 +43,7 @@ trace-mcp-init = "trace_mcp.init_project:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/trace_mcp"]
+
 
 [tool.ruff]
 line-length = 120

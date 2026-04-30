@@ -1,4 +1,19 @@
-# TRACE auto-start failure analysis — 2026-04-13
+# ADR 001 — TRACE auto-start enforcement
+
+**Status:** accepted
+**Date:** 2026-04-13 (incident) / 2026-04-16 (adapter work)
+**Resolution:** Claude Code host adapter with three hooks (`SessionStart`,
+`UserPromptSubmit`, `PreToolUse`); see
+[`src/trace_mcp/adapters/claude_code/`](../../src/trace_mcp/adapters/claude_code/).
+
+> This ADR captures the failure that motivated the adapter layer. The
+> numbered follow-ups at the bottom are all addressed by
+> `src/trace_mcp/adapters/`; the "Hook options" section became PR2
+> (project-aware `session-reminder.sh`), PR3 (`prompt-reminder.sh`), and
+> PR4 (`pretool-guard.sh`). The file is retained as a point-in-time
+> incident report, not as live guidance.
+
+---
 
 ## Incident
 

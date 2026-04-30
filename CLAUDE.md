@@ -3,6 +3,7 @@
 > **Full documentation**: [README.md](README.md) (architecture, tools, configuration, changelog)
 > **Formal specification**: [docs/specification.md](docs/specification.md)
 > **Version**: 0.3.0
+> **TRACE project name**: "TRACE"
 
 ---
 
@@ -73,3 +74,33 @@ instructions are in the global `~/.claude/CLAUDE.md`. Key points:
 **Core**: `trace_start_session`, `trace_end_session`, `trace_log_tool_call`, `trace_log_annotation`, `trace_log_contribution`, `trace_log_state_change`, `trace_propose_decision`, `trace_resolve_decision`, `trace_get_session`, `trace_get_events`, `trace_get_decisions`, `trace_get_decision_chain`, `trace_search`, `trace_export`, `trace_list_sessions`, `trace_project_summary`, `trace_health_check`
 
 **trace-learn**: `trace_learn_recall`, `trace_learn_add`, `trace_learn_list`, `trace_learn_forget`, `trace_learn_extract`
+
+<!-- trace-mcp:claude-code -->
+
+## TRACE Audit Protocol
+
+This project uses [TRACE](https://github.com/Thru-Echoes/TRACE) for transparent
+documentation of AI-human collaboration. The TRACE MCP server is configured in
+`.mcp.json` and enforced via `.claude/hooks/`.
+
+**Absolute rule**: Never fabricate, falsify, or retroactively alter TRACE
+data. A sparse honest record beats a dense fabricated one.
+
+**Session lifecycle**
+
+- **Start** a TRACE session at the beginning of any multi-step workflow.
+- **End** with a summary when the workflow is complete. Review the
+  Attribution Audit returned by `trace_end_session` before closing.
+
+**What to log**
+
+- **Decisions** (propose BEFORE acting, resolve when the human responds).
+- **Corrections** when the human catches an AI mistake.
+- **Contributions** — one per artifact, with `direction` (who had the idea)
+  and `execution` (who did the work).
+- Domain tool calls (not file reads, greps, or TRACE's own calls).
+
+Full protocol, including attribution rules and examples, lives at the
+[TRACE specification](https://github.com/Thru-Echoes/TRACE/blob/main/docs/specification.md).
+
+<!-- /trace-mcp:claude-code -->

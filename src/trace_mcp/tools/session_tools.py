@@ -14,7 +14,6 @@ import trace_mcp
 from trace_mcp.schema import Actor, Environment, Session, SessionMetadata, TraceEvent
 from trace_mcp.storage.base import TraceStorage
 
-
 # ── Attribution Audit Models ─────────────────────────────────────────────
 
 
