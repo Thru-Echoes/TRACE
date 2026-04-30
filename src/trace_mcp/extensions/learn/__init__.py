@@ -14,12 +14,12 @@ import json
 import logging
 from typing import TYPE_CHECKING, cast, get_args
 
+from trace_mcp.extension_hooks import register_extract_hook, register_recall_hook
 from trace_mcp.extensions.learn import extraction, matching, store
 from trace_mcp.extensions.learn.config import load_config
 from trace_mcp.extensions.learn.embeddings import get_embedding_provider
 from trace_mcp.extensions.learn.matching import DecayParams
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, LearningCategory
-from trace_mcp.hooks import register_extract_hook, register_recall_hook
 
 _VALID_CATEGORIES = get_args(LearningCategory)
 

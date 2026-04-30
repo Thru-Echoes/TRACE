@@ -178,7 +178,7 @@ def _compute_knowledge_metrics(project: str) -> dict[str, Any]:
             never_surfaced += 1
 
     # Top 5 most surfaced
-    sorted_learnings = sorted(store.learnings, key=lambda l: l.recall_count, reverse=True)
+    sorted_learnings = sorted(store.learnings, key=lambda lr: lr.recall_count, reverse=True)
     most_surfaced = [
         {
             "id": lrn.id,
@@ -332,7 +332,8 @@ async def health_check(
     Optionally scoped to a single project or session.
     """
     # Storage paths
-    sessions_dir = str(storage._dir) if hasattr(storage, "_dir") else "unknown"
+    storage_dir = getattr(storage, "_dir", None)
+    sessions_dir = str(storage_dir) if storage_dir is not None else "unknown"
     sessions_dir_exists = Path(sessions_dir).is_dir() if sessions_dir != "unknown" else False
 
     try:

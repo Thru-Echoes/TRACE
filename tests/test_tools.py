@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import trace_mcp
 from trace_mcp.schema import Session, SessionMetadata
 from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import (
@@ -29,15 +30,15 @@ def active() -> dict[str, Session]:
 
 
 class TestInitProjectMCPConfig:
-    def test_init_project_mcp_config_uses_uv_run(self) -> None:
-        """MCP_CONFIG should use 'uv run --directory ... trace-mcp'."""
+    def test_init_project_mcp_config_uses_uvx(self) -> None:
+        """MCP_CONFIG should use 'uvx --from ... --refresh-package trace-mcp trace-mcp'."""
         from trace_mcp.init_project import MCP_CONFIG
 
         trace_config = MCP_CONFIG["trace"]
-        assert trace_config["command"] == "uv"
+        assert trace_config["command"] == "uvx"
         args = trace_config["args"]
-        assert "run" in args
-        assert "--directory" in args
+        assert "--from" in args
+        assert "--refresh-package" in args
         assert "trace-mcp" in args
 
 
@@ -606,7 +607,7 @@ class TestCorrectionWorkflow:
 class TestHealthCheck:
     async def test_health_check_empty(self, storage: JsonFileStorage, tmp_path: Path) -> None:
         result = await query_tools.health_check(storage)
-        assert result["version"] == "0.3.0"
+        assert result["version"] == trace_mcp.__version__
         assert result["session_count"] == 0
         assert result["events"]["total"] == 0
         assert result["events"]["by_type"] == {}

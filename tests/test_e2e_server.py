@@ -23,6 +23,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import trace_mcp
+
 import pytest  # noqa: F401 (used by pytest-asyncio for test collection)
 
 TRACE_ROOT = Path(__file__).parent.parent
@@ -383,7 +385,7 @@ class TestSessionLifecycleE2E:
 
                 result_text = response["result"]["content"][0]["text"]
                 health = json.loads(result_text)
-                assert health["version"] == "0.3.0"
+                assert health["version"] == trace_mcp.__version__
                 assert health["session_count"] == 1
 
                 # 11. End session

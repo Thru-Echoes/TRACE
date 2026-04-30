@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from trace_mcp.hooks import (
+from trace_mcp.extension_hooks import (
     clear_hooks,
     extract_if_available,
     register_extract_hook,
