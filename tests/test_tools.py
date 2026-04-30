@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+import trace_mcp
 from trace_mcp.schema import Session, SessionMetadata
 from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import (
@@ -606,7 +607,7 @@ class TestCorrectionWorkflow:
 class TestHealthCheck:
     async def test_health_check_empty(self, storage: JsonFileStorage, tmp_path: Path) -> None:
         result = await query_tools.health_check(storage)
-        assert result["version"] == "0.3.0"
+        assert result["version"] == trace_mcp.__version__
         assert result["session_count"] == 0
         assert result["events"]["total"] == 0
         assert result["events"]["by_type"] == {}
