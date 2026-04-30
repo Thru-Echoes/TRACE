@@ -3,7 +3,7 @@
 > **Full documentation**: [README.md](README.md) (architecture, tools, configuration, changelog)
 > **Formal specification**: [docs/specification.md](docs/specification.md)
 > **Version**: 0.3.0
-> **TRACE project name**: "TRACE"
+> **TRACE project name**: "trace-mcp"
 
 ---
 
