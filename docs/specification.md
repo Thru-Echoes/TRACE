@@ -123,13 +123,15 @@ An actor is any entity that performs actions within a session.
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `type` | enum | MUST | One of: `"human"`, `"ai"`, `"system"`. |
-| `id` | string | MUST | Unique identifier within the session (e.g., `"researcher-jane"`, `"claude-sonnet-4"`). |
+| `id` | string | MUST | Unique identifier within the session (e.g., `"researcher-jane"`, `"claude-opus-4.7"`). |
 | `role` | string | MAY | Role in the workflow (e.g., `"lead"`, `"assistant"`, `"reviewer"`). |
 
 **Actor types**:
 - `human` — A person making decisions, providing feedback, or doing work.
 - `ai` — An AI model or agent performing actions, proposing decisions, or generating outputs.
 - `system` — An automated system acting without direct human or AI agency (e.g., a CI pipeline, a scheduled job).
+
+**AI actor IDs** are typically the model identifier published by the client's vendor. The TRACE specification is vendor-neutral; common examples spanning multiple organizations include `"claude-opus-4.7"` (Anthropic), `"gpt-5.5"` (OpenAI), `"gemini-3-pro"` (Google), `"llama-4-405b"` (Meta), and `"deepseek-r1"` (DeepSeek). Producers SHOULD use the canonical model ID from their AI client.
 
 ### 3.4 Event
 
@@ -510,7 +512,7 @@ When storing session documents to files, implementations SHOULD use atomic write
     "description": "Analyzing adaptation language shifts in IPCC AR6",
     "participants": [
       {"type": "human", "id": "researcher-jane", "role": "lead"},
-      {"type": "ai", "id": "claude-sonnet-4", "role": "assistant"}
+      {"type": "ai", "id": "claude-opus-4.7", "role": "assistant"}
     ],
     "tags": ["ipcc", "adaptation", "nlp"]
   },
@@ -521,11 +523,11 @@ When storing session documents to files, implementations SHOULD use atomic write
       "timestamp": "2026-02-05T14:32:00Z",
       "session_id": "trace_20260205_a1b2c3",
       "type": "decision",
-      "actor": {"type": "ai", "id": "claude-sonnet-4"},
+      "actor": {"type": "ai", "id": "claude-opus-4.7"},
       "decision": {
         "description": "Use cosine similarity threshold of 0.85 for passage matching",
         "rationale": "F1=0.78 on validation set at this threshold",
-        "proposed_by": {"type": "ai", "id": "claude-sonnet-4"},
+        "proposed_by": {"type": "ai", "id": "claude-opus-4.7"},
         "disposition": "proposed",
         "suggestion_type": "proactive",
         "tags": ["methodology", "threshold"]
@@ -559,7 +561,7 @@ When storing session documents to files, implementations SHOULD use atomic write
       "timestamp": "2026-02-05T14:40:00Z",
       "session_id": "trace_20260205_a1b2c3",
       "type": "tool_call",
-      "actor": {"type": "ai", "id": "claude-sonnet-4"},
+      "actor": {"type": "ai", "id": "claude-opus-4.7"},
       "tool_call": {
         "server": "corpus-search",
         "name": "search_passages",
@@ -574,7 +576,7 @@ When storing session documents to files, implementations SHOULD use atomic write
       "timestamp": "2026-02-05T14:42:00Z",
       "session_id": "trace_20260205_a1b2c3",
       "type": "annotation",
-      "actor": {"type": "ai", "id": "claude-sonnet-4"},
+      "actor": {"type": "ai", "id": "claude-opus-4.7"},
       "annotation": {
         "category": "gotcha",
         "content": "IPCC AR5 PDFs have inconsistent Unicode encoding — ligatures (fi, fl) are sometimes split into separate characters, causing keyword matching to miss passages.",
@@ -586,7 +588,7 @@ When storing session documents to files, implementations SHOULD use atomic write
       "timestamp": "2026-02-05T15:30:00Z",
       "session_id": "trace_20260205_a1b2c3",
       "type": "contribution",
-      "actor": {"type": "ai", "id": "claude-sonnet-4"},
+      "actor": {"type": "ai", "id": "claude-opus-4.7"},
       "contribution": {
         "description": "Implemented cosine similarity function with Unicode normalization",
         "artifact": "src/similarity.py",
