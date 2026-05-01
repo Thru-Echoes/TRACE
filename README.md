@@ -10,9 +10,9 @@ What does the solution to this look like?
   <img src="docs/trace-use-case-3.png" width="650" alt="Claude Code: a single prompt — 'start a TRACE session and review the current manuscript for submission readiness' — produces auto-recalled learnings and a five-item task plan.">
 </p>
 
-1. Ask Claude to start a TRACE session and review the manuscript.
-2. Claude orients across repos using past-session memory.
-3. `trace_start_session` runs, learnings auto-recall, and a task plan emerges.
+1. From inside `TRACE/`, ask Claude to start a session and review the manuscript (which is inside sibling dir, `TRACE-research/`).
+2. Past-session memory makes Claude pivot to that sibling repo before logging anything.
+3. `trace_start_session` runs there, learnings auto-recall, and a five-item task plan emerges.
 
 ## **TRACE: Transparent Recording of AI-assisted Collaboration Experiments**
 
@@ -34,6 +34,13 @@ The need is also moving from norm to regulation. The **EU AI Act** (Articles 12,
 
 Every TRACE decision carries an **actor** (who proposed, who resolved), a **disposition** (proposed → accepted / revised / rejected), a **rationale**, a **suggestion_type** (proactive / requested / collaborative), and an optional `revises_event_id` linking to a prior decision. Decisions form a provenance DAG, not a flat log — a future reader can reconstruct who proposed what, why it landed where it did, and how the approach evolved during the session.
 
+<p align="center">
+  <img src="docs/trace-example-corp-sus-extractor-2.png" width="560"
+       alt="Three TRACE events from a corp-sus-report-extractor session: a human-accepted decision, an AI-proposed alternative logged after rejection, and a correction annotation linking back to the rejection.">
+</p>
+
+Three events from a real `corp-sus-report-extractor` session: a human-proposed scope decision (`evt_002`, accepted), an AI-proposed alternative kept for provenance after rejection (`evt_003`), and a correction annotation linked to the rejection via `corrects_event_ids` (`evt_004`). Rejected alternatives and corrections are first-class events — they don't get discarded.
+
 ## Preliminary deployment results
 
 Four weeks since the v0.3 release (2026-03-19 → present), TRACE has been used across **5 research workflows**:
@@ -54,7 +61,7 @@ Contributions: **73% human-directed → AI-executed, 20% collaborative-directed,
 ## Architecture
 
 ```
-AI Client (Claude Code, Claude Desktop, etc.)
+AI Client (any MCP-aware client: Claude Code, Cursor, ChatGPT, Codex, ...)
     |
     +-- connects to: Domain MCP Server(s)
     |                 (corpus search, NLP pipeline, data retrieval, etc.)
@@ -77,7 +84,7 @@ AI Client (Claude Code, Claude Desktop, etc.)
 uv pip install -e ".[dev]"
 ```
 
-### Configure for Claude Code
+### Configure your MCP client
 
 Add to your project's `.mcp.json`:
 
