@@ -262,12 +262,20 @@ async def trace_log_tool_call(
     actor_id: str = "ai-assistant",
     reasoning: str | None = None,
     conversation_turn: int | None = None,
+    host: str = "mcp",
+    parent_event_id: str | None = None,
     session_id: str | None = None,
 ) -> str:
-    """Log a tool call made to another MCP server.
+    """Log a tool call made to another tool or host.
 
     Call this AFTER each tool invocation to record what was called,
     with what inputs, and what was returned.
+
+    v0.4.1: `host` distinguishes "mcp" (default — external MCP server),
+    "external" (non-MCP external tool), and "internal" (host-internal
+    helper such as a subagent dispatch from Claude Code). `parent_event_id`
+    links a dispatched child call to the controller event that motivated
+    it (spec §3.5); the value MUST be an in-session event ID.
 
     session_id is optional — if omitted, uses the current session or
     auto-creates one.
@@ -294,6 +302,8 @@ async def trace_log_tool_call(
             actor_id=actor_id,
             reasoning=reasoning,
             conversation_turn=conversation_turn,
+            host=host,
+            parent_event_id=parent_event_id,
         )
         return f"{prefix}Logged tool call: {event_id}"
     except Exception as e:

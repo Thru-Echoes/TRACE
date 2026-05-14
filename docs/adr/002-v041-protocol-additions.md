@@ -77,11 +77,11 @@ The PROV namespace URI `https://trace-protocol.org/ns/v0.3#` is referenced from 
 
 **Considered and rejected:** renaming to `v0.4#` for consistency with the spec version. Rejected because the namespace URI is an identifier, not a versioned package — its role is to disambiguate `trace:` properties from PROV core properties, not to track protocol revisions.
 
-### D7: Defer host-internal hook auto-capture to v1.1+
+### D7: Defer host-internal hook auto-capture to a future minor release
 
 The audit's Issue 5 (42 uncaptured Agent dispatches) could be partially closed by adding `dispatch-start.sh` / `dispatch-end.sh` Claude Code hooks that auto-call `trace_log_tool_call(host="internal", ...)`. This requires careful fail-open coordination, threshold tuning, and integration with the host's tool-call event lifecycle.
 
-**Decision:** for v0.4.1, ship the SCHEMA and protocol surface (`host` field, `parent_event_id`, spec §3.5 generalization, CLAUDE.md USUALLY-tier guidance) so manual logging is supported. Defer the auto-capture hooks to v1.1 with telemetry-driven threshold tuning. Add an advisory hint to `AttributionAudit` that fires when contribution density is high and tool_call count is zero, hinting at the gap without imposing on production sessions.
+**Decision:** for v0.4.1, ship the SCHEMA and protocol surface (`host` field, `parent_event_id`, spec §3.5 generalization, CLAUDE.md USUALLY-tier guidance) so manual logging is supported. Defer the auto-capture hooks to a future minor release with telemetry-driven threshold tuning — tracked in the v0.4.2+ "Deferred" list below. Add an advisory hint to `AttributionAudit` that fires when contribution density is high and tool_call count is zero, hinting at the gap without imposing on production sessions.
 
 ### D8: Three-round verification gates the release
 
@@ -93,16 +93,19 @@ The fix plan was developed over multiple rounds of independent subagent verifica
 
 **Backwards compatibility:** Pre-v0.4.1 session files load cleanly (Pydantic `extra="ignore"`). New optional fields default to v0.3 semantics. The annotation category enum was extended (additive). The PROV mapping change is the only documented breaking step for downstream consumers; mitigated by explicit CHANGELOG migration callout.
 
-**Test coverage:** 56 new E2E tests in `tests/test_v041_uri_corrects_event_ids.py` (23), `tests/test_v041_attribution_audit.py` (25), and `tests/test_v041_prov_ld_split.py` (11) verify v0.4.1 behavior with real storage and real PROV-LD export — no mocks. Pre-existing 749 tests continue to pass.
+**Test coverage:** 76 new E2E tests in `tests/test_v041_uri_corrects_event_ids.py` (23), `tests/test_v041_attribution_audit.py` (25), `tests/test_v041_prov_ld_split.py` (11), `tests/test_v041_decision_audit_hook.py` (11), and `tests/test_v041_tool_call_wrapper.py` (6) verify v0.4.1 behavior with real storage, real PROV-LD export, a real `/bin/bash` subprocess for the hook, and a real MCP-server subprocess for the wrapper passthrough — no mocks. Pre-existing 764 tests continue to pass. Total suite: 840 tests.
 
 **Adapter assets updated:**
 - `CLAUDE_BLOCK.md` (the block `trace-mcp-init` installs into consumer projects) now documents Proposer Identity Rule, URI-form references, discovery category, snippet absence markers, and subagent dispatch logging.
 - `decision-audit.sh` hook script generalizes from `ai`-only self-resolution check to any same-instance pair, and surfaces the new audit fields (missing snippets, attribution warnings).
 
+**Delivered in this batch (originally listed as deferred):**
+- Schema file rename `schemas/trace-v0.3.json` → `schemas/trace-v0.4.json` with the `$id` cascade applied to `scripts/generate_schema.py`, `scripts/validate_session.py`, README, CONTRIBUTING, spec, and conformance tests. The PROV namespace URI and `Session.context` URL remain at v0.3 per D6.
+- Appendix A worked example (`evt_006`) demonstrating the question → AI-proposal → accept flow with `suggestion_type="requested"`, plus a "Reading evt_006 against §3.6" paragraph contrasting all three Proposer-Identity patterns (proactive AI, requested AI, human directive).
+- `host` and `parent_event_id` parameters exposed on the `trace_log_tool_call` MCP wrapper so the v0.4.1 schema additions are reachable through the public interface (not just the internal `logging_tools.log_tool_call` function).
+
 **Deferred for v0.4.2+:**
-- Auto-capture hooks for Claude Code subagent dispatches (`dispatch-start.sh`, `dispatch-end.sh`).
-- Schema file rename `schemas/trace-v0.3.json` → `schemas/trace-v0.4.json` + `$id` cascade across `scripts/generate_schema.py`, `scripts/validate_session.py`, README references.
-- Appendix A worked example specifically demonstrating the question→AI-proposal→accept flow with `suggestion_type="requested"`.
+- Auto-capture hooks for Claude Code subagent dispatches (`dispatch-start.sh`, `dispatch-end.sh`). v0.4.1 documents the manual logging pattern; auto-capture remains a host-side investment.
 
 ## References
 

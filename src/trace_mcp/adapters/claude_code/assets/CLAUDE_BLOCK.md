@@ -34,9 +34,10 @@ data. A sparse honest record beats a dense fabricated one.
 - **Contributions** — one per artifact, with `direction` (who had the idea)
   and `execution` (who did the work). Always set `conversation_snippet`
   to the relevant user message (~200 chars). If no user message
-  motivated the event (autonomous-execution stretch), use
-  `<autonomous-stretch>` rather than omitting. Silent omission is a
-  v0.4.1 protocol violation per spec §3.4.1.
+  motivated the event, use the explicit absence marker
+  `<autonomous-stretch>` (no user turn since the last decision) or
+  `<no recent user message>` (general fallback) rather than omitting.
+  Silent omission is a v0.4.1 protocol violation per spec §3.4.1.
 - **Subagent dispatches** when their outcome is summarized by a
   contribution — `trace_log_tool_call(host="internal", server="claude-code",
   parent_event_id=...)` per spec §3.5. Skip routine file reads, greps,

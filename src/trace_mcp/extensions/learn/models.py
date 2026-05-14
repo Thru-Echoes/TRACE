@@ -7,6 +7,8 @@ from pydantic import BaseModel, Field
 
 # Categories that a Learning can have — superset of AnnotationData categories
 # (includes "decision" for rejected/revised decision learnings).
+# v0.4.1: added "discovery" — non-trivial findings from autonomous work
+# should feed the cross-session knowledge store (spec §3.7).
 LearningCategory = Literal[
     "learning",
     "gotcha",
@@ -16,6 +18,7 @@ LearningCategory = Literal[
     "prompt_pattern",
     "todo",
     "question",
+    "discovery",
     "other",
 ]
 

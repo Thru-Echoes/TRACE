@@ -18,15 +18,19 @@ if [ -z "$LATEST" ]; then
 fi
 
 # Compute all v0.4.1 audit metrics in one Python invocation for efficiency.
-# Each metric is on its own line; bash reads them via mapfile.
-mapfile -t METRICS < <(python3 << PYEOF 2>/dev/null
+# v0.4.1 amendment: this script must run on macOS bash 3.2 (the default
+# /bin/bash on macOS; Apple has not shipped a newer bash since the GPLv3
+# transition). bash 3.2 does NOT have `mapfile`, so we emit a single
+# space-separated line from Python and parse it with `read`, which is
+# POSIX-portable.
+METRICS_RAW=$(python3 - "$LATEST" 2>/dev/null << 'PYEOF'
 import json
+import sys
 try:
-    data = json.load(open("$LATEST"))
+    data = json.load(open(sys.argv[1]))
 except Exception:
     # Fail-open: emit zeros if we can't parse
-    for _ in range(6):
-        print(0)
+    print("0 0 0 0 0 0")
     raise SystemExit
 
 events = data.get("events", [])
@@ -68,31 +72,25 @@ for e in events:
     if a and a.get("category") == "correction":
         if not a.get("corrects_event_ids"):
             orphan_correction += 1
-        # Missing snippet on a correction is a spec §3.4.1 MUST violation
+        # Missing snippet on a correction is a spec §3.4.1 MUST violation.
+        # v0.4.1 amendment: also count whitespace-only / empty snippet as
+        # missing (closes the silent-bypass path Verifier C identified).
         if snip is None or (not is_absence(snip) and not snip.strip()):
-            if snip is None:
-                missing_snippet_correction += 1
+            missing_snippet_correction += 1
 
     if c:
-        # Missing snippet on a contribution is a spec §3.4.1 MUST violation
-        if snip is None:
+        # Missing snippet on a contribution is a spec §3.4.1 MUST violation.
+        # v0.4.1 amendment: also count whitespace-only / empty snippet as missing.
+        if snip is None or (not is_absence(snip) and not snip.strip()):
             missing_snippet_contrib += 1
 
-print(unresolved)
-print(ai_self_resolved)
-print(same_instance_self_resolved)
-print(orphan_correction)
-print(missing_snippet_contrib)
-print(missing_snippet_correction)
+print(f"{unresolved} {ai_self_resolved} {same_instance_self_resolved} "
+      f"{orphan_correction} {missing_snippet_contrib} {missing_snippet_correction}")
 PYEOF
 )
 
-UNRESOLVED="${METRICS[0]:-0}"
-AI_SELF_RESOLVED="${METRICS[1]:-0}"
-SAME_INSTANCE="${METRICS[2]:-0}"
-ORPHANED="${METRICS[3]:-0}"
-MISSING_CONTRIB="${METRICS[4]:-0}"
-MISSING_CORR="${METRICS[5]:-0}"
+# Parse the single space-separated line. POSIX-portable; works on bash 3.2+.
+read -r UNRESOLVED AI_SELF_RESOLVED SAME_INSTANCE ORPHANED MISSING_CONTRIB MISSING_CORR <<< "${METRICS_RAW:-0 0 0 0 0 0}"
 
 # v0.4.1: derive "non-ai same-instance" = SAME_INSTANCE − AI_SELF_RESOLVED.
 # This is the genuinely new v0.4.1 visibility (human→human / system→system

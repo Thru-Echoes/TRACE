@@ -66,7 +66,7 @@ When you modify Pydantic models in `src/trace_mcp/schema/`, regenerate the JSON 
 python scripts/generate_schema.py
 ```
 
-This updates `schemas/trace-v0.3.json` from `Session.model_json_schema()`.
+This updates `schemas/trace-v0.4.json` from `Session.model_json_schema()`.
 
 ## Extension development
 

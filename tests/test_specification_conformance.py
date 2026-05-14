@@ -39,7 +39,7 @@ from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import decision_tools, logging_tools, query_tools, session_tools
 from trace_mcp.exporters import export_prov_jsonld
 
-SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "trace-v0.3.json"
+SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "trace-v0.4.json"
 SPEC_PATH = Path(__file__).parent.parent / "docs" / "specification.md"
 
 
@@ -1008,7 +1008,7 @@ class TestSpecInterchangeFormat:
     # §7.1 JSON encoding
     def test_schema_file_exists_and_valid(self, schema: dict) -> None:
         assert "$id" in schema
-        assert "trace-v0.3" in schema["$id"]
+        assert "trace-v0.4" in schema["$id"]
 
     async def test_trace_output_is_valid_json(self, tmp_path: Path) -> None:
         doc = await _trace_generated_session(tmp_path)
@@ -1166,7 +1166,7 @@ class TestSpecDocumentCompleteness:
         assert "RFC 2119" in spec_text
 
     def test_spec_references_json_schema(self, spec_text: str) -> None:
-        assert "trace-v0.3.json" in spec_text
+        assert "trace-v0.4.json" in spec_text
 
     def test_spec_has_example_document(self, spec_text: str) -> None:
         assert "## Appendix A: Example Session Document" in spec_text
