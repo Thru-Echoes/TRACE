@@ -4,7 +4,7 @@
 
 **Status**: Draft
 **Last Updated**: 2026-05-14
-**JSON Schema**: [`trace-v0.3.json`](../schemas/trace-v0.3.json)
+**JSON Schema**: [`trace-v0.4.json`](../schemas/trace-v0.4.json)
 **W3C PROV Namespace**: `https://trace-protocol.org/ns/v0.3#`
 
 ---
@@ -114,7 +114,7 @@ Records the computational context in which the session took place. All fields ar
 | `spec_version` | string | Version of the implementation producing this document. |
 | `custom` | object | Extension point for domain-specific environment data. |
 
-> **Note on field naming**: The JSON Schema uses `mcp_servers` (for `tools`), `python_version` (for `runtime_version`), and `trace_version` (for `spec_version`) for historical reasons. These names are retained for backward compatibility. Conforming producers SHOULD use the schema field names. This specification uses generic names to remain technology-neutral.
+> **Note on field naming**: The JSON Schema uses `mcp_servers` (for `tools`) and `python_version` (for `runtime_version`) for historical reasons. These names are retained for backward compatibility. Conforming producers SHOULD use the schema field names. This specification uses generic names to remain technology-neutral. **v0.4.1**: the `trace_version` field was removed from `Environment` to eliminate two-source-of-truth — the single canonical version lives on `Session.trace_version`. Conforming consumers MUST silently ignore an unrecognized `environment.trace_version` field when reading pre-v0.4.1 session files (no error, no warning), so that v0.3.x and v0.4.0 sessions remain readable without migration.
 
 ### 3.3 Actor
 
@@ -469,7 +469,7 @@ A conforming consumer MAY export session documents as PROV JSON-LD using this ma
 The canonical interchange format is JSON. Each session MUST be representable as a single JSON object conforming to the JSON Schema at:
 
 ```
-https://trace-protocol.org/schemas/trace-v0.3.json
+https://trace-protocol.org/schemas/trace-v0.4.json
 ```
 
 A copy of this schema is distributed alongside this specification.
@@ -680,10 +680,39 @@ When storing session documents to files, implementations SHOULD use atomic write
       "context": {
         "conversation_snippet": "Can you write the similarity function? Use the 0.80 threshold we agreed on"
       }
+    },
+    {
+      "id": "evt_006",
+      "timestamp": "2026-02-05T15:35:00Z",
+      "session_id": "trace_20260205_a1b2c3",
+      "type": "decision",
+      "actor": {"type": "ai", "id": "claude-opus-4.7"},
+      "decision": {
+        "description": "Three-step plan to improve recall: (1) tighten passage-extractor regex for multi-sentence quotations, (2) add Unicode NFKC normalization in preprocessing, (3) re-run matcher at threshold 0.80 and compare F1 against current run.",
+        "rationale": "Researcher asked what would lift recall further without dropping the threshold below 0.80. Three interventions ordered by expected effect size on the held-out set.",
+        "proposed_by": {"type": "ai", "id": "claude-opus-4.7"},
+        "disposition": "accepted",
+        "resolved_by": {"type": "human", "id": "researcher-jane"},
+        "suggestion_type": "requested",
+        "tags": ["methodology", "recall"]
+      },
+      "context": {
+        "conversation_snippet": "researcher: 'what else can we do to lift recall without dropping threshold further?' / claude: 'three things in priority order: tighten the extractor regex...' / researcher: 'yes, do those three'",
+        "reasoning_summary": "Human posed an open question; AI authored the three-step plan; human accepted with 'yes, do those three'. Proposer is AI (authored the content); resolver is human (accepted). This is the canonical v0.4.1 §3.6 Proposer Identity Rule pattern — see §8.2 recognition table for the speech-act mapping."
+      }
     }
   ]
 }
 ```
+
+**Reading evt_006 against the v0.4.1 Proposer Identity Rule (§3.6)**:
+The human asked an open question ("what else can we do?"); the AI authored the specific three-step plan; the human accepted with "yes, do those three". Under the disambiguation table:
+- The substantive content of `description` paraphrases the AI's reply, not the human's question.
+- Therefore `proposed_by={type: ai}`, even though the human spoke first.
+- `suggestion_type="requested"` because the proposal was made in response to a human question rather than volunteered.
+- `disposition="accepted"`, `resolved_by={type: human}` because the human's "yes, do those three" closes the deliberation.
+
+Contrast with evt_001 (`suggestion_type="proactive"` — AI volunteered) and evt_002 (`proposed_by={type: human}` — researcher stated a directive in their own words and the AI executed). All three patterns are first-class.
 
 ---
 

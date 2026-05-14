@@ -249,7 +249,7 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
     # Pre-index discovery / correction / gotcha annotation timestamps for
     # the orphan-discovery scan. This lets each contribution check the
     # 30-minute pre-window in O(K) rather than O(N²).
-    discovery_anchors: list[tuple[str, "datetime"]] = []  # (event_id, timestamp)
+    discovery_anchors: list[tuple[str, datetime]] = []  # (event_id, timestamp)
     for e in session.events:
         if e.type == "annotation" and e.annotation and e.annotation.category in (
             "discovery",
@@ -615,6 +615,13 @@ def _check_referential_integrity(
 
     if event.tool_call and event.tool_call.retries_event_id:
         ids_to_check.append((event.tool_call.retries_event_id, "retries_event_id"))
+
+    # v0.4.1: parent_event_id on tool_call must point to a real event in the
+    # session (the controller-side event that motivated the dispatch). Without
+    # this check, PROV-LD's wasInformedBy edges could silently point at
+    # nonexistent events — Verifier C correctly flagged this gap.
+    if event.tool_call and event.tool_call.parent_event_id:
+        ids_to_check.append((event.tool_call.parent_event_id, "parent_event_id"))
 
     if event.contribution and event.contribution.related_decision_ids:
         for ref_id in event.contribution.related_decision_ids:

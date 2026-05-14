@@ -17,7 +17,7 @@ except ImportError:
     sys.exit(1)
 
 
-SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "trace-v0.3.json"
+SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "trace-v0.4.json"
 
 
 def validate_file(path: Path, schema: dict) -> bool:

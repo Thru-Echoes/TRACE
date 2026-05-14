@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ToolCallData.host: Literal["mcp","internal","external"] = "mcp"` — distinguishes external MCP servers from host-internal tools (subagent dispatchers) and external non-MCP tools.
 - `ToolCallData.parent_event_id: str | None = None` — links a dispatch to the controller event that motivated it. Enables manual dispatch-chain logging on day one.
 
+### Added (MCP wrapper)
+- `trace_log_tool_call` in `server.py` now exposes the `host` and `parent_event_id` parameters so the v0.4.1 schema fields are reachable through the public MCP interface (previously only the internal `logging_tools.log_tool_call` function accepted them — a release-gate verifier caught the gap). Defaults preserve v0.3.0 / v0.4.0 semantics (`host="mcp"`, `parent_event_id=None`). Six new E2E tests in `tests/test_v041_tool_call_wrapper.py` verify the wrapper passes both fields through, that invalid `host` values are rejected by Pydantic, and that dangling `parent_event_id` surfaces a referential-integrity warning.
+
 ### Added (server-side audit)
 - `AttributionAudit` extended with five new counts: `missing_snippet_contribution_count`, `missing_snippet_correction_count`, `explicit_absence_snippet_count`, `orphan_discovery_hint_count`, `attribution_warning_count`. Surfaced in the session-end audit block in severity order.
 - Structural attribution-warning detector: counts decisions where `proposed_by == resolved_by` (same Actor instance) in multi-actor sessions — catches the question→AI-proposal→human-accept self-resolution pattern without regex.
@@ -48,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed (single source of truth)
 - `Environment.trace_version` removed. Single canonical version lives on `Session.trace_version`. Pre-0.4.1 sessions on disk silently drop the redundant field on next save (Pydantic v2 default `extra="ignore"` permits this).
 - `Session.trace_version` default bumped from `"0.3.0"` to `"0.4.1"`.
-- `schemas/trace-v0.3.json` regenerated and renamed to `schemas/trace-v0.4.json`. References in `session.py`, `generate_schema.py`, `validate_session.py`, `prov_mapping.py`, README, and tests updated. The PROV namespace URI `https://trace-protocol.org/ns/v0.3#` is kept (additive extensions are valid within the v0.3 namespace).
+- `schemas/trace-v0.3.json` renamed to `schemas/trace-v0.4.json` and regenerated to include v0.4.1 fields (`discovery` category, `host`, `parent_event_id`). The `$id` inside the schema is updated to `https://trace-protocol.org/schemas/trace-v0.4.json`. References updated in `scripts/generate_schema.py`, `scripts/validate_session.py`, `README.md`, `CONTRIBUTING.md`, `docs/specification.md`, and `tests/test_specification_conformance.py`. Per ADR 002 D6, the spec URL `https://trace-protocol.org/v0.3` in `Session.context` and the PROV namespace URI `https://trace-protocol.org/ns/v0.3#` in `prov_mapping.py` remain at v0.3 — additive extensions are valid within the same namespace.
 
 ### Migration notes
 - **PROV-LD consumers** must update queries matching `prov:wasRevisionOf` for corrections — see "Changed (PROV-LD export)" above.

@@ -702,7 +702,7 @@
       "type": "object"
     }
   },
-  "description": "JSON Schema for a session document conforming to the Decision Provenance for AI-Assisted Workflows specification v0.3.0. See: https://trace-protocol.org/v0.3",
+  "description": "JSON Schema for a session document conforming to the Decision Provenance for AI-Assisted Workflows specification v0.4.1. See: https://trace-protocol.org/v0.3 (namespace URI kept at v0.3# per ADR 002 D6 \u2014 additive extensions are valid within the same namespace).",
   "properties": {
     "context": {
       "default": "https://trace-protocol.org/v0.3",
@@ -773,7 +773,7 @@
     "id",
     "metadata"
   ],
-  "title": "Decision Provenance Session Document v0.3",
+  "title": "Decision Provenance Session Document v0.4.1",
   "type": "object",
-  "$id": "https://trace-protocol.org/schemas/trace-v0.3.json"
+  "$id": "https://trace-protocol.org/schemas/trace-v0.4.json"
 }
