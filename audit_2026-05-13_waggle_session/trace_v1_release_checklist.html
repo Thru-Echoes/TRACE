@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>TRACE v0.4.1 Release Checklist</title>
+<style>
+  :root {
+    --bg: #f7f7f5;
+    --panel: #ffffff;
+    --ink: #1a1a1a;
+    --muted: #5e5e5e;
+    --accent: #6a4c93;
+    --accent-soft: #f0eaf5;
+    --critical: #b54545;
+    --critical-soft: #fbecec;
+    --done: #4a7c59;
+    --done-soft: #eaf4ec;
+    --border: #d8d3c8;
+    --code-bg: #f3efe7;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+    margin: 0;
+    padding: 2rem 1rem;
+    line-height: 1.55;
+  }
+  main {
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+  header {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem 1.75rem;
+    margin-bottom: 1.5rem;
+  }
+  header h1 {
+    margin: 0 0 0.5rem 0;
+    font-size: 1.5rem;
+    color: var(--accent);
+  }
+  header p {
+    margin: 0.25rem 0;
+    color: var(--muted);
+    font-size: 0.95rem;
+  }
+  .meta {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 0.5rem 1rem;
+    margin-top: 1rem;
+    font-size: 0.85rem;
+  }
+  .meta div { color: var(--muted); }
+  .meta strong { color: var(--ink); }
+  .progress {
+    margin-top: 1rem;
+    padding: 0.75rem 1rem;
+    background: var(--accent-soft);
+    border-radius: 6px;
+    font-size: 0.95rem;
+  }
+  .progress strong { color: var(--accent); }
+  details.layer {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+  }
+  details.layer > summary {
+    cursor: pointer;
+    padding: 1rem 1.5rem;
+    background: var(--panel);
+    font-weight: 600;
+    font-size: 1.05rem;
+    border-bottom: 1px solid transparent;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    color: var(--accent);
+  }
+  details.layer[open] > summary {
+    border-bottom: 1px solid var(--border);
+  }
+  details.layer > summary::-webkit-details-marker { display: none; }
+  details.layer > summary::after {
+    content: "▸";
+    color: var(--muted);
+    transition: transform 0.15s;
+    font-size: 0.85rem;
+  }
+  details.layer[open] > summary::after { transform: rotate(90deg); }
+  .layer-body { padding: 0.5rem 1.5rem 1rem 1.5rem; }
+  .layer-summary {
+    color: var(--muted);
+    font-size: 0.9rem;
+    font-weight: 400;
+    margin-left: 0.75rem;
+  }
+  .item {
+    border-bottom: 1px solid var(--border);
+    padding: 1rem 0;
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 0.75rem 1rem;
+  }
+  .item:last-child { border-bottom: none; }
+  .item.critical { background: var(--critical-soft); margin: 0 -1.5rem; padding-left: 1.5rem; padding-right: 1.5rem; border-bottom-color: var(--border); }
+  .item.new { background: var(--accent-soft); margin: 0 -1.5rem; padding-left: 1.5rem; padding-right: 1.5rem; border-bottom-color: var(--border); }
+  input[type="checkbox"] {
+    width: 1.1rem;
+    height: 1.1rem;
+    margin-top: 0.2rem;
+    accent-color: var(--done);
+    cursor: pointer;
+  }
+  .item-content { min-width: 0; }
+  .id {
+    display: inline-block;
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    font-size: 0.8rem;
+    color: var(--accent);
+    background: var(--accent-soft);
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    margin-right: 0.5rem;
+  }
+  .tag {
+    display: inline-block;
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    margin-left: 0.25rem;
+    vertical-align: middle;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .tag-critical { background: var(--critical); color: white; }
+  .tag-new { background: var(--accent); color: white; }
+  .tag-issue { background: #e8e2d2; color: #6a5b2e; }
+  .title {
+    font-weight: 600;
+    color: var(--ink);
+    margin-right: 0.5rem;
+  }
+  .desc {
+    margin-top: 0.4rem;
+    color: var(--ink);
+    font-size: 0.92rem;
+  }
+  code, .filepath {
+    font-family: ui-monospace, SFMono-Regular, monospace;
+    background: var(--code-bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+  .corrections-note {
+    background: var(--critical-soft);
+    border-left: 4px solid var(--critical);
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+  }
+  .corrections-note h3 {
+    margin: 0 0 0.5rem 0;
+    color: var(--critical);
+    font-size: 1rem;
+  }
+  .corrections-note ul { margin: 0.5rem 0 0 0; padding-left: 1.25rem; }
+  .corrections-note li { margin: 0.2rem 0; }
+  footer {
+    margin-top: 2rem;
+    padding: 1rem;
+    color: var(--muted);
+    font-size: 0.85rem;
+    text-align: center;
+  }
+  .legend {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-top: 0.5rem;
+    font-size: 0.8rem;
+    color: var(--muted);
+  }
+  .legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .swatch {
+    display: inline-block;
+    width: 0.9rem;
+    height: 0.9rem;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+</style>
+<script>
+  function updateProgress() {
+    const all = document.querySelectorAll('input[type="checkbox"]');
+    const done = document.querySelectorAll('input[type="checkbox"]:checked');
+    const pct = all.length === 0 ? 0 : Math.round(100 * done.length / all.length);
+    const el = document.getElementById('progress-text');
+    if (el) el.textContent = done.length + ' / ' + all.length + ' (' + pct + '%)';
+    try { localStorage.setItem('trace-v041-progress', JSON.stringify(
+      [...all].map(cb => cb.checked)
+    )); } catch(e) {}
+  }
+  window.addEventListener('DOMContentLoaded', () => {
+    // restore
+    try {
+      const saved = JSON.parse(localStorage.getItem('trace-v041-progress') || '[]');
+      const boxes = document.querySelectorAll('input[type="checkbox"]');
+      saved.forEach((v, i) => { if (boxes[i]) boxes[i].checked = v; });
+    } catch(e) {}
+    // bind
+    document.querySelectorAll('input[type="checkbox"]').forEach(cb =>
+      cb.addEventListener('change', updateProgress)
+    );
+    updateProgress();
+  });
+</script>
+</head>
+<body>
+<main>
+
+<header>
+  <h1>TRACE v0.4.1 Release Checklist</h1>
+  <p>Synthesized after 3-set independent verification of the proposed v1.0 fix plan against the waggle session audit. All items are additive — no breaking changes, no removals.</p>
+  <div class="meta">
+    <div><strong>Source audit:</strong> <code>trace_20260513_446733</code></div>
+    <div><strong>Target protocol version:</strong> 0.4.1 (additive over 0.4.0)</div>
+    <div><strong>Issues addressed:</strong> 5 audit dimensions + 4 cross-cutting</div>
+    <div><strong>Total items:</strong> 65 (after Round 3 amendments)</div>
+    <div><strong>Estimated effort:</strong> ~5 days focused work</div>
+    <div><strong>Plan docs:</strong> <code>trace_v1_FINAL_fix_plan.md</code> + <code>trace_v1_round3_amendments.md</code></div>
+  </div>
+  <div class="progress">Progress: <strong id="progress-text">0 / 0 (0%)</strong> · State saved in browser localStorage</div>
+  <div class="legend">
+    <span><span class="swatch" style="background:var(--critical-soft);border-color:var(--critical);"></span> Critical (added by verification — was missing or wrong in proposed plan)</span>
+    <span><span class="swatch" style="background:var(--accent-soft);border-color:var(--accent);"></span> New (added on top of proposed plan)</span>
+    <span><span class="swatch" style="background:var(--panel);"></span> From proposed plan (unchanged or refined)</span>
+  </div>
+</header>
+
+<div class="corrections-note">
+  <h3>13 substantive corrections from the verification subagents (already incorporated below)</h3>
+  <ul>
+    <li>Version target wrong: <code>0.3.1</code> would be a downgrade from current <code>0.4.0</code>; corrected to <code>0.4.1</code></li>
+    <li><code>_check_referential_integrity</code> would reject URI-form refs — must carve out URI entries explicitly (<strong>L3.1</strong>)</li>
+    <li>Existing <code>FM1</code> only catches <code>ai→ai</code> self-resolution — generalize to any same-type tuple (<strong>L3.2</strong>)</li>
+    <li>FM37 regex syntax bug: <code>\|</code> would not work in Python — superseded by structural detector (<strong>L5.4</strong>)</li>
+    <li><code>FM17</code> vs <code>FM5</code> label confusion in proposed §4.1 — corrected in L4.1–L4.3</li>
+    <li><code>_is_explicit_absence</code> over-matches generic angle-bracketed strings — use explicit allow-list (<strong>L5.2</strong>)</li>
+    <li>Scratchpad off-by-one ("27 events" but 28) — fix (<strong>L5.7</strong>)</li>
+    <li><code>trace_version</code> two-source inconsistency between top-level and environment — drop from Environment (<strong>L1.3</strong>)</li>
+    <li>URI scheme overreach: 4 normative schemes → 1 normative (<code>external:</code>) + 3 non-normative examples (<strong>L7.5</strong>)</li>
+    <li>Brittle English phrase lists: tightened, moved to module constants, advisory only (<strong>L5.5, L7.10</strong>)</li>
+    <li><code>parent_event_id</code> field omitted but PROV mapping referenced it — add (<strong>L2.3</strong>)</li>
+    <li>CLAUDE.md guidance for <code>host="internal"</code> logging missing — schema field was write-only (<strong>L8.5</strong>)</li>
+    <li>Test surface unspecified — 7 concrete tests required pre-merge (<strong>L9.1–L9.7</strong>)</li>
+  </ul>
+
+  <h3 style="margin-top: 1.25rem; color: var(--critical);">Round 3 amendments — 10 more substantive issues</h3>
+  <ul>
+    <li><strong>L3.2 / L5.4 scoping wrong.</strong> Must check <strong>same-instance</strong> equality (full <code>Actor</code>: type AND id), NOT same-type. Plus guard against single-actor sessions. Type-only check false-fires on <code>system→system</code> and multi-AI sessions (real production data exists in <code>~/.trace/sessions/</code>).</li>
+    <li><strong>L3.2 directly contradicts an existing test.</strong> <code>tests/test_decision_guards.py:84-99</code> is <code>test_human_self_resolves_clean</code> with docstring <em>"humans can change their mind"</em>. The test must be rewritten, not just supplemented.</li>
+    <li><strong>L5.7 wrong diagnosis.</strong> <code>scratchpad.py:182-186</code> already auto-derives from <code>len(session.events)</code> (verified by Round 3a). The "27 vs 28" off-by-one is in <code>session.summary</code> — human-authored prose passed to <code>trace_end_session(summary=...)</code>. Recommendation: <strong>remove L5.7</strong> or redirect to a summary-text/count discrepancy detector.</li>
+    <li><strong>L5.6 trigger too sensitive.</strong> Round 3b ran <code>grep</code> on ~20 production sessions — <strong>all returned 0 tool_calls</strong>. Original threshold fires on every session, becoming noise. Revise to <code>≥10 contributions + client="Claude Code"</code> AND render as advisory hint (no warning counter). Guard against <code>environment is None</code>.</li>
+    <li><strong>L5.5 hint not warning.</strong> Rename <code>orphan_discovery_warning_count</code> → <code>orphan_discovery_hint_count</code>; render at lower severity tier. Detector is heuristic; "warning" overweights it.</li>
+    <li><strong>L5.2 .strip() the snippet</strong> before allow-list lookup, so leading whitespace doesn't break absence-marker detection.</li>
+    <li><strong>L6.2 underestimated.</strong> The PROV-O qualified-influence pattern is exporter architecture work (~5h, not 2h). The exporter has no qualified-influence node anywhere today; this requires new bundle sections.</li>
+    <li><strong>L9.0 fixture migration missing.</strong> ~15 fixtures across 6 test files reference fields being changed. Must precede L9.1 (canonical regression). ~3-4h budget not in plan.</li>
+    <li><strong>Layer 11 missing entirely.</strong> 10 adoption-surface items: README, project CLAUDE.md, CONTRIBUTING.md, installer asset (CLAUDE_BLOCK.md), <code>decision-audit.sh</code> hook, ADR creation, PROV namespace policy, schema $id cascade, CHANGELOG migration callouts, optional <code>--upgrade</code> flag for <code>trace-mcp-init</code>.</li>
+    <li><strong>FastMCP wrapper signature.</strong> <code>server.py</code>'s <code>log_tool_call</code> wrapper needs the new <code>host</code> and <code>parent_event_id</code> kwargs added too — implicit in L4.6 but worth calling out.</li>
+  </ul>
+  <p style="margin-top: 0.75rem; font-size: 0.88rem;"><strong>Recommendation:</strong> apply these amendments inline (already done below) and start implementation. Round 4 marginal value is below cost.</p>
+</div>
+
+<details class="layer" open>
+  <summary>Layer 1 — Version &amp; scaffolding <span class="layer-summary">5 items · sets up version invariants</span></summary>
+  <div class="layer-body">
+    <div class="item">
+      <input type="checkbox" id="L1.1">
+      <div class="item-content">
+        <span class="id">L1.1</span><span class="title">Bump version to <code>0.4.1</code></span>
+        <span class="tag tag-issue">scaffolding</span>
+        <div class="desc">Update <code>pyproject.toml:7</code> and <code>src/trace_mcp/__init__.py:3</code>. Current value is <code>0.4.0</code>. All schema changes in this checklist are additive so no major-minor jump is needed.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L1.2">
+      <div class="item-content">
+        <span class="id">L1.2</span><span class="title">Bump <code>Session.trace_version</code> default</span>
+        <span class="tag tag-issue">scaffolding</span>
+        <div class="desc">Update default at <code>src/trace_mcp/schema/session.py:53</code> from <code>"0.3.0"</code> to <code>"0.4.1"</code>. This is the value written into new session files.</div>
+      </div>
+    </div>
+    <div class="item critical">
+      <input type="checkbox" id="L1.3">
+      <div class="item-content">
+        <span class="id">L1.3</span><span class="title">Resolve <code>trace_version</code> two-source inconsistency</span>
+        <span class="tag tag-critical">critical</span><span class="tag tag-new">new</span>
+        <div class="desc">Drop <code>trace_version</code> from the <code>Environment</code> model (<code>session.py:32</code>) and remove the corresponding line in <code>_auto_environment()</code> (<code>session_tools.py:~227-234</code>). Single source of truth is <code>Session.trace_version</code>. The audited waggle session showed <code>0.3.0</code> at top-level and <code>0.4.0</code> in environment — a reader cannot tell which version the session conforms to.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L1.4">
+      <div class="item-content">
+        <span class="id">L1.4</span><span class="title">Add CHANGELOG entry</span>
+        <span class="tag tag-issue">scaffolding</span>
+        <div class="desc">Add <code>0.4.1</code> section to <code>CHANGELOG.md</code> listing every schema/spec/server change. Note: fully backwards-compatible with 0.3.x and 0.4.0.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L1.5">
+      <div class="item-content">
+        <span class="id">L1.5</span><span class="title">Regenerate JSON Schema</span>
+        <span class="tag tag-issue">scaffolding</span>
+        <div class="desc">Run <code>python scripts/generate_schema.py</code>. Rename <code>schemas/trace-v0.3.json</code> → <code>schemas/trace-v0.4.json</code> to track major-minor. Update spec references and tests. Verify the diff against the v0.3 schema is purely additive (new optional fields, expanded enum, no removals or type narrowing).</div>
+      </div>
+    </div>
+  </div>
+</details>
+
+<details class="layer" open>
+  <summary>Layer 2 — Schema additions <span class="layer-summary">3 items · additive, default-preserving</span></summary>
+  <div class="layer-body">
+    <div class="item">
+      <input type="checkbox" id="L2.1">
+      <div class="item-content">
+        <span class="id">L2.1</span><span class="title">Add <code>discovery</code> to <code>AnnotationData.category</code></span>
+        <span class="tag tag-issue">issue 3</span>
+        <div class="desc">In <code>src/trace_mcp/schema/events.py:~71</code> append <code>"discovery"</code> to the literal. Definition: a non-trivial finding from autonomous or unattended work that carries causal load. Distinct from <code>gotcha</code> (surprising but nobody was wrong) and <code>correction</code> (something was wrong).</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L2.2">
+      <div class="item-content">
+        <span class="id">L2.2</span><span class="title">Add <code>host</code> to <code>ToolCallData</code></span>
+        <span class="tag tag-issue">issue 5</span>
+        <div class="desc">In <code>events.py:~25-38</code> add <code>host: Literal["mcp", "internal", "external"] = "mcp"</code>. Place last in the field list (preserves visual diff readability — Set 1 noted that "first field" placement is unnecessary). Default preserves v0.3 / v0.4.0 semantics for existing sessions.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L2.3">
+      <div class="item-content">
+        <span class="id">L2.3</span><span class="title">Add <code>parent_event_id</code> to <code>ToolCallData</code></span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">issue 5</span>
+        <div class="desc">In <code>events.py:~25-38</code> add <code>parent_event_id: str | None = None</code>. Relation field enabling manual dispatch-chain logging on day one. Defers the prose-summary fields (<code>dispatch_kind</code>, <code>prompt_summary</code>, <code>result_summary</code>) to v1.1 when hooks land. PROV-LD mapping (L6.3) depends on this field existing.</div>
+      </div>
+    </div>
+  </div>
+</details>
+
+<details class="layer" open>
+  <summary>Layer 3 — Validator changes <span class="layer-summary">2 items · critical for plan to function</span></summary>
+  <div class="layer-body">
+    <div class="item critical">
+      <input type="checkbox" id="L3.1">
+      <div class="item-content">
+        <span class="id">L3.1</span><span class="title">URI-form carve-out in referential-integrity check</span>
+        <span class="tag tag-critical">critical</span><span class="tag tag-issue">issue 4</span>
+        <div class="desc">In <code>session_tools.py:~358-390</code> (<code>_check_referential_integrity</code>), modify the <code>corrects_event_ids</code> iteration: if an entry matches <code>^[a-z][a-z0-9-]*:</code> (scheme-prefixed URI), skip the event-ID lookup. Otherwise apply existing dangling-reference check. Without this, every URI-form correction would throw <code>ValueError</code> and the §7.5 spec changes are non-functional.</div>
+      </div>
+    </div>
+    <div class="item critical">
+      <input type="checkbox" id="L3.2">
+      <div class="item-content">
+        <span class="id">L3.2</span><span class="title">Generalize FM1 to catch <code>human→human</code> self-resolution</span>
+        <span class="tag tag-critical">critical</span><span class="tag tag-issue">issue 2</span>
+        <div class="desc">In <code>src/trace_mcp/tools/decision_tools.py:~76-82</code>: <strong>scope to same-instance equality (Actor.type AND Actor.id)</strong>, NOT same-type. Fire when <code>proposed_by == resolved_by</code> AND session has ≥2 distinct actor types across <code>metadata.participants ∪ {e.actor for e in events}</code>. Preserve <code>if resolved_by is not None</code> short-circuit. Warning text: <em>"Same actor instance proposed and resolved this decision. Per spec §3.6, in multi-actor workflows the proposer should differ from the resolver."</em> <strong>Round 3 corrections:</strong> (1) type-only check from the proposed plan false-fires on system-only and multi-AI sessions; (2) generalize FM25 (currently <code>ai</code>-only) for consistency; (3) existing <code>tests/test_decision_guards.py:84-99</code> (<code>test_human_self_resolves_clean</code>, docstring "humans can change their mind") must be rewritten — the contract is intentionally inverted to catch same-instance.</div>
+      </div>
+    </div>
+  </div>
+</details>
+
+<details class="layer" open>
+  <summary>Layer 4 — Logging tool changes <span class="layer-summary">8 items · sharpen existing warnings, add 1 new co-occurrence check</span></summary>
+  <div class="layer-body">
+    <div class="item">
+      <input type="checkbox" id="L4.1">
+      <div class="item-content">
+        <span class="id">L4.1</span><span class="title">Sharpen FM5 text — correction without snippet</span>
+        <span class="tag tag-issue">issue 1</span>
+        <div class="desc">In <code>logging_tools.py:~108-113</code> update warning text: <em>"Correction logged without conversation_snippet. Set to the relevant user message (~200 chars), or use '&lt;no recent user message&gt;' if no user message motivated this correction. Silent omission is a v0.4.1 protocol violation per spec §3.4.1."</em></div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L4.2">
+      <div class="item-content">
+        <span class="id">L4.2</span><span class="title">Sharpen FM5 text — contribution without snippet</span>
+        <span class="tag tag-issue">issue 1</span>
+        <div class="desc">In <code>logging_tools.py:~162-167</code> update warning text: <em>"Contribution logged without conversation_snippet. Set to the relevant user message (~200 chars), or use '&lt;autonomous-stretch&gt;' if working autonomously from a prior decision. Silent omission is a v0.4.1 protocol violation per spec §3.4.1."</em></div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L4.3">
+      <div class="item-content">
+        <span class="id">L4.3</span><span class="title">Sharpen FM17 text — correction without anchor</span>
+        <span class="tag tag-issue">issue 4</span>
+        <div class="desc">In <code>logging_tools.py:~101-106</code>: relax the trigger (fire only when BOTH <code>corrects_event_ids</code> empty AND <code>conversation_snippet</code> null). Update text: <em>"Correction logged without corrects_event_ids OR conversation_snippet. Provide (a) an event ID, (b) a URI-form external reference (e.g., 'jsonl:transcript.jsonl#L225', 'external:https://...'), or (c) a conversation_snippet quoting the corrected statement. See spec §3.7.1."</em></div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L4.4">
+      <div class="item-content">
+        <span class="id">L4.4</span><span class="title">Add FM17 co-occurrence warning</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">issue 4</span>
+        <div class="desc">In <code>logging_tools.py</code> add: when <code>category="correction"</code> AND <code>corrects_event_ids</code> is empty AND <code>related_event_ids</code> is non-empty, warn: <em>"Correction has empty corrects_event_ids but non-empty related_event_ids. If related_event_ids contains the corrected item's anchor, move it to corrects_event_ids. related_event_ids is for loose association, not for the correction relationship."</em> This catches the evt_003 workaround anti-pattern.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L4.5">
+      <div class="item-content">
+        <span class="id">L4.5</span><span class="title">Demote FM3 (related_decision_ids) warning</span>
+        <span class="tag tag-issue">issue 1</span>
+        <div class="desc">In <code>logging_tools.py:~170</code> guard the warning: only fire if the session has at least one decision event. Reduces warning fatigue — if no decisions exist, "consider linking to the decision(s)" is noise that trains controllers to ignore the whole warning block.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L4.6">
+      <div class="item-content">
+        <span class="id">L4.6</span><span class="title">Expand <code>log_tool_call</code> signature</span>
+        <span class="tag tag-issue">issue 5</span>
+        <div class="desc">In <code>logging_tools.py:~21-37</code> add <code>host: str = "mcp"</code> and <code>parent_event_id: str | None = None</code> kwargs. Threads through to <code>ToolCallData</code>. Existing call sites unaffected (all use kwargs).</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L4.7">
+      <div class="item-content">
+        <span class="id">L4.7</span><span class="title">Update <code>log_tool_call</code> docstring</span>
+        <span class="tag tag-issue">issue 5</span>
+        <div class="desc">In <code>logging_tools.py:~38</code> replace "Log a tool call made to another MCP server" with: <em>"Log an automated tool or service invocation. Covers MCP tools, external non-MCP tools, and host-internal subagent dispatchers (set <code>host</code> accordingly)."</em></div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L4.8">
+      <div class="item-content">
+        <span class="id">L4.8</span><span class="title">Make FM23 host-aware</span>
+        <span class="tag tag-issue">issue 5</span>
+        <div class="desc">In <code>logging_tools.py:~50-56</code> only fire the exploratory-call warning when <code>host == "mcp"</code> for names <code>read/glob/grep/bash</code>. Drop the proposed-plan's speculative "host-internal exploratory names" clause — no such convention exists. Keep FM22 (TRACE self-call block) unchanged.</div>
+      </div>
+    </div>
+  </div>
+</details>
+
+<details class="layer" open>
+  <summary>Layer 5 — AttributionAudit extension <span class="layer-summary">8 items · the load-bearing visibility change</span></summary>
+  <div class="layer-body">
+    <div class="item">
+      <input type="checkbox" id="L5.1">
+      <div class="item-content">
+        <span class="id">L5.1</span><span class="title">Add count fields to <code>AttributionAudit</code> model</span>
+        <span class="tag tag-issue">issue 1, 2, 3</span>
+        <div class="desc">In <code>session_tools.py:~40-57</code> add five fields, all <code>int = 0</code>: <code>missing_snippet_contribution_count</code>, <code>missing_snippet_correction_count</code>, <code>explicit_absence_snippet_count</code>, <code>orphan_discovery_warning_count</code>, <code>attribution_warning_count</code>. Backward compatible.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L5.2">
+      <div class="item-content">
+        <span class="id">L5.2</span><span class="title">Helper <code>_is_explicit_absence</code> with allow-list</span>
+        <span class="tag tag-issue">issue 1</span>
+        <div class="desc">Add helper that returns True only for an explicit allow-list: <code>{"&lt;autonomous-stretch&gt;", "&lt;no recent user message&gt;"}</code>. Reject generic <code>&lt;...&gt;</code> matching to avoid false positives on real user text like <code>&lt;script&gt;</code>. Expose the allow-list as a module constant.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L5.3">
+      <div class="item-content">
+        <span class="id">L5.3</span><span class="title">Snippet counting loop in <code>_build_attribution_audit</code></span>
+        <span class="tag tag-issue">issue 1</span>
+        <div class="desc">In <code>session_tools.py:~142-200</code> extend the existing event-loop to count contributions and correction-annotations with null <code>conversation_snippet</code>. Count explicit-absence markers separately. Update the audit warnings list.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L5.4">
+      <div class="item-content">
+        <span class="id">L5.4</span><span class="title">Structural attribution-warning detector</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">issue 2</span>
+        <div class="desc">Count decisions where <code>proposed_by.type == resolved_by.type</code>, regardless of which type. Fires on the evt_025 pattern via the structural tuple — no regex, no acceptance-phrase heuristic. The spec §3.6 line 220 attribution rule says proposer ≠ resolver in multi-actor workflows; this is the structural test. Superior to the proposed-plan's FM37 regex approach (Set 3 critique).</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L5.5">
+      <div class="item-content">
+        <span class="id">L5.5</span><span class="title">Orphan-discovery detector (tightened phrase list)</span>
+        <span class="tag tag-issue">issue 3</span>
+        <div class="desc">Module-level constant <code>DISCOVERY_PHRASES = ("discovered", "found a bug", "load-bearing fix", "turned out")</code>. Dropped <code>"all along"</code> and <code>"as it turns out"</code> from the proposed list per Set 1 false-positive risk. For each contribution containing a phrase, verify a <code>discovery</code>/<code>correction</code>/<code>gotcha</code> annotation exists within 30 min before. If not, increment counter and add to <strong>audit hints</strong> (not warnings). <strong>Round 3 correction:</strong> rename the count field to <code>orphan_discovery_hint_count</code> (not <code>_warning_count</code>) and render in a lower-severity tier. The detector is heuristic; calling its output "warnings" overweights the signal.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L5.6">
+      <div class="item-content">
+        <span class="id">L5.6</span><span class="title">Subagent-dispatch visibility detector</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">issue 5</span>
+        <div class="desc"><strong>Round 3 correction — original threshold too sensitive.</strong> Round 3b ran <code>grep -c '"type": "tool_call"'</code> on ~20 production sessions in <code>~/.trace/sessions/</code> — <strong>all returned 0</strong>. The proposed trigger (<code>≥5 contributions AND 0 tool_calls</code>) fires on every contribution-rich session, becoming permanent noise. <strong>Revised:</strong> raise threshold to <code>≥10 contributions AND 0 tool_calls AND client=="Claude Code"</code>. Render as an <strong>advisory hint</strong> (separate from warning counters): <em>"This session logged N contributions and 0 tool_call events. Subagent dispatches may have gone uncaptured; see spec §3.5 and CLAUDE.md USUALLY tier for guidance on manual dispatch logging."</em> Do NOT increment any warning counter — purely informational until hooks land in v1.1. Field data can decide whether to upgrade. Also guard against <code>session.metadata.environment is None</code> for legacy sessions.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L5.7">
+      <div class="item-content">
+        <span class="id">L5.7</span><span class="title">Auto-derived event count in scratchpad</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">audit gap</span>
+        <div class="desc"><strong>Round 3 correction — wrong diagnosis.</strong> Round 3a verified that <code>scratchpad.py:182-186</code> ALREADY auto-derives the count from <code>len(session.events)</code>. The audited "27 vs 28" off-by-one is in <code>session.summary</code> — human/AI-authored free text passed to <code>trace_end_session(summary=...)</code>. The plan's L5.7 fixes the wrong file. <strong>Revised L5.7 (two options):</strong> (a) detect summary-text/count discrepancy via regex in <code>_build_attribution_audit</code> (e.g., <code>r"(\d+)\s+(?:TRACE\s+)?events?\s+logged"</code> against <code>session.summary</code>); soft-warn when captured number mismatches structural count. (b) <strong>Remove L5.7 entirely</strong> — accept human-authored summary text is freeform prose; not TRACE's job to police. <strong>Recommended: remove.</strong> The cost of an off-by-one in human prose is small; the cost of a false-positive on every numeric mention in a summary is larger.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L5.8">
+      <div class="item-content">
+        <span class="id">L5.8</span><span class="title">Severity-ordered audit rendering</span>
+        <span class="tag tag-issue">issue 1, 2, 3</span>
+        <div class="desc">In <code>AttributionAudit.render</code> (<code>session_tools.py:~59-126</code>) surface the new counts in declared severity order: unresolved decisions &gt; unlinked corrections &gt; attribution-warning &gt; orphan-discovery &gt; dispatch-visibility &gt; missing-snippet. Always-first surface ensures the most-important issue isn't missed.</div>
+      </div>
+    </div>
+  </div>
+</details>
+
+<details class="layer" open>
+  <summary>Layer 6 — PROV-LD mapping <span class="layer-summary">3 items · split correction semantics</span></summary>
+  <div class="layer-body">
+    <div class="item">
+      <input type="checkbox" id="L6.1">
+      <div class="item-content">
+        <span class="id">L6.1</span><span class="title">Split correction PROV mapping</span>
+        <span class="tag tag-issue">issue 4</span>
+        <div class="desc">In <code>src/trace_mcp/schema/prov_mapping.py:~7-16</code> split correction into two entries. Event-ID target → <code>prov:wasInvalidatedBy</code> (corrected event is invalidated). URI target → <code>prov:wasInfluencedBy</code> (with qualified-influence node — see L6.2). Drop the conflated <code>prov:wasRevisionOf</code> for corrections (it remains correct for the revision relationship between decisions).</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L6.2">
+      <div class="item-content">
+        <span class="id">L6.2</span><span class="title">Correct PROV-O exporter dispatch (qualified influence)</span>
+        <span class="tag tag-issue">issue 4</span>
+        <div class="desc">In <code>src/trace_mcp/exporters/prov_jsonld.py:~150-155</code> dispatch on entry shape. Event-ID → <code>wasInvalidatedBy</code> triple. URI → <code>wasInfluencedBy</code> with a <code>prov:Influence</code> qualified-influence blank node bearing <code>prov:atLocation</code>. The proposed plan's shorthand "<code>wasInfluencedBy + atLocation</code>" was technically imprecise per Set 1; the qualified form validates against strict PROV-O consumers.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L6.3">
+      <div class="item-content">
+        <span class="id">L6.3</span><span class="title">Add <code>parent_event_id</code> → <code>prov:wasInformedBy</code></span>
+        <span class="tag tag-issue">issue 5</span>
+        <div class="desc">In <code>prov_mapping.py:~16</code> add the dispatch parent relation. In the exporter, emit a <code>wasInformedBy</code> edge from the dispatch activity to the parent activity. Depends on L2.3 (the field) existing.</div>
+      </div>
+    </div>
+  </div>
+</details>
+
+<details class="layer" open>
+  <summary>Layer 7 — Spec edits (<code>docs/specification.md</code>) <span class="layer-summary">12 items · text only, no code</span></summary>
+  <div class="layer-body">
+    <div class="item">
+      <input type="checkbox" id="L7.1">
+      <div class="item-content">
+        <span class="id">L7.1</span><span class="title">§3.4.1 — normative MUST on snippets + absence markers</span>
+        <span class="tag tag-issue">issue 1</span>
+        <div class="desc">Replace soft "particularly important" prose (line ~164) with normative MUST on <code>contribution</code> and <code>correction</code>-category <code>annotation</code> snippets. Define absence-marker convention (<code>&lt;autonomous-stretch&gt;</code>, <code>&lt;no recent user message&gt;</code>). Add reuse guidance: when one user message motivates multiple contributions, reuse the same snippet — honesty does not require uniqueness.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L7.2">
+      <div class="item-content">
+        <span class="id">L7.2</span><span class="title">§3.5 — generalize tool_call</span>
+        <span class="tag tag-issue">issue 5</span>
+        <div class="desc">Generalize at line 168: covers external MCP, external non-MCP (HTTP, CLI), and host-internal tools (subagent dispatchers). Document <code>host</code> field and <code>parent_event_id</code> for dispatch chains. The schema is already technology-neutral; this aligns text with reality.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L7.3">
+      <div class="item-content">
+        <span class="id">L7.3</span><span class="title">§3.6 — Proposer Identity Rule</span>
+        <span class="tag tag-issue">issue 2</span>
+        <div class="desc">Add new normative paragraph after the Attribution rule (line 220): <em>"<code>proposed_by</code> MUST identify the actor who authored the content of the proposal — the words populating <code>description</code> — not the actor who spoke the directive to act."</em> Include 4-row disambiguation table for canonical patterns (proactive / requested / direct-directive / collaborative).</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L7.4">
+      <div class="item-content">
+        <span class="id">L7.4</span><span class="title">§3.7 — add <code>discovery</code> annotation category</span>
+        <span class="tag tag-issue">issue 3</span>
+        <div class="desc">Add row to the annotation categories table (line ~238) with criteria distinguishing <code>discovery</code> from <code>gotcha</code> (surprising but nobody was wrong) and <code>correction</code> (something prior was wrong). Note: SHOULD be logged at the moment of discovery, not in a post-hoc summary.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L7.5">
+      <div class="item-content">
+        <span class="id">L7.5</span><span class="title">§3.7.1 (NEW) — External References in corrects_event_ids</span>
+        <span class="tag tag-issue">issue 4</span>
+        <div class="desc">Normative: each <code>corrects_event_ids</code> entry MUST be either an event ID or a URI-form reference distinguishable by <code>&lt;scheme&gt;:</code> prefix. Universal fallback: <code>external:&lt;uri&gt;</code>. Non-normative examples: <code>jsonl:&lt;path&gt;#L&lt;line&gt;</code>, <code>subagent:&lt;id&gt;</code>, <code>tool-result:&lt;id&gt;</code>. Forbid fabricating events purely to give corrections a target. <em>Trimmed from 4 normative schemes to 1 normative + 3 non-normative examples per Set 3.</em></div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L7.6">
+      <div class="item-content">
+        <span class="id">L7.6</span><span class="title">§4.4 — split reference validity rules</span>
+        <span class="tag tag-issue">issue 4</span>
+        <div class="desc">At line ~322, split: <code>retries_event_id</code>, <code>revises_event_id</code>, <code>related_event_ids</code>, <code>related_decision_ids</code> SHOULD reference valid event IDs within the same session. <code>corrects_event_ids</code> entries SHOULD reference valid event IDs OR MAY use URI-form per §3.7.1.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L7.7">
+      <div class="item-content">
+        <span class="id">L7.7</span><span class="title">§5.2 — rewrite Correction Provenance</span>
+        <span class="tag tag-issue">issue 4</span>
+        <div class="desc">At line ~349 rewrite to handle three anchor cases: (a) in-session event ID, (b) URI-form external reference, (c) <code>conversation_snippet</code> only (acceptable only when both other anchors unavailable).</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L7.8">
+      <div class="item-content">
+        <span class="id">L7.8</span><span class="title">§6 — PROV-LD mapping table updates</span>
+        <span class="tag tag-issue">issue 4, 5</span>
+        <div class="desc">At line ~375 split correction mapping into two rows: event-ID target → <code>prov:wasInvalidatedBy</code>; URI target → <code>prov:wasInfluencedBy</code> (qualified-influence pattern with <code>prov:atLocation</code> on the qualified node). Add <code>parent_event_id</code> → <code>prov:wasInformedBy</code> row.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L7.9">
+      <div class="item-content">
+        <span class="id">L7.9</span><span class="title">§8.1 — real-time logging + autonomous-window guidance</span>
+        <span class="tag tag-issue">issue 3</span>
+        <div class="desc">At line ~466 add: discoveries / corrections / gotchas SHOULD be logged at the moment of the underlying event, not folded into a later contribution's description. Add: hosts SHOULD detect long autonomous-execution windows and nudge controllers to log. <em>Drop the specific numeric thresholds (15 min / 15 invocations) per Set 3 — defer to non-normative implementer guidance.</em></div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L7.10">
+      <div class="item-content">
+        <span class="id">L7.10</span><span class="title">§8.2 — recognition table additions</span>
+        <span class="tag tag-issue">issue 2, 3</span>
+        <div class="desc">At line ~477 add two rows: (a) "what should we do about X?" → AI replies with plan → "proceed" → Decision proposed by AI with <code>suggestion_type=requested</code>; (b) discovery-language patterns → Annotation (category: <code>discovery</code>), log immediately. <em>Patterns described normatively, examples advisory only (not exhaustive list).</em></div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L7.11">
+      <div class="item-content">
+        <span class="id">L7.11</span><span class="title">Appendix A — worked example for question→AI-proposal→accept</span>
+        <span class="tag tag-issue">issue 2</span>
+        <div class="desc">Add a worked example using the <strong>next sequential event ID</strong> (e.g., <code>evt_006</code> — Set 1 corrected the proposed-plan's <code>evt_002a</code> which violates spec's sequential-ID convention at line 151). Demonstrate <code>proposed_by={type:ai, id:"claude-opus-4.7"}</code>, <code>suggestion_type="requested"</code>, <code>disposition="accepted"</code>, <code>resolved_by={type:human}</code>, with a <code>conversation_snippet</code> quoting the three-turn exchange.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L7.12">
+      <div class="item-content">
+        <span class="id">L7.12</span><span class="title">Appendix B — Version History entry</span>
+        <span class="tag tag-issue">scaffolding</span>
+        <div class="desc">Bump <code>trace_version</code> to <code>0.4.1</code>. List additive changes by section. Note: fully backwards compatible with 0.3.x and 0.4.0; consumers per §1.3 already tolerate unknown fields and unrecognized enum values.</div>
+      </div>
+    </div>
+  </div>
+</details>
+
+<details class="layer" open>
+  <summary>Layer 8 — Configuration &amp; documentation <span class="layer-summary">7 items · CLAUDE.md updates</span></summary>
+  <div class="layer-body">
+    <div class="item">
+      <input type="checkbox" id="L8.1">
+      <div class="item-content">
+        <span class="id">L8.1</span><span class="title">Global CLAUDE.md — Decision row (line ~52)</span>
+        <span class="tag tag-issue">issue 2</span>
+        <div class="desc">Reference Proposer Identity Rule. Add heuristic: <em>"before logging, ask whose words <code>description</code> paraphrases — that actor is the proposer."</em></div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L8.2">
+      <div class="item-content">
+        <span class="id">L8.2</span><span class="title">Global CLAUDE.md — Correction row (line ~53)</span>
+        <span class="tag tag-issue">issue 4</span>
+        <div class="desc">Add: <em>"If the corrected entity is not a TRACE event (subagent output, tool result, external claim), use a URI-form reference per spec §3.7.1 (<code>jsonl:</code>, <code>external:</code>, etc.). <code>related_event_ids</code> is for loose association, not for the correction relationship."</em></div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L8.3">
+      <div class="item-content">
+        <span class="id">L8.3</span><span class="title">Global CLAUDE.md — discovery category (line ~58)</span>
+        <span class="tag tag-issue">issue 3</span>
+        <div class="desc">Add <code>discovery</code> to the annotation category guidance in the SOMETIMES tier with: <em>"log AT THE MOMENT, not in post-hoc summary."</em></div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L8.4">
+      <div class="item-content">
+        <span class="id">L8.4</span><span class="title">Global CLAUDE.md — snippet absence markers (line ~91)</span>
+        <span class="tag tag-issue">issue 1</span>
+        <div class="desc">Update: <em>"Always set <code>conversation_snippet</code> on contributions and corrections. If no user message motivated the event (autonomous stretch), use <code>&lt;autonomous-stretch&gt;</code>. When one user message motivates multiple contributions, reuse the same snippet — honesty does not require uniqueness. Silent omission is a protocol violation; explicit absence is honest."</em></div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L8.5">
+      <div class="item-content">
+        <span class="id">L8.5</span><span class="title">Global CLAUDE.md — subagent dispatch logging</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">issue 5</span>
+        <div class="desc">Add to the USUALLY tier: <em>"Subagent dispatches when their outcome is summarized by a contribution. Set <code>host='internal'</code>, <code>server='claude-code'</code>. Use <code>parent_event_id</code> to link the dispatch to the controller event."</em> Without this, the <code>host</code> schema field is write-only — Set 2 critique.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L8.6">
+      <div class="item-content">
+        <span class="id">L8.6</span><span class="title">Codex adapter spec update</span>
+        <span class="tag tag-issue">issue 5</span>
+        <div class="desc">In <code>src/trace_mcp/adapters/codex/README.md</code> reference the new <code>host="internal"</code> shape and <code>parent_event_id</code> so a future Codex implementor doesn't reinvent. Keep the adapter as placeholder.</div>
+      </div>
+    </div>
+    <div class="item">
+      <input type="checkbox" id="L8.7">
+      <div class="item-content">
+        <span class="id">L8.7</span><span class="title">Project CLAUDE.md — no changes</span>
+        <span class="tag tag-issue">scaffolding</span>
+        <div class="desc">Project <code>CLAUDE.md</code> defers to global protocol — no edits needed. Confirm by inspection.</div>
+      </div>
+    </div>
+  </div>
+</details>
+
+<details class="layer" open>
+  <summary>Layer 9 — Test coverage <span class="layer-summary">8 items · required pre-merge</span></summary>
+  <div class="layer-body">
+    <div class="item critical">
+      <input type="checkbox" id="L9.0">
+      <div class="item-content">
+        <span class="id">L9.0</span><span class="title">Fixture migration audit (must precede other tests)</span>
+        <span class="tag tag-critical">critical</span><span class="tag tag-new">new</span>
+        <div class="desc">Before applying schema/validator changes that break existing tests, sweep <code>tests/</code> for: (a) <code>trace_version="0.3.0"</code> kwarg passed to <code>Environment(...)</code> constructor — delete the kwarg per L1.3 (~7 fixtures in <code>test_schema.py</code>, <code>test_specification_conformance.py</code>, <code>test_hardening_e2e.py</code>, <code>test_exporters.py</code>); (b) <code>Session.trace_version == "0.3.0"</code> assertions — bump per L1.2; (c) <code>"trace-v0.3.json"</code> path strings — update per L1.5; (d) <code>"wasRevisionOf"</code> assertions in PROV tests — split per L6.1; (e) warning-text assertions in <code>test_failure_modes_e2e.py</code>; (f) <code>test_human_self_resolves_clean</code> in <code>test_decision_guards.py:84-99</code> — rewrite to assert same-instance fires per L3.2 Round 3 correction. Effort: ~3-4h. <strong>Must complete BEFORE L9.1</strong> so the existing test suite still passes between the scaffolding edits and the new regression tests.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L9.1">
+      <div class="item-content">
+        <span class="id">L9.1</span><span class="title">Waggle-session regression test</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">canonical</span>
+        <div class="desc">Load <code>audit_2026-05-13_waggle_session/trace_session_trace_20260513_446733.json</code> under v0.4.1 schema. Assert: (a) schema validates with no errors; (b) <code>AttributionAudit</code> shows <code>missing_snippet_contribution_count=15</code>, <code>missing_snippet_correction_count=1</code>, <code>attribution_warning_count≥2</code> (evt_001 + evt_025), <code>orphan_discovery_warning_count≥1</code> (evt_027 plausibility_score reference). This is the canonical scenario — if v0.4.1 ships without these warnings firing on the original audit subject, the fix is invalid by construction.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L9.2">
+      <div class="item-content">
+        <span class="id">L9.2</span><span class="title">Unit tests for <code>_is_explicit_absence</code></span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">issue 1</span>
+        <div class="desc">Boundary cases: <code>""</code>, <code>"&lt;&gt;"</code>, <code>"&lt;autonomous-stretch&gt;"</code> (true), <code>"&lt;some other angle thing&gt;"</code> (false — not in allow-list), <code>"&lt;script&gt;alert(1)&lt;/script&gt;"</code> (false). Verifies allow-list semantics prevent over-match.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L9.3">
+      <div class="item-content">
+        <span class="id">L9.3</span><span class="title">Unit test for URI-form referential-integrity carve-out</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">issue 4</span>
+        <div class="desc">Verify URI-form <code>corrects_event_ids</code> entries (<code>jsonl:...</code>, <code>external:...</code>) do NOT trigger <code>ValueError</code>. Verify malformed-prefix entries (no <code>:</code>) still throw if not a valid event ID. Prevents the §7.5 spec changes from being non-functional.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L9.4">
+      <div class="item-content">
+        <span class="id">L9.4</span><span class="title">Unit test for FM1 generalization</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">issue 2</span>
+        <div class="desc">Assert: <code>human→human</code> self-resolution emits the warning. <code>ai→ai</code> self-resolution still emits (existing behavior). <code>ai→human</code> and <code>human→ai</code> do not emit.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L9.5">
+      <div class="item-content">
+        <span class="id">L9.5</span><span class="title">Backwards-compat round-trip test</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">backwards-compat</span>
+        <div class="desc">Verify: (a) the existing v0.3.0 sample session in <code>specification.md</code> Appendix A still validates under v0.4.1 schema; (b) any existing v0.4.0 session files in <code>~/.trace/sessions/</code> still load through Pydantic without error.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L9.6">
+      <div class="item-content">
+        <span class="id">L9.6</span><span class="title">PROV-LD export test for split correction</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">issue 4</span>
+        <div class="desc">Build a synthetic session with both event-ID and URI-form <code>corrects_event_ids</code>. Export to PROV-LD. Assert: event-ID entries produce <code>wasInvalidatedBy</code> triples; URI entries produce <code>wasInfluencedBy</code> with a qualified <code>prov:Influence</code> node bearing <code>prov:atLocation</code>.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L9.7">
+      <div class="item-content">
+        <span class="id">L9.7</span><span class="title">AttributionAudit render-order test</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">issue 1, 2, 3</span>
+        <div class="desc">Build a session that triggers ALL five new counts non-zero. Assert audit lines appear in declared severity order: unresolved decisions &gt; unlinked corrections &gt; attribution-warning &gt; orphan-discovery &gt; dispatch-visibility &gt; missing-snippet. Locks down user-facing rendering against future regression.</div>
+      </div>
+    </div>
+  </div>
+</details>
+
+<details class="layer" open>
+  <summary>Layer 11 — Adoption surface <span class="layer-summary">10 items · external-facing artifacts (Round 3 addition)</span></summary>
+  <div class="layer-body">
+    <p style="color: var(--muted); margin: 0.5rem 0 1rem 0;">The original plan covered package internals but not externally-facing artifacts. Without these, v0.4.1 ships with three quietly-out-of-date surfaces (README says 0.4.0, installer assets reference 0.3.0, decision-audit hook under-reports). All items below were surfaced by Round 3c.</p>
+    <div class="item new">
+      <input type="checkbox" id="L11.1">
+      <div class="item-content">
+        <span class="id">L11.1</span><span class="title">Update README version + schema URL</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">adoption</span>
+        <div class="desc">Update <code>README.md:23</code> (<code>**Version:** 0.4.0</code> → <code>0.4.1</code>), <code>:25</code> (schema URL/filename), <code>:252</code> (schema link in file-tree).</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L11.2">
+      <div class="item-content">
+        <span class="id">L11.2</span><span class="title">Update project-root CLAUDE.md version line</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">adoption</span>
+        <div class="desc">Update <code>CLAUDE.md:5</code> (repo-root, checked-in — distinct from the user's <code>~/.claude/CLAUDE.md</code> already covered in Layer 8). Currently says <code>**Version**: 0.3.0</code>; bump to <code>0.4.1</code>.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L11.3">
+      <div class="item-content">
+        <span class="id">L11.3</span><span class="title">Update CONTRIBUTING.md</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">adoption</span>
+        <div class="desc">Update <code>CONTRIBUTING.md:69</code> schema regeneration filename reference per L1.5. Optionally add a row to the test surface table (lines 23-39) reflecting the new Layer 9 tests.</div>
+      </div>
+    </div>
+    <div class="item critical">
+      <input type="checkbox" id="L11.4">
+      <div class="item-content">
+        <span class="id">L11.4</span><span class="title">Update CLAUDE_BLOCK.md installer asset</span>
+        <span class="tag tag-critical">critical</span><span class="tag tag-new">new</span>
+        <div class="desc">Update <code>src/trace_mcp/adapters/claude_code/assets/CLAUDE_BLOCK.md:18-24</code> to mirror L7.1 (snippet MUST + absence markers), L7.3 (Proposer Identity Rule), L7.5 (URI-form <code>corrects_event_ids</code>). This is the block <code>trace-mcp-init</code> appends to consumer projects' CLAUDE.md — if not updated, every new TRACE adopter gets stale v0.3-era guidance.</div>
+      </div>
+    </div>
+    <div class="item critical">
+      <input type="checkbox" id="L11.5">
+      <div class="item-content">
+        <span class="id">L11.5</span><span class="title">Update decision-audit.sh hook script</span>
+        <span class="tag tag-critical">critical</span><span class="tag tag-new">new</span>
+        <div class="desc"><code>src/trace_mcp/adapters/claude_code/assets/hooks/decision-audit.sh:14-40</code> hard-codes the narrow <code>proposed_by.type == resolved_by.type == 'ai'</code> check. After L3.2 generalizes server-side, this hook will under-report. Either inline the new same-instance check or refactor to shell out to the session's persisted audit block. The 11 consumer projects with this hook installed will keep running the old check until they re-run <code>trace-mcp-init</code>. Add a hook integration test in L9.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L11.6">
+      <div class="item-content">
+        <span class="id">L11.6</span><span class="title">Create ADR 002 for v0.4.1 decisions</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">adoption</span>
+        <div class="desc">Write <code>docs/adr/002-v041-protocol-additions.md</code> documenting design rationale for: Proposer Identity Rule, URI-form <code>corrects_event_ids</code>, single-source-of-truth <code>trace_version</code>, PROV-LD correction predicate split, deferred items. Without an ADR, the v0.4.1 design rationale lives only in the audit folder and CHANGELOG — weak homes for "why this and not that." Follow pattern in <code>docs/adr/001-trace-auto-start.md</code>.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L11.7">
+      <div class="item-content">
+        <span class="id">L11.7</span><span class="title">Decide PROV namespace URI policy</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">adoption</span>
+        <div class="desc">Either keep <code>https://trace-protocol.org/ns/v0.3#</code> (additive extensions are valid within the same namespace — recommended) or bump to <code>ns/v0.4#</code>. Update <code>prov_mapping.py:24</code>, spec §6, README consistently. Document the decision in ADR 002 (L11.6). PROV namespaces are commonly treated as stable identifiers across additive extensions — recommendation is keep at v0.3.</div>
+      </div>
+    </div>
+    <div class="item critical">
+      <input type="checkbox" id="L11.8">
+      <div class="item-content">
+        <span class="id">L11.8</span><span class="title">Schema $id and URL cascade</span>
+        <span class="tag tag-critical">critical</span><span class="tag tag-new">new</span>
+        <div class="desc">Update ALL references the FINAL plan's L1.5 missed: <code>scripts/generate_schema.py:19</code> (<code>schema["$id"]</code> literal), <code>:23-24,27</code> (URL/description embeddings), <code>scripts/validate_session.py:20</code> (hard-coded filename), <code>schemas/trace-v0.3.json:760</code> ($id inside the schema), <code>src/trace_mcp/schema/session.py:52</code> (default <code>context</code> URL — already references v0.3, decide per L11.7). Without this cascade, the renamed schema file is unreachable via its declared $id.</div>
+      </div>
+    </div>
+    <div class="item critical">
+      <input type="checkbox" id="L11.9">
+      <div class="item-content">
+        <span class="id">L11.9</span><span class="title">CHANGELOG migration callouts</span>
+        <span class="tag tag-critical">critical</span><span class="tag tag-new">new</span>
+        <div class="desc">Add explicit migration sections in the v0.4.1 CHANGELOG entry: (a) <strong>Breaking for PROV consumers:</strong> corrections now emit <code>wasInvalidatedBy</code> (event target) or qualified <code>wasInfluencedBy</code> (URI target) instead of <code>wasRevisionOf</code>. SPARQL/jq queries must be updated. (b) <strong>Hook re-install:</strong> consumer projects with TRACE hooks installed (~11 projects) should re-run <code>trace-mcp-init</code> — the server-side FM1 generalization is otherwise invisible to consumers running the v0.4.0 hook. (c) <strong>Pinned-version Pydantic consumers</strong> parsing v0.4.1-written sessions through older schemas should set <code>model_config = ConfigDict(extra="ignore")</code>.</div>
+      </div>
+    </div>
+    <div class="item new">
+      <input type="checkbox" id="L11.10">
+      <div class="item-content">
+        <span class="id">L11.10</span><span class="title">(Optional, can defer) <code>--upgrade</code> flag for trace-mcp-init</span>
+        <span class="tag tag-new">new</span><span class="tag tag-issue">adoption</span>
+        <div class="desc">Add <code>--upgrade</code> flag to <code>src/trace_mcp/adapters/claude_code/init_project.py</code> that re-installs hook scripts idempotently and stamps a version header into each hook so future plans can detect outdated copies. Without this, the 11 consumer projects need their owners to manually re-run <code>trace-mcp-init</code> (and remember to do so). Defer to v1.1 if scope-constrained.</div>
+      </div>
+    </div>
+  </div>
+</details>
+
+<details class="layer">
+  <summary>Items explicitly NOT in v0.4.1 (deferred or rejected) <span class="layer-summary">13 items · for the record</span></summary>
+  <div class="layer-body">
+    <p style="color: var(--muted); margin-top: 0.5rem;">These were considered and excluded. Each has a rationale; do not re-add without one of those rationales being addressed.</p>
+    <ul style="margin: 0; padding-left: 1.5rem; color: var(--ink); font-size: 0.92rem; line-height: 1.7;">
+      <li><strong>Deferred to v1.1:</strong> <code>idle-gap-nudge.sh</code> hook (host-specific; protocol-level recommendation in §8.1).</li>
+      <li><strong>Deferred to v1.1:</strong> <code>dispatch-start.sh</code> / <code>dispatch-end.sh</code> hooks (host-specific; manual logging supported via L4.6).</li>
+      <li><strong>Deferred to v1.1:</strong> <code>dispatch_kind</code>, <code>prompt_summary</code>, <code>result_summary</code> fields on <code>ToolCallData</code> (premature without hooks to auto-populate).</li>
+      <li><strong>Deferred to v1.1:</strong> Markdown export rendering for dispatches (depends on dispatch logging being in use).</li>
+      <li><strong>Deferred to v1.1:</strong> <code>trace_project_summary</code> separating MCP vs internal dispatch counts (depends on dispatch logging).</li>
+      <li><strong>Deferred to v1.1:</strong> <code>scripts/audit_coverage.py</code> retroactive utility (nice-to-have; not protocol-blocking).</li>
+      <li><strong>Rejected:</strong> <code>trace_log_discovery</code> convenience wrapper (use <code>trace_log_annotation(category="discovery")</code>; tool surface area should be earned by distinct semantics).</li>
+      <li><strong>Rejected:</strong> New <code>subagent_dispatch</code> event type (bloats every consumer; an Agent dispatch is a tool call by every operational measure).</li>
+      <li><strong>Rejected:</strong> New <code>subagent_claim</code> event type (wrong layer; a subagent claim is an utterance, not a provenance event).</li>
+      <li><strong>Rejected:</strong> Auto-extraction of <code>conversation_snippet</code> from a buffer (TRACE is stateless; risks misattribution; violates "Never fabricate").</li>
+      <li><strong>Rejected:</strong> Hard-required <code>conversation_snippet</code> schema field (pushes controllers to fabricate; sparse honest &gt; dense fabricated).</li>
+      <li><strong>Rejected:</strong> Retroactive event injection for existing sessions (fabricates provenance).</li>
+      <li><strong>Rejected:</strong> Schema version bump to <code>0.5.0</code> (all changes additive; reserve 0.5 for actually-breaking changes like the eventual <code>mcp_servers</code> → <code>tools</code> rename).</li>
+    </ul>
+  </div>
+</details>
+
+<footer>
+  TRACE v0.4.1 release checklist · 65 actionable items + 13 explicit exclusions · synthesized 2026-05-14 after 3 rounds of independent verification (Round 1: original 5-issue audit; Round 2: proposed-plan verification, 13 corrections; Round 3: FINAL-plan verification, 10 amendments). State persists in browser localStorage under <code>trace-v041-progress</code>.
+</footer>
+
+</main>
+</body>
+</html>
