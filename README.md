@@ -20,7 +20,7 @@ TRACE is an MCP server that provides a standardized audit trail for AI-assisted 
 
 TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy or intercept calls — the AI client explicitly logs events to TRACE, creating a complete, human-readable provenance record.
 
-**Version:** 0.4.0 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
+**Version:** 0.4.1 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
 
 > The schema URI is an identifier (per W3C PROV convention) and is not currently a resolvable URL. The machine-readable JSON Schema lives at [`schemas/trace-v0.3.json`](schemas/trace-v0.3.json) in this repository.
 

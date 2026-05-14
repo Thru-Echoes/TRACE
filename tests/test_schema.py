@@ -310,7 +310,6 @@ class TestRoundTrip:
                     mcp_servers=["corpus-search"],
                     client="claude-code",
                     os="Darwin",
-                    trace_version="0.4.1",
                 ),
                 tags=["test"],
             ),
