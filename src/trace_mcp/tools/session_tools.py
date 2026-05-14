@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import platform
+import re
 import sys
 import uuid
 from datetime import UTC, datetime
@@ -10,7 +11,6 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-import trace_mcp
 from trace_mcp.schema import Actor, Environment, Session, SessionMetadata, TraceEvent
 from trace_mcp.storage.base import TraceStorage
 
@@ -37,6 +37,46 @@ class DecisionSummary(BaseModel):
     description_preview: str
 
 
+# v0.4.1: explicit absence markers for conversation_snippet per spec §3.4.1.
+# Documented allow-list; producers MAY define additional markers using the
+# `<...>` convention but these are the canonical ones surfaced in the audit.
+_EXPLICIT_ABSENCE_MARKERS = frozenset({
+    "<autonomous-stretch>",
+    "<no recent user message>",
+})
+
+
+def _is_explicit_absence(s: str | None) -> bool:
+    """True if s is an explicit absence marker per spec §3.4.1.
+
+    Used by the AttributionAudit to distinguish:
+      (a) null / missing snippet (controller forgot — a violation)
+      (b) explicit absence marker (honest "no user message" — acceptable)
+      (c) real user-message snippet (the normal case)
+
+    Allow-list semantics prevent false-positives on real user text that
+    happens to be angle-bracketed (e.g., `<script>` for code review).
+    Whitespace-tolerant via .strip() so leading/trailing whitespace in
+    the marker doesn't cause silent misclassification.
+    """
+    if s is None:
+        return False
+    return s.strip() in _EXPLICIT_ABSENCE_MARKERS
+
+
+# v0.4.1: phrase list for orphan-discovery hint detector (spec §3.7 + §8.1).
+# Tightened per Round 3 amendments: dropped "all along" and "as it turns
+# out" (high false-positive rate in routine prose). The remaining phrases
+# are technical-discovery markers that strongly suggest a load-bearing
+# finding that should have been its own discovery/correction/gotcha event.
+_DISCOVERY_PHRASES = (
+    "discovered",
+    "found a bug",
+    "load-bearing fix",
+    "turned out",
+)
+
+
 class AttributionAudit(BaseModel):
     """Structured attribution audit returned at session end."""
 
@@ -48,13 +88,23 @@ class AttributionAudit(BaseModel):
     rejection_count: int = 0
     intervention_count: int = 0
 
-    # Guard rail audit fields
+    # Guard rail audit fields (v0.3.x)
     unresolved_decision_count: int = 0
     unresolved_decision_ids: list[str] = Field(default_factory=list)
-    self_resolution_count: int = 0
+    self_resolution_count: int = 0  # ai-only (backward compat)
     self_resolution_ids: list[str] = Field(default_factory=list)
     unlinked_correction_count: int = 0
     warnings: list[str] = Field(default_factory=list)
+
+    # v0.4.1: extended audit fields surfacing the silent-warning failures
+    # from the waggle audit. Default 0 keeps the model backward-compatible.
+    missing_snippet_contribution_count: int = 0
+    missing_snippet_correction_count: int = 0
+    explicit_absence_snippet_count: int = 0
+    orphan_discovery_hint_count: int = 0
+    attribution_warning_count: int = 0  # same-instance self-resolution (any type)
+    attribution_warning_ids: list[str] = Field(default_factory=list)
+    orphan_discovery_event_ids: list[str] = Field(default_factory=list)
 
     def render(self) -> str:
         """Render the audit as a human-readable string."""
@@ -105,10 +155,51 @@ class AttributionAudit(BaseModel):
                 f"AI self-resolutions: {self.self_resolution_count} ({ids})"
             )
 
+        # v0.4.1: generalized same-instance self-resolution count (any actor
+        # type, per spec §3.6 Proposer Identity Rule). May overlap with
+        # self_resolution_count for ai→ai events — kept separate so v0.3
+        # consumers reading self_resolution_count don't see a behavior change.
+        if self.attribution_warning_count:
+            ids = ", ".join(self.attribution_warning_ids)
+            lines.append(
+                f"Attribution warnings (v0.4.1 same-instance self-resolution): "
+                f"{self.attribution_warning_count} ({ids}) — per spec §3.6"
+            )
+
         if self.unlinked_correction_count:
             lines.append(
                 f"Unlinked corrections: {self.unlinked_correction_count} "
                 "(missing corrects_event_ids)"
+            )
+
+        if self.orphan_discovery_hint_count:
+            ids = ", ".join(self.orphan_discovery_event_ids)
+            lines.append(
+                f"Orphan-discovery hints (v0.4.1): {self.orphan_discovery_hint_count} "
+                f"contribution(s) describing discoveries with no near-in-time "
+                f"discovery/correction/gotcha annotation ({ids}) — "
+                "consider logging at the moment of discovery per spec §8.1"
+            )
+
+        if (
+            self.missing_snippet_contribution_count
+            or self.missing_snippet_correction_count
+        ):
+            parts2: list[str] = []
+            if self.missing_snippet_contribution_count:
+                parts2.append(f"{self.missing_snippet_contribution_count} contribution(s)")
+            if self.missing_snippet_correction_count:
+                parts2.append(f"{self.missing_snippet_correction_count} correction(s)")
+            lines.append(
+                f"Missing conversation_snippet (v0.4.1, spec §3.4.1 MUST): "
+                f"{', '.join(parts2)} — set the user message or use "
+                "'<autonomous-stretch>' / '<no recent user message>'"
+            )
+
+        if self.explicit_absence_snippet_count:
+            lines.append(
+                f"Explicit-absence snippet markers: {self.explicit_absence_snippet_count} "
+                "(honest absences — not warnings)"
             )
 
         if self.warnings:
@@ -127,7 +218,14 @@ class AttributionAudit(BaseModel):
 
 
 def _build_attribution_audit(session: Session) -> AttributionAudit:
-    """Build an attribution review summary for session-end verification."""
+    """Build an attribution review summary for session-end verification.
+
+    v0.4.1: extended with snippet coverage counts, structural attribution
+    warning, orphan-discovery hint, and dispatch-visibility hint. All new
+    metrics surface the silent-warning failures the waggle audit identified.
+    """
+    from datetime import timedelta
+
     contribs: list[ContributionSummary] = []
     decs: list[DecisionSummary] = []
     corrections = []
@@ -135,12 +233,38 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
     revised = []
 
     unresolved_ids: list[str] = []
-    self_resolved_ids: list[str] = []
+    self_resolved_ids: list[str] = []  # ai-only (backward compat)
     unlinked_correction_count = 0
     audit_warnings: list[str] = []
 
+    # v0.4.1 metrics
+    missing_snippet_contribution = 0
+    missing_snippet_correction = 0
+    explicit_absence_snippet = 0
+    attribution_warning_ids: list[str] = []
+    orphan_discovery_ids: list[str] = []
+    contribution_count = 0
+    tool_call_count = 0
+
+    # Pre-index discovery / correction / gotcha annotation timestamps for
+    # the orphan-discovery scan. This lets each contribution check the
+    # 30-minute pre-window in O(K) rather than O(N²).
+    discovery_anchors: list[tuple[str, "datetime"]] = []  # (event_id, timestamp)
     for e in session.events:
+        if e.type == "annotation" and e.annotation and e.annotation.category in (
+            "discovery",
+            "correction",
+            "gotcha",
+        ):
+            discovery_anchors.append((e.id, e.timestamp))
+
+    discovery_window = timedelta(minutes=30)
+
+    for e in session.events:
+        if e.type == "tool_call":
+            tool_call_count += 1
         if e.type == "contribution" and e.contribution:
+            contribution_count += 1
             c = e.contribution
             desc = c.description[:80] + ("..." if len(c.description) > 80 else "")
             contribs.append(ContributionSummary(
@@ -150,6 +274,31 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
                 artifact=c.artifact,
                 description_preview=desc,
             ))
+
+            # v0.4.1 L5.3: count contributions missing conversation_snippet.
+            # explicit_absence markers count separately so honest absences
+            # (no user message during autonomous stretch) aren't penalized.
+            snip = e.context.conversation_snippet
+            if snip is None:
+                missing_snippet_contribution += 1
+            elif _is_explicit_absence(snip):
+                explicit_absence_snippet += 1
+
+            # v0.4.1 L5.5: orphan-discovery hint. If this contribution's
+            # description contains a discovery phrase but no
+            # discovery/correction/gotcha annotation exists within 30 min
+            # before this contribution, the discovery was likely logged
+            # post-hoc and lost as a discrete provenance event.
+            desc_lower = c.description.lower()
+            if any(phrase in desc_lower for phrase in _DISCOVERY_PHRASES):
+                window_start = e.timestamp - discovery_window
+                has_anchor = any(
+                    window_start <= ts <= e.timestamp
+                    for _id, ts in discovery_anchors
+                )
+                if not has_anchor:
+                    orphan_discovery_ids.append(e.id)
+
         elif e.type == "decision" and e.decision:
             d = e.decision
             desc = d.description[:80] + ("..." if len(d.description) > 80 else "")
@@ -165,17 +314,37 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
             elif d.disposition == "revised":
                 revised.append(e)
 
-            # FM1/FM9: Track unresolved and self-resolved decisions
+            # FM1/FM9: Track unresolved and (ai-only) self-resolved decisions
             if d.disposition == "proposed":
                 unresolved_ids.append(e.id)
-            elif d.resolved_by and d.proposed_by.type == d.resolved_by.type == "ai":
-                self_resolved_ids.append(e.id)
+            elif d.resolved_by:
+                # Existing ai-only self-resolution count (backward compat).
+                if d.proposed_by.type == d.resolved_by.type == "ai":
+                    self_resolved_ids.append(e.id)
+
+                # v0.4.1 L5.4: STRUCTURAL attribution-warning detector.
+                # Catches same-instance self-resolution regardless of actor
+                # type. Per spec §3.6 Proposer Identity Rule. Catches the
+                # evt_025 pattern (human-proposes plan, human-accepts) that
+                # the ai-only check above silently allows.
+                if (
+                    d.proposed_by.type == d.resolved_by.type
+                    and d.proposed_by.id == d.resolved_by.id
+                ):
+                    attribution_warning_ids.append(e.id)
 
         elif e.type == "annotation" and e.annotation and e.annotation.category == "correction":
             corrections.append(e)
             # FM17: Correction without corrects_event_ids
             if not e.annotation.corrects_event_ids:
                 unlinked_correction_count += 1
+
+            # v0.4.1 L5.3: count corrections missing conversation_snippet.
+            snip = e.context.conversation_snippet
+            if snip is None:
+                missing_snippet_correction += 1
+            elif _is_explicit_absence(snip):
+                explicit_absence_snippet += 1
 
     corrected_ids: list[str] = []
     for c in corrections:
@@ -184,7 +353,7 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
 
     intervention_count = len(corrections) + len(rejected) + len(revised)
 
-    # Build aggregate warnings
+    # Build aggregate warnings (severity-ordered to match render())
     if unresolved_ids:
         audit_warnings.append(
             f"{len(unresolved_ids)} decision(s) still in 'proposed' state — "
@@ -195,10 +364,50 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
             f"{len(self_resolved_ids)} decision(s) were proposed and resolved by AI — "
             "verify human was consulted."
         )
+    if attribution_warning_ids:
+        audit_warnings.append(
+            f"{len(attribution_warning_ids)} decision(s) with same-instance "
+            "self-resolution (any actor type) — per spec §3.6 Proposer Identity "
+            "Rule, proposer should differ from resolver in multi-actor workflows."
+        )
     if unlinked_correction_count:
         audit_warnings.append(
             f"{unlinked_correction_count} correction(s) lack corrects_event_ids — "
             "link them for full provenance."
+        )
+    if orphan_discovery_ids:
+        audit_warnings.append(
+            f"{len(orphan_discovery_ids)} contribution(s) contain discovery-language "
+            "but have no near-in-time discovery/correction/gotcha annotation — "
+            "consider logging at the moment of discovery per spec §8.1."
+        )
+    if missing_snippet_contribution or missing_snippet_correction:
+        parts3: list[str] = []
+        if missing_snippet_contribution:
+            parts3.append(f"{missing_snippet_contribution} contribution(s)")
+        if missing_snippet_correction:
+            parts3.append(f"{missing_snippet_correction} correction(s)")
+        audit_warnings.append(
+            f"Missing conversation_snippet (spec §3.4.1 MUST): {', '.join(parts3)}. "
+            "Set to the user message or use '<autonomous-stretch>' to mark explicit absence."
+        )
+
+    # v0.4.1 L5.6: dispatch-visibility hint (advisory only, no counter).
+    # Raised threshold per Round 3 amendment A3 — production sessions
+    # routinely have 0 tool_call events, so a low threshold would generate
+    # permanent noise. Guard against missing environment for legacy sessions.
+    env = session.metadata.environment
+    if (
+        contribution_count >= 10
+        and tool_call_count == 0
+        and env is not None
+        and env.client == "Claude Code"
+    ):
+        audit_warnings.append(
+            f"[hint] Session has {contribution_count} contributions and 0 tool_call "
+            "events. If subagent dispatches occurred, consider logging them as "
+            "tool_call(host='internal', server='claude-code', parent_event_id=...) "
+            "per spec §3.5. Advisory only."
         )
 
     return AttributionAudit(
@@ -215,6 +424,14 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
         self_resolution_ids=self_resolved_ids,
         unlinked_correction_count=unlinked_correction_count,
         warnings=audit_warnings,
+        # v0.4.1 fields
+        missing_snippet_contribution_count=missing_snippet_contribution,
+        missing_snippet_correction_count=missing_snippet_correction,
+        explicit_absence_snippet_count=explicit_absence_snippet,
+        orphan_discovery_hint_count=len(orphan_discovery_ids),
+        orphan_discovery_event_ids=orphan_discovery_ids,
+        attribution_warning_count=len(attribution_warning_ids),
+        attribution_warning_ids=attribution_warning_ids,
     )
 
 
@@ -225,11 +442,12 @@ def _generate_session_id() -> str:
 
 
 def _auto_environment() -> Environment:
+    # v0.4.1: trace_version removed from Environment — single source of truth
+    # is Session.trace_version (see schema/session.py docstring).
     return Environment(
         client="Claude Code",
         os=f"{platform.system()} {platform.release()}",
         python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
-        trace_version=trace_mcp.__version__,
         custom={"arch": platform.machine()},
     )
 
@@ -355,6 +573,23 @@ async def get_or_load_session(
     return session
 
 
+# v0.4.1: URI-form references in corrects_event_ids per spec §3.7.1.
+# A string matching this pattern is treated as a URI reference (e.g.,
+# "external:...", "jsonl:...", "subagent:...", "tool-result:...") and is
+# exempt from in-session existence checking. Event IDs follow the
+# evt_NNN convention and never contain colons.
+_URI_SCHEME_RE = re.compile(r"^[a-z][a-z0-9-]+:")
+
+
+def _is_uri_form_reference(s: str) -> bool:
+    """True if s is a URI-form reference per spec §3.7.1.
+
+    Used to exempt out-of-session anchors (subagent outputs, external
+    documents) from referential-integrity checking on corrects_event_ids.
+    """
+    return bool(_URI_SCHEME_RE.match(s))
+
+
 def _check_referential_integrity(
     session: Session,
     event: TraceEvent,
@@ -365,9 +600,14 @@ def _check_referential_integrity(
 
     ids_to_check: list[tuple[str, str]] = []
 
-    # Collect all referenced IDs from the event
+    # Collect all referenced IDs from the event.
+    # v0.4.1: corrects_event_ids MAY contain URI-form references per spec §3.7.1;
+    # those are exempt from in-session validation (the referenced item exists
+    # outside the TRACE event log).
     if event.annotation and event.annotation.corrects_event_ids:
         for ref_id in event.annotation.corrects_event_ids:
+            if _is_uri_form_reference(ref_id):
+                continue
             ids_to_check.append((ref_id, "corrects_event_ids"))
 
     if event.decision and event.decision.revises_event_id:

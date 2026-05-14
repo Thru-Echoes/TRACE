@@ -81,10 +81,20 @@ class TestSameActorWarning:
         )
         assert "AI resolved its own proposal" not in result
 
-    async def test_human_self_resolves_clean(
+    async def test_human_self_resolves_warns(
         self, storage: JsonFileStorage, active: dict[str, Session]
     ) -> None:
-        """Human proposes + human resolves -> no warning (humans can change their mind)."""
+        """v0.4.1: human\u2192human same-instance self-resolution NOW warns.
+
+        Inverted from v0.3.x behavior. Per spec \u00a73.6 Proposer Identity Rule
+        and the Attribution rule, the proposer should differ from the
+        resolver in multi-actor workflows. The waggle audit's evt_025
+        was exactly this pattern (human-proposes plan\u2192human-accepts) and
+        was silently allowed by the v0.3.x ai-only FM1.
+
+        The warning uses the v0.4.1 general-case message rather than the
+        ai-specific one (which is reserved for ai\u2192ai backward compat).
+        """
         session = await _make_session(storage, active)
         evt_id = await decision_tools.propose_decision(
             storage, session,
@@ -97,8 +107,35 @@ class TestSameActorWarning:
             event_id=evt_id, disposition="accepted",
             resolved_by_type="human", resolved_by_id="researcher",
         )
+        # v0.4.1: same-instance human\u2192human DOES warn (general-case message)
+        assert "Same actor instance proposed and resolved this decision" in result
+        assert "spec \u00a73.6" in result
+        # The ai-specific message should NOT appear for human\u2192human
         assert "AI resolved its own proposal" not in result
-        assert "\u26a0\ufe0f" not in result or "rejected" in result.lower()
+
+    async def test_human_different_instance_self_resolves_clean(
+        self, storage: JsonFileStorage, active: dict[str, Session]
+    ) -> None:
+        """Two different humans proposing/resolving: NO warning (different instances).
+
+        v0.4.1: the same-instance rule is on (type, id) tuple equality.
+        Same type but different id is not self-resolution.
+        """
+        session = await _make_session(storage, active)
+        evt_id = await decision_tools.propose_decision(
+            storage, session,
+            description="Use method X",
+            proposed_by_type="human", proposed_by_id="researcher-alice",
+        )
+        evt_id = evt_id.split("\n")[0]
+        result = await decision_tools.resolve_decision(
+            storage, session,
+            event_id=evt_id, disposition="accepted",
+            resolved_by_type="human", resolved_by_id="researcher-bob",
+        )
+        # Different ids \u2192 not same-instance \u2192 no self-resolution warning
+        assert "Same actor instance" not in result
+        assert "AI resolved its own proposal" not in result
 
     async def test_ai_resolves_human_proposal_clean(
         self, storage: JsonFileStorage, active: dict[str, Session]

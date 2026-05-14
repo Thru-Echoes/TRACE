@@ -83,12 +83,12 @@ def _handcrafted_session() -> dict[str, Any]:
                 {"type": "system", "id": "ci-pipeline"},
             ],
             "environment": {
-                # §3.2.1 — schema field names (mcp_servers, python_version, trace_version)
+                # §3.2.1 — schema field names (mcp_servers, python_version)
+                # v0.4.1: trace_version removed from Environment (single source of truth on Session)
                 "mcp_servers": ["search-server", "analysis-server"],
                 "client": "test-harness",
                 "os": "Linux 6.1",
                 "python_version": "3.12.0",
-                "trace_version": "0.4.1",
                 "custom": {"gpu": "A100"},
             },
             "tags": ["conformance", "e2e"],
@@ -695,9 +695,12 @@ class TestSpecDataModelCoverage:
     # §3.2.1 Environment
     def test_environment_has_fields(self) -> None:
         fields = Environment.model_fields
-        # Schema names: mcp_servers, client, os, python_version, trace_version, custom
-        for f in ["mcp_servers", "client", "os", "python_version", "trace_version", "custom"]:
+        # v0.4.1: trace_version removed (single source of truth on Session.trace_version)
+        # Schema names: mcp_servers, client, os, python_version, custom
+        for f in ["mcp_servers", "client", "os", "python_version", "custom"]:
             assert f in fields, f"Environment missing field: {f}"
+        # v0.4.1: explicitly verify trace_version is NOT on Environment
+        assert "trace_version" not in fields, "Environment.trace_version should be removed in v0.4.1"
 
     # §3.3 Actor
     def test_actor_has_required_fields(self) -> None:
@@ -778,7 +781,7 @@ class TestSpecDataModelCoverage:
             assert f in fields, f"AnnotationData missing field: {f}"
 
     def test_annotation_category_values(self) -> None:
-        for cat in ["learning", "gotcha", "observation", "correction", "todo", "question", "other"]:
+        for cat in ["learning", "gotcha", "observation", "correction", "todo", "question", "discovery", "other"]:
             a = AnnotationData(category=cat, content="test")
             assert a.category == cat
 
@@ -1197,3 +1200,4 @@ class TestSpecDocumentCompleteness:
         assert "0.1.0" in spec_text
         assert "0.2.0" in spec_text
         assert "0.3.0" in spec_text
+        assert "0.4.1" in spec_text

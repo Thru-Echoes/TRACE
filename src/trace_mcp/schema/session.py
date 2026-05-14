@@ -23,13 +23,19 @@ class Actor(BaseModel):
 
 
 class Environment(BaseModel):
-    """Execution context for reproducibility."""
+    """Execution context for reproducibility.
+
+    v0.4.1: `trace_version` removed from Environment to eliminate the
+    two-source-of-truth problem. The single canonical version lives on
+    `Session.trace_version`. Existing v0.3.x/v0.4.0 session files that
+    have `environment.trace_version` set load cleanly via Pydantic v2
+    default `extra='ignore'` (the field is silently dropped).
+    """
 
     mcp_servers: list[str] = Field(default_factory=list)
     client: str = ""
     os: str | None = None
     python_version: str | None = None
-    trace_version: str = ""
     custom: dict[str, Any] = Field(default_factory=dict)
 
 

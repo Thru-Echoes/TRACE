@@ -37,7 +37,6 @@ def sample_session() -> Session:
                 mcp_servers=["corpus-search-mcp"],
                 client="claude-code",
                 os="Darwin",
-                trace_version="0.4.1",
             ),
             tags=["ipcc", "adaptation"],
         ),
