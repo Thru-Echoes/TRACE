@@ -254,7 +254,7 @@
       "type": "object"
     },
     "Environment": {
-      "description": "Execution context for reproducibility.",
+      "description": "Execution context for reproducibility.\n\nv0.4.1: `trace_version` removed from Environment to eliminate the\ntwo-source-of-truth problem. The single canonical version lives on\n`Session.trace_version`. Existing v0.3.x/v0.4.0 session files that\nhave `environment.trace_version` set load cleanly via Pydantic v2\ndefault `extra='ignore'` (the field is silently dropped).",
       "properties": {
         "mcp_servers": {
           "items": {
@@ -291,11 +291,6 @@
           ],
           "default": null,
           "title": "Python Version"
-        },
-        "trace_version": {
-          "default": "",
-          "title": "Trace Version",
-          "type": "string"
         },
         "custom": {
           "additionalProperties": true,
