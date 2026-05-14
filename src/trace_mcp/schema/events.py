@@ -23,7 +23,7 @@ class EventContext(BaseModel):
 
 
 class ToolCallData(BaseModel):
-    """Records an MCP tool invocation on another server."""
+    """Records a tool or service invocation (MCP, external non-MCP, or host-internal)."""
 
     server: str
     method: str = "tools/call"
@@ -36,6 +36,8 @@ class ToolCallData(BaseModel):
     status: Literal["success", "error", "timeout"] = "success"
     error_message: str | None = None
     retries_event_id: str | None = None
+    host: Literal["mcp", "internal", "external"] = "mcp"
+    parent_event_id: str | None = None
 
 
 class DecisionData(BaseModel):
@@ -68,7 +70,7 @@ class DecisionData(BaseModel):
 class AnnotationData(BaseModel):
     """Free-form observations, learnings, gotchas, corrections, todos."""
 
-    category: Literal["learning", "gotcha", "observation", "correction", "todo", "question", "other"]
+    category: Literal["learning", "gotcha", "observation", "correction", "todo", "question", "discovery", "other"]
     content: str
     corrects_event_ids: list[str] = Field(default_factory=list)
     related_event_ids: list[str] = Field(default_factory=list)

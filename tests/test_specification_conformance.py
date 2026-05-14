@@ -65,7 +65,7 @@ def _handcrafted_session() -> dict[str, Any]:
     return {
         # §3.1 Session Document
         "context": "https://trace-protocol.org/v0.3",
-        "trace_version": "0.3.0",
+        "trace_version": "0.4.1",
         "id": "handcrafted_20260319_aaa111",
         "created": "2026-03-19T10:00:00+00:00",
         "ended": "2026-03-19T11:30:00+00:00",
@@ -88,7 +88,7 @@ def _handcrafted_session() -> dict[str, Any]:
                 "client": "test-harness",
                 "os": "Linux 6.1",
                 "python_version": "3.12.0",
-                "trace_version": "0.3.0",
+                "trace_version": "0.4.1",
                 "custom": {"gpu": "A100"},
             },
             "tags": ["conformance", "e2e"],

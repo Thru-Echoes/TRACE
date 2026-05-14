@@ -50,7 +50,7 @@ class Session(BaseModel):
     """Top-level audit session. One session = one TRACE JSON file."""
 
     context: str = "https://trace-protocol.org/v0.3"
-    trace_version: str = "0.3.0"
+    trace_version: str = "0.4.1"
     id: str
     created: datetime = Field(default_factory=lambda: datetime.now(UTC))
     ended: datetime | None = None

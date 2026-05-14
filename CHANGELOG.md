@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.1] — In progress
+
+> **Audit-driven release.** Targets the five quality issues surfaced by the 2026-05-13 waggle-session audit (`audit_2026-05-13_waggle_session/trace_audit_findings.md`). All changes are additive and backward-compatible with v0.3.x and v0.4.0 wire format. Three rounds of independent verification incorporated; remediation plan and HTML checklist live alongside the audit.
+
+### Added (schema — all optional, default-preserving)
+- `AnnotationData.category` accepts `"discovery"` — a non-trivial finding from autonomous or unattended work that carries causal load (distinct from `gotcha` and `correction`). SHOULD be logged at the moment of discovery, not in a post-hoc summary.
+- `ToolCallData.host: Literal["mcp","internal","external"] = "mcp"` — distinguishes external MCP servers from host-internal tools (subagent dispatchers) and external non-MCP tools.
+- `ToolCallData.parent_event_id: str | None = None` — links a dispatch to the controller event that motivated it. Enables manual dispatch-chain logging on day one.
+
+### Added (server-side audit)
+- `AttributionAudit` extended with five new counts: `missing_snippet_contribution_count`, `missing_snippet_correction_count`, `explicit_absence_snippet_count`, `orphan_discovery_hint_count`, `attribution_warning_count`. Surfaced in the session-end audit block in severity order.
+- Structural attribution-warning detector: counts decisions where `proposed_by == resolved_by` (same Actor instance) in multi-actor sessions — catches the question→AI-proposal→human-accept self-resolution pattern without regex.
+- Orphan-discovery hint: surfaces contributions whose description contains discovery-language (`"discovered"`, `"found a bug"`, `"load-bearing fix"`, `"turned out"`) without a near-in-time discovery/correction/gotcha annotation.
+
+### Added (spec)
+- §3.4.1 — normative MUST clause on `conversation_snippet` for `contribution` and `correction`-category `annotation`; absence-marker convention (`<autonomous-stretch>`, `<no recent user message>`).
+- §3.5 — generalized Tool Invocation to cover external MCP, external non-MCP (HTTP/CLI), and host-internal tools; documented `host` field and `parent_event_id` for dispatch chains.
+- §3.6 — **Proposer Identity Rule** with disambiguation table: `proposed_by` MUST identify the actor who authored the proposal content, not who spoke the directive.
+- §3.7 — `discovery` annotation category.
+- §3.7.1 (new) — External References in `corrects_event_ids`: URI-form anchors (`external:<uri>`, `jsonl:<path>#L<line>`, etc.) when the corrected item is not a TRACE event.
+- §4.4 — split: `corrects_event_ids` MAY use URI-form per §3.7.1.
+- §5.2 — rewrite Correction Provenance for three anchor cases (event ID / URI / snippet-only).
+- §8.1 — real-time logging guidance + autonomous-window detection recommendation (host-implementation specific).
+- §8.2 — recognition table rows for question→AI-proposal pattern and discovery language.
+- Appendix A — worked example for question→AI-proposal→accept flow with `suggestion_type="requested"`.
+
+### Changed (PROV-LD export — **breaking for PROV consumers matching on `wasRevisionOf`**)
+- Correction events now emit either `prov:wasInvalidatedBy` (event-ID target) or qualified `prov:wasInfluencedBy` with `prov:atLocation` (URI target). Previously all corrections emitted `prov:wasRevisionOf`, which conflated repudiatory corrections with evolutionary revisions. Downstream SPARQL/jq queries matching `?correction prov:wasRevisionOf ?event` must be updated.
+- New: `parent_event_id` on `tool_call` emits `prov:wasInformedBy`.
+
+### Changed (validators and warnings)
+- `_check_referential_integrity` skips URI-form entries (scheme-prefixed strings) in `corrects_event_ids` — without this, the §3.7.1 URI scheme would hard-fail at `append_event`.
+- `FM1` (decision self-resolution) generalized: warns when `proposed_by == resolved_by` for any same-instance pair in a multi-actor session, not just `ai→ai`. Catches the systematic `human→human` attribution pattern surfaced by the audit.
+- `FM5` snippet warnings (contribution / correction) sharpened to mention the absence-marker convention.
+- `FM17` correction-without-anchor warning relaxed: fires only when both `corrects_event_ids` AND `conversation_snippet` are empty. New co-occurrence warning when `corrects_event_ids: []` but `related_event_ids` non-empty on a correction.
+- `FM3` (`related_decision_ids`) warning demoted: only fires when the session has at least one decision event.
+- `FM23` exploratory-tool warning made `host`-aware: only fires for typical MCP-side names on `host="mcp"`.
+
+### Changed (single source of truth)
+- `Environment.trace_version` removed. Single canonical version lives on `Session.trace_version`. Pre-0.4.1 sessions on disk silently drop the redundant field on next save (Pydantic v2 default `extra="ignore"` permits this).
+- `Session.trace_version` default bumped from `"0.3.0"` to `"0.4.1"`.
+- `schemas/trace-v0.3.json` regenerated and renamed to `schemas/trace-v0.4.json`. References in `session.py`, `generate_schema.py`, `validate_session.py`, `prov_mapping.py`, README, and tests updated. The PROV namespace URI `https://trace-protocol.org/ns/v0.3#` is kept (additive extensions are valid within the v0.3 namespace).
+
+### Migration notes
+- **PROV-LD consumers** must update queries matching `prov:wasRevisionOf` for corrections — see "Changed (PROV-LD export)" above.
+- **Consumer projects with installed hooks** should re-run `trace-mcp-init` to refresh `decision-audit.sh`. The server-side FM1 generalization is otherwise invisible to consumers running the v0.4.0 hook.
+- **Pinned-version Pydantic consumers** parsing v0.4.1-written sessions through older schemas should set `model_config = ConfigDict(extra="ignore")` on their models to tolerate the new optional fields.
+
 ## [0.4.0] — 2026-04-29
 
 ### Added
