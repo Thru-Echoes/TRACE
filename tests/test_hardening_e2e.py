@@ -98,7 +98,6 @@ def _make_green_narrative_session(session_id: str = "trace_test_gn") -> Session:
                 client="Claude Code",
                 os="Darwin 25.3.0",
                 python_version="3.13.11",
-                trace_version="0.3.0",
                 custom={"arch": "arm64"},
             ),
         ),
@@ -117,7 +116,6 @@ def _make_wama_session(session_id: str = "trace_test_wama") -> Session:
                 client="Claude Code",
                 os="Darwin 25.3.0",
                 python_version="3.13.11",
-                trace_version="0.3.0",
             ),
         ),
     )
@@ -134,7 +132,6 @@ def _make_meeting_recorder_session(session_id: str = "trace_test_mr") -> Session
             environment=Environment(
                 client="Claude Code",
                 os="Darwin 25.3.0",
-                trace_version="0.3.0",
             ),
         ),
     )

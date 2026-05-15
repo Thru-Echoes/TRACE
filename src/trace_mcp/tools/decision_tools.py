@@ -72,26 +72,40 @@ async def resolve_decision(
     guard_warnings: list[str] = []
     suppress = os.environ.get("TRACE_SUPPRESS_SELF_RESOLVE_WARNING", "").lower() == "true"
 
-    # FM1: Same-actor self-resolution
-    if target.decision.proposed_by.type == resolved_by_type and resolved_by_type == "ai":
-        if not suppress:
+    # FM1: Same-instance self-resolution
+    # v0.4.1: generalized from ai-only to any same-instance pair per spec §3.6
+    # Proposer Identity Rule + Attribution rule. Detects when the same Actor
+    # instance (type AND id) proposes and resolves the decision.
+    proposer = target.decision.proposed_by
+    is_self_resolution = (
+        proposer.type == resolved_by_type
+        and proposer.id == resolved_by_id
+    )
+
+    if is_self_resolution and not suppress:
+        if resolved_by_type == "ai":
+            # Backward-compat message preserved for ai→ai (the original v0.3 case).
             guard_warnings.append(
                 "AI resolved its own proposal. Decisions proposed by AI "
                 "should normally be resolved by a human."
             )
-
-    # FM25: Suspiciously fast resolution (propose + resolve <5s by same AI actor)
-    elapsed = (datetime.now(UTC) - target.timestamp).total_seconds()
-    if (
-        elapsed < 5.0
-        and resolved_by_type == "ai"
-        and target.decision.proposed_by.type == "ai"
-    ):
-        if not suppress:
+        else:
+            # v0.4.1: catches the evt_025 pattern — human→human (or system→system)
+            # same-instance self-resolution that the original FM1 silently allowed.
             guard_warnings.append(
-                f"Decision proposed and self-resolved in {elapsed:.1f}s. "
-                "Was the human consulted before resolving?"
+                "Same actor instance proposed and resolved this decision. "
+                "Per spec §3.6, in multi-actor workflows the proposer should "
+                "differ from the resolver."
             )
+
+    # FM25: Suspiciously fast resolution (propose + resolve <5s by same instance)
+    # v0.4.1: generalized from ai-only to any same-instance pair.
+    elapsed = (datetime.now(UTC) - target.timestamp).total_seconds()
+    if elapsed < 5.0 and is_self_resolution and not suppress:
+        guard_warnings.append(
+            f"Decision proposed and self-resolved in {elapsed:.1f}s. "
+            "Was the other actor consulted before resolving?"
+        )
 
     # FM31: Rejection -> suggest correction annotation
     if disposition == "rejected":
