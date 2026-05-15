@@ -11,6 +11,7 @@ from typing import Any
 
 from trace_mcp.schema import Session
 from trace_mcp.schema.prov_mapping import PROV_CONTEXT
+from trace_mcp.tools.session_tools import _is_uri_form_reference
 
 
 def _iso(dt: Any) -> str | None:
@@ -41,6 +42,16 @@ def _build_bundle(session: Session) -> dict[str, Any]:
         "used": {},
         "wasAttributedTo": {},
         "wasRevisionOf": {},
+        # v0.4.1: new PROV relations per spec §6.
+        # `wasInvalidatedBy` — repudiatory corrections to in-session events.
+        # `wasInfluencedBy` — corrections anchored to URI-form external refs.
+        # `influence` — qualified-influence blank nodes for URI corrections,
+        #   bearing `prov:atLocation` with the URI.
+        # `wasInformedBy` — dispatch-chain relation (tool_call.parent_event_id).
+        "wasInvalidatedBy": {},
+        "wasInfluencedBy": {},
+        "influence": {},
+        "wasInformedBy": {},
     }
 
     # Register agents from participants
@@ -89,6 +100,16 @@ def _build_bundle(session: Session) -> dict[str, Any]:
                 bundle["wasRevisionOf"][f"trace:retry_{evt.id}"] = {
                     "prov:generatedEntity": activity_id,
                     "prov:usedEntity": retried_id,
+                }
+            # v0.4.1: parent_event_id → prov:wasInformedBy. The dispatch activity
+            # was informed by the controller-side event that issued it. Enables
+            # consumers to walk the dispatch graph from a contribution back through
+            # the subagent invocations that produced it.
+            if tc.parent_event_id:
+                parent_id = f"trace:{tc.parent_event_id}"
+                bundle["wasInformedBy"][f"trace:wib_{evt.id}"] = {
+                    "prov:informed": activity_id,
+                    "prov:informant": parent_id,
                 }
 
             # Input entity
@@ -147,12 +168,37 @@ def _build_bundle(session: Session) -> dict[str, Any]:
                 "prov:entity": entity_id,
                 "prov:agent": actor_id,
             }
-            # Link corrections to the events they correct
-            for corrected_id in a.corrects_event_ids:
-                bundle["wasRevisionOf"][f"trace:corr_{evt.id}_{corrected_id}"] = {
-                    "prov:generatedEntity": entity_id,
-                    "prov:usedEntity": f"trace:{corrected_id}",
-                }
+            # v0.4.1: correction mapping is split per spec §6.
+            # - Event-ID target (in-session) → prov:wasInvalidatedBy
+            #   The corrected event is invalidated by this correction activity.
+            #   This is REPUDIATORY semantics, distinct from `wasRevisionOf`
+            #   which implies evolutionary refinement.
+            # - URI-form target (out-of-session, per spec §3.7.1) → qualified
+            #   prov:wasInfluencedBy. The correction was influenced by the
+            #   externally-located artifact. Reified via prov:qualifiedInfluence
+            #   pointing to a prov:Influence blank node bearing prov:atLocation
+            #   with the URI.
+            for idx, corrected_ref in enumerate(a.corrects_event_ids):
+                if _is_uri_form_reference(corrected_ref):
+                    # Qualified-influence pattern (PROV-O §4 qualified relations).
+                    # Stable, deterministic blank-node ID: derived from event ID
+                    # + index within the entry list (not from Python hash, which
+                    # would be non-deterministic across runs).
+                    qi_id = f"_:infl_{evt.id}_{idx}"
+                    bundle["influence"][qi_id] = {
+                        "prov:type": "prov:Influence",
+                        "prov:atLocation": corrected_ref,
+                    }
+                    bundle["wasInfluencedBy"][f"trace:wif_{evt.id}_{idx}"] = {
+                        "prov:influenced": entity_id,
+                        "prov:qualifiedInfluence": qi_id,
+                    }
+                else:
+                    # Event-ID target: invalidated-by.
+                    bundle["wasInvalidatedBy"][f"trace:inv_{evt.id}_{corrected_ref}"] = {
+                        "prov:entity": f"trace:{corrected_ref}",
+                        "prov:activity": entity_id,
+                    }
 
         elif evt.type == "contribution" and evt.contribution:
             c = evt.contribution

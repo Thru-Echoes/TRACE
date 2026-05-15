@@ -30,12 +30,20 @@ async def log_tool_call(
     status: str = "success",
     error_message: str | None = None,
     retries_event_id: str | None = None,
+    host: str = "mcp",
+    parent_event_id: str | None = None,
     actor_type: str = "ai",
     actor_id: str = "ai-assistant",
     reasoning: str | None = None,
     conversation_turn: int | None = None,
 ) -> str:
-    """Log a tool call made to another MCP server."""
+    """Log an automated tool or service invocation.
+
+    v0.4.1: covers MCP tools, external non-MCP tools, and host-internal
+    subagent dispatchers. Set `host` accordingly (default `"mcp"`
+    preserves v0.3.0/v0.4.0 semantics). Use `parent_event_id` to link a
+    dispatch to the controller event that motivated it.
+    """
     warnings: list[str] = []
 
     # FM22: Block logging TRACE's own tool calls
@@ -48,8 +56,11 @@ async def log_tool_call(
         )
 
     # FM23: Hint about exploratory tool calls
+    # v0.4.1: scoped to host="mcp" only. Host-internal tools have their own
+    # exploratory names (e.g., Claude Code's Read/Grep/Bash) and don't share
+    # the MCP-side convention.
     exploratory_tools = {"read", "glob", "grep", "bash", "cat", "ls", "find", "head", "tail"}
-    if tool_lower in exploratory_tools:
+    if host == "mcp" and tool_lower in exploratory_tools:
         warnings.append(
             "Consider whether this exploratory call needs TRACE logging. "
             "File reads, greps, and directory listings are usually not logged."
@@ -68,6 +79,8 @@ async def log_tool_call(
             status=status,  # type: ignore[arg-type]
             error_message=error_message,
             retries_event_id=retries_event_id,
+            host=host,  # type: ignore[arg-type]
+            parent_event_id=parent_event_id,
         ),
         context=EventContext(
             reasoning_summary=reasoning,
@@ -97,19 +110,43 @@ async def log_annotation(
     """Log an observation, learning, gotcha, correction, or note."""
     warnings: list[str] = []
     effective_corrects = corrects_event_ids or []
+    effective_related = related_event_ids or []
 
-    # FM17: Correction without corrects_event_ids
-    if category == "correction" and not effective_corrects:
+    # FM17: Correction without any anchor.
+    # v0.4.1: relaxed — only fires when BOTH corrects_event_ids AND
+    # conversation_snippet are empty. A correction needs SOME anchor
+    # (event ID, URI-form ref, or quoted snippet) per spec §5.2.
+    if category == "correction" and not effective_corrects and conversation_snippet is None:
         warnings.append(
-            "Correction logged without corrects_event_ids. Link to the "
-            "event(s) being corrected for full provenance."
+            "Correction logged without corrects_event_ids OR conversation_snippet. "
+            "Provide (a) an event ID, (b) a URI-form external reference "
+            "(e.g., 'jsonl:transcript.jsonl#L225', 'external:https://...'), or "
+            "(c) a conversation_snippet quoting the corrected statement. See spec §3.7.1."
         )
 
-    # FM5: Correction without conversation_snippet
+    # FM17 co-occurrence (v0.4.1, new): when a correction has empty
+    # corrects_event_ids but non-empty related_event_ids, the related_event_ids
+    # is likely being used as a workaround for the correction relationship.
+    # This is the evt_003 anti-pattern surfaced by the waggle audit.
+    if (
+        category == "correction"
+        and not effective_corrects
+        and effective_related
+    ):
+        warnings.append(
+            "Correction has empty corrects_event_ids but non-empty related_event_ids. "
+            "If related_event_ids contains the corrected item's anchor, move it to "
+            "corrects_event_ids. related_event_ids is for loose association, not for "
+            "the correction relationship. See spec §3.7.1."
+        )
+
+    # FM5: Correction without conversation_snippet (v0.4.1 sharpened).
     if category == "correction" and conversation_snippet is None:
         warnings.append(
-            "Correction logged without conversation_snippet. Include the "
-            "relevant user message (~200 chars) for attribution."
+            "Correction logged without conversation_snippet. Set to the relevant "
+            "user message (~200 chars), or use '<no recent user message>' if no "
+            "user message motivated this correction. Silent omission is a v0.4.1 "
+            "protocol violation per spec §3.4.1."
         )
 
     # FM26: Gotcha with corrects_event_ids suggests reclassification
@@ -159,15 +196,21 @@ async def log_contribution(
     warnings: list[str] = []
     effective_decision_ids = related_decision_ids or []
 
-    # FM5: Missing conversation_snippet
+    # FM5: Missing conversation_snippet (v0.4.1 sharpened).
     if conversation_snippet is None:
         warnings.append(
-            "Contribution logged without conversation_snippet. Include the "
-            "relevant user message (~200 chars) for attribution."
+            "Contribution logged without conversation_snippet. Set to the relevant "
+            "user message (~200 chars), or use '<autonomous-stretch>' if working "
+            "autonomously from a prior decision. Silent omission is a v0.4.1 "
+            "protocol violation per spec §3.4.1."
         )
 
-    # FM3 (partial): No related_decision_ids
-    if not effective_decision_ids:
+    # FM3 (partial): No related_decision_ids.
+    # v0.4.1: demoted to fire only when the session actually has decisions.
+    # If the session has zero decisions, "consider linking" is noise that
+    # trains controllers to ignore the whole warning block.
+    session_has_decisions = any(e.type == "decision" for e in session.events)
+    if not effective_decision_ids and session_has_decisions:
         warnings.append(
             "Contribution logged without related_decision_ids. Consider "
             "linking to the decision(s) that motivated this work."

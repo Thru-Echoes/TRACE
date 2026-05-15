@@ -47,6 +47,7 @@
             "correction",
             "todo",
             "question",
+            "discovery",
             "other"
           ],
           "title": "Category",
@@ -253,7 +254,7 @@
       "type": "object"
     },
     "Environment": {
-      "description": "Execution context for reproducibility.",
+      "description": "Execution context for reproducibility.\n\nv0.4.1: `trace_version` removed from Environment to eliminate the\ntwo-source-of-truth problem. The single canonical version lives on\n`Session.trace_version`. Existing v0.3.x/v0.4.0 session files that\nhave `environment.trace_version` set load cleanly via Pydantic v2\ndefault `extra='ignore'` (the field is silently dropped).",
       "properties": {
         "mcp_servers": {
           "items": {
@@ -290,11 +291,6 @@
           ],
           "default": null,
           "title": "Python Version"
-        },
-        "trace_version": {
-          "default": "",
-          "title": "Trace Version",
-          "type": "string"
         },
         "custom": {
           "additionalProperties": true,
@@ -482,7 +478,7 @@
       "type": "object"
     },
     "ToolCallData": {
-      "description": "Records an MCP tool invocation on another server.",
+      "description": "Records a tool or service invocation (MCP, external non-MCP, or host-internal).",
       "properties": {
         "server": {
           "title": "Server",
@@ -575,6 +571,28 @@
           ],
           "default": null,
           "title": "Retries Event Id"
+        },
+        "host": {
+          "default": "mcp",
+          "enum": [
+            "mcp",
+            "internal",
+            "external"
+          ],
+          "title": "Host",
+          "type": "string"
+        },
+        "parent_event_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Event Id"
         }
       },
       "required": [
@@ -684,7 +702,7 @@
       "type": "object"
     }
   },
-  "description": "JSON Schema for a session document conforming to the Decision Provenance for AI-Assisted Workflows specification v0.3.0. See: https://trace-protocol.org/v0.3",
+  "description": "JSON Schema for a session document conforming to the Decision Provenance for AI-Assisted Workflows specification v0.4.1. See: https://trace-protocol.org/v0.3 (namespace URI kept at v0.3# per ADR 002 D6 \u2014 additive extensions are valid within the same namespace).",
   "properties": {
     "context": {
       "default": "https://trace-protocol.org/v0.3",
@@ -692,7 +710,7 @@
       "type": "string"
     },
     "trace_version": {
-      "default": "0.3.0",
+      "default": "0.4.1",
       "title": "Trace Version",
       "type": "string"
     },
@@ -755,7 +773,7 @@
     "id",
     "metadata"
   ],
-  "title": "Decision Provenance Session Document v0.3",
+  "title": "Decision Provenance Session Document v0.4.1",
   "type": "object",
-  "$id": "https://trace-protocol.org/schemas/trace-v0.3.json"
+  "$id": "https://trace-protocol.org/schemas/trace-v0.4.json"
 }

@@ -2,8 +2,9 @@
 
 > **Full documentation**: [README.md](README.md) (architecture, tools, configuration, changelog)
 > **Formal specification**: [docs/specification.md](docs/specification.md)
-> **Version**: 0.3.0
+> **Version**: 0.4.1
 > **TRACE project name**: "trace-mcp"
+> **Product / IP / talk-prep status (2026-05-05):** [`notes/2026-05-05-meeting-takeaways.md`](notes/2026-05-05-meeting-takeaways.md) — software-disclosure pending with Mike Cohen, LLC awaiting state, two IP lawyers referred by Heather Meeker, June 9 Berkeley Library talk locked.
 
 ---
 

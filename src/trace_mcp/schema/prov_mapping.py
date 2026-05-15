@@ -13,6 +13,14 @@ PROV_MAPPING = {
     "DecisionData": "prov:Activity",  # with trace: attributes
     "DecisionData.revision": "prov:wasRevisionOf",
     "AnnotationData": "prov:Entity",  # prov:wasAttributedTo
+    # v0.4.1: corrections split into two relations depending on target shape.
+    # Event-ID target = repudiatory invalidation (the prior event is no longer
+    # valid). URI-form target = influence from an externally-located artifact,
+    # reified through a qualified Influence node bearing prov:atLocation.
+    "AnnotationData.corrects_event_ids[evt_*]": "prov:wasInvalidatedBy",
+    "AnnotationData.corrects_event_ids[<scheme>:*]": "prov:wasInfluencedBy",
+    # v0.4.1: tool_call dispatch chain — controller event informed the dispatch.
+    "ToolCallData.parent_event_id": "prov:wasInformedBy",
 }
 
 # Namespace URIs are identifiers, not resolvable URLs — this is standard

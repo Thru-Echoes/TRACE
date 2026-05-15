@@ -57,7 +57,7 @@ class TestSession:
         )
         assert s.id == "trace_20260205_abc123"
         assert s.status == "active"
-        assert s.trace_version == "0.3.0"
+        assert s.trace_version == "0.4.1"
         assert isinstance(s.created, datetime)
 
     def test_next_event_id(self) -> None:
@@ -310,7 +310,6 @@ class TestRoundTrip:
                     mcp_servers=["corpus-search"],
                     client="claude-code",
                     os="Darwin",
-                    trace_version="0.3.0",
                 ),
                 tags=["test"],
             ),

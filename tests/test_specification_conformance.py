@@ -39,7 +39,7 @@ from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import decision_tools, logging_tools, query_tools, session_tools
 from trace_mcp.exporters import export_prov_jsonld
 
-SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "trace-v0.3.json"
+SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "trace-v0.4.json"
 SPEC_PATH = Path(__file__).parent.parent / "docs" / "specification.md"
 
 
@@ -65,7 +65,7 @@ def _handcrafted_session() -> dict[str, Any]:
     return {
         # §3.1 Session Document
         "context": "https://trace-protocol.org/v0.3",
-        "trace_version": "0.3.0",
+        "trace_version": "0.4.1",
         "id": "handcrafted_20260319_aaa111",
         "created": "2026-03-19T10:00:00+00:00",
         "ended": "2026-03-19T11:30:00+00:00",
@@ -83,12 +83,12 @@ def _handcrafted_session() -> dict[str, Any]:
                 {"type": "system", "id": "ci-pipeline"},
             ],
             "environment": {
-                # §3.2.1 — schema field names (mcp_servers, python_version, trace_version)
+                # §3.2.1 — schema field names (mcp_servers, python_version)
+                # v0.4.1: trace_version removed from Environment (single source of truth on Session)
                 "mcp_servers": ["search-server", "analysis-server"],
                 "client": "test-harness",
                 "os": "Linux 6.1",
                 "python_version": "3.12.0",
-                "trace_version": "0.3.0",
                 "custom": {"gpu": "A100"},
             },
             "tags": ["conformance", "e2e"],
@@ -695,9 +695,12 @@ class TestSpecDataModelCoverage:
     # §3.2.1 Environment
     def test_environment_has_fields(self) -> None:
         fields = Environment.model_fields
-        # Schema names: mcp_servers, client, os, python_version, trace_version, custom
-        for f in ["mcp_servers", "client", "os", "python_version", "trace_version", "custom"]:
+        # v0.4.1: trace_version removed (single source of truth on Session.trace_version)
+        # Schema names: mcp_servers, client, os, python_version, custom
+        for f in ["mcp_servers", "client", "os", "python_version", "custom"]:
             assert f in fields, f"Environment missing field: {f}"
+        # v0.4.1: explicitly verify trace_version is NOT on Environment
+        assert "trace_version" not in fields, "Environment.trace_version should be removed in v0.4.1"
 
     # §3.3 Actor
     def test_actor_has_required_fields(self) -> None:
@@ -778,7 +781,7 @@ class TestSpecDataModelCoverage:
             assert f in fields, f"AnnotationData missing field: {f}"
 
     def test_annotation_category_values(self) -> None:
-        for cat in ["learning", "gotcha", "observation", "correction", "todo", "question", "other"]:
+        for cat in ["learning", "gotcha", "observation", "correction", "todo", "question", "discovery", "other"]:
             a = AnnotationData(category=cat, content="test")
             assert a.category == cat
 
@@ -1005,7 +1008,7 @@ class TestSpecInterchangeFormat:
     # §7.1 JSON encoding
     def test_schema_file_exists_and_valid(self, schema: dict) -> None:
         assert "$id" in schema
-        assert "trace-v0.3" in schema["$id"]
+        assert "trace-v0.4" in schema["$id"]
 
     async def test_trace_output_is_valid_json(self, tmp_path: Path) -> None:
         doc = await _trace_generated_session(tmp_path)
@@ -1163,7 +1166,7 @@ class TestSpecDocumentCompleteness:
         assert "RFC 2119" in spec_text
 
     def test_spec_references_json_schema(self, spec_text: str) -> None:
-        assert "trace-v0.3.json" in spec_text
+        assert "trace-v0.4.json" in spec_text
 
     def test_spec_has_example_document(self, spec_text: str) -> None:
         assert "## Appendix A: Example Session Document" in spec_text
@@ -1197,3 +1200,4 @@ class TestSpecDocumentCompleteness:
         assert "0.1.0" in spec_text
         assert "0.2.0" in spec_text
         assert "0.3.0" in spec_text
+        assert "0.4.1" in spec_text

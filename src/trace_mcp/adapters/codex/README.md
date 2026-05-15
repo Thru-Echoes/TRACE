@@ -33,3 +33,25 @@ To reach parity with the Claude Code adapter, Codex would need one of:
 
 Until one of the above paths is viable, leave `CodexAdapter.install` raising
 `NotImplementedError` and `detect` returning `False`.
+
+## v0.4.1 schema additions relevant to Codex
+
+The TRACE protocol v0.4.1 added two optional fields to `ToolCallData`
+that a future Codex adapter should populate when capturing Codex's
+subagent dispatches (e.g., Codex's `task` tool or equivalent):
+
+- `host: Literal["mcp", "internal", "external"] = "mcp"` — set to
+  `"internal"` for host-internal tools, with `server="codex"`.
+- `parent_event_id: str | None = None` — links a dispatch event to
+  the controller-side event (typically a decision or contribution)
+  that motivated it. Enables reconstruction of the dispatch graph
+  via the PROV-LD `prov:wasInformedBy` relation (spec §6).
+
+When implementing Codex auto-capture, follow the pattern that the
+Claude Code `dispatch-{start,end}.sh` hooks will use:
+PreToolUse-equivalent records dispatch start, PostToolUse-equivalent
+records `duration_ms`/`status`/output summary and then calls
+`trace_log_tool_call(host="internal", server="codex", parent_event_id=...)`.
+
+Protocol-level guidance lives in spec §3.5; the schema is in
+`src/trace_mcp/schema/events.py` (`ToolCallData`).

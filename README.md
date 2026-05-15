@@ -20,9 +20,11 @@ TRACE is an MCP server that provides a standardized audit trail for AI-assisted 
 
 TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy or intercept calls — the AI client explicitly logs events to TRACE, creating a complete, human-readable provenance record.
 
-**Version:** 0.4.0 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
+**Version:** 0.4.1 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
 
-> The schema URI is an identifier (per W3C PROV convention) and is not currently a resolvable URL. The machine-readable JSON Schema lives at [`schemas/trace-v0.3.json`](schemas/trace-v0.3.json) in this repository.
+> The schema URI is an identifier (per W3C PROV convention) and is not currently a resolvable URL. The machine-readable JSON Schema lives at [`schemas/trace-v0.4.json`](schemas/trace-v0.4.json) in this repository.
+
+**What's new in 0.4.1** (additive — v0.3.x and v0.4.0 sessions load unchanged): the **Proposer Identity Rule** (`proposed_by` identifies the *author* of proposal content, not the speaker of the resolving directive — spec §3.6); a `discovery` annotation category for non-trivial findings surfaced during autonomous execution (§3.7); **URI-form `corrects_event_ids`** with schemes `external:`, `jsonl:`, `subagent:`, `tool-result:` for correcting things that aren't TRACE events (§3.7.1); `host` and `parent_event_id` on `tool_call` to cover MCP, host-internal, and external tools and to link subagent-dispatch chains (§3.5); a normative MUST on `conversation_snippet` for contributions and corrections with an explicit `<autonomous-stretch>` absence marker (§3.4.1). The PROV-LD correction mapping splits along the event-ID vs URI-form axis — downstream consumers matching `prov:wasRevisionOf` for corrections should switch to `prov:wasInvalidatedBy` (event IDs) and `prov:wasInfluencedBy` with `prov:atLocation` (URI form). Full details in [CHANGELOG.md](CHANGELOG.md) and [docs/adr/002-v041-protocol-additions.md](docs/adr/002-v041-protocol-additions.md); worked examples in [docs/examples.md](docs/examples.md).
 
 ## Why decision provenance?
 
@@ -202,9 +204,9 @@ Claude: -> trace_end_session(summary="Analyzed 47 passages...")
 
 | Type | Description | Key Fields |
 |------|-------------|------------|
-| **tool_call** | MCP tool invocation on another server | server, name, input, output, status, `retries_event_id` |
+| **tool_call** | Invocation of an MCP server, host-internal helper, or external tool | server, name, input, output, status, `retries_event_id`, **`host`** (v0.4.1: `mcp`/`internal`/`external`), **`parent_event_id`** (v0.4.1: links dispatched child to controller) |
 | **decision** | Methodological decision with attribution | description, rationale, disposition, `suggestion_type`, `revises_event_id` |
-| **annotation** | Learning, gotcha, correction, observation, todo, question | category, content, `corrects_event_ids` |
+| **annotation** | Learning, gotcha, correction, observation, todo, question, **discovery** (v0.4.1) | category, content, `corrects_event_ids` (v0.4.1: MAY use URI-form schemes `external:`, `jsonl:`, `subagent:`, `tool-result:`) |
 | **state_change** | Environment or configuration change | description, field, old_value, new_value |
 | **contribution** | Work product with direction/execution attribution | description, direction, execution, artifact, `related_decision_ids` |
 
@@ -249,7 +251,7 @@ TRACE implements the **Decision Provenance for AI-Assisted Workflows** specifica
 | Artifact | Location | Role |
 |----------|----------|------|
 | **Specification** | [`docs/specification.md`](docs/specification.md) | Authoritative definition of the data model, semantics, and conformance rules. Technology-neutral. |
-| **JSON Schema** | [`schemas/trace-v0.3.json`](schemas/trace-v0.3.json) | Machine-readable formalization. Any JSON document validating against this schema is a conforming session document. |
+| **JSON Schema** | [`schemas/trace-v0.4.json`](schemas/trace-v0.4.json) | Machine-readable formalization. Any JSON document validating against this schema is a conforming session document. |
 | **Reference implementation** | This repository (`trace-mcp`) | An MCP server that produces conforming documents. One possible implementation — not the only one. |
 
 The specification defines five event types (tool invocations, decisions, annotations, state changes, contributions), a decision lifecycle model (proposed / accepted / revised / rejected), and an actor taxonomy (human / ai / system). Any tool that produces JSON documents conforming to the schema implements the standard — no dependency on MCP, Python, or TRACE itself.
