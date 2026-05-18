@@ -100,33 +100,39 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         tags: list[str] | None,
         limit: int,
     ) -> list[dict]:
-        ks = store.load_store(project)
-        if not ks.learnings:
-            return []
-        stale = _needs_embedding(ks)
-        embedded = await _embed_learnings(stale) if stale else False
-        results = await matching.recall_learnings(
-            ks.learnings,
-            context=context,
-            context_tags=tags,
-            threshold=None,  # Use backend's default_threshold
-            limit=limit,
-            backend=_backend,
-            decay_config=_decay_params,
-        )
-        if results or embedded:
-            store.save_store(ks)
-        return results
+        # P9(b) / A-R3-2: lock the full load→embed→save RMW span. This is
+        # the highest-frequency knowledge-store mutator (core auto-recall);
+        # leaving it unlocked allowed a concurrent locked add to be
+        # clobbered (lost-update — caught by the final-gate reviewers).
+        with store.project_lock(project):
+            ks = store.load_store(project)
+            if not ks.learnings:
+                return []
+            stale = _needs_embedding(ks)
+            embedded = await _embed_learnings(stale) if stale else False
+            results = await matching.recall_learnings(
+                ks.learnings,
+                context=context,
+                context_tags=tags,
+                threshold=None,  # Use backend's default_threshold
+                limit=limit,
+                backend=_backend,
+                decay_config=_decay_params,
+            )
+            if results or embedded:
+                store.save_store(ks)
+            return results
 
     async def _extract_hook(project: str, session_id: str) -> list[str]:
-        ks = store.load_store(project)
-        sess = await storage.get_session(session_id)
-        new_ids = await extraction.extract_from_session_auto(ks, sess, _config)
-        if new_ids:
-            new_set = set(new_ids)
-            to_embed = [lrn for lrn in ks.learnings if lrn.id in new_set and lrn.embedding is None]
-            await _embed_learnings(to_embed)
-            store.save_store(ks)
+        with store.project_lock(project):  # P9(b) / A-R3-2
+            ks = store.load_store(project)
+            sess = await storage.get_session(session_id)
+            new_ids = await extraction.extract_from_session_auto(ks, sess, _config)
+            if new_ids:
+                new_set = set(new_ids)
+                to_embed = [lrn for lrn in ks.learnings if lrn.id in new_set and lrn.embedding is None]
+                await _embed_learnings(to_embed)
+                store.save_store(ks)
         return new_ids
 
     register_recall_hook(_recall_hook)
@@ -148,27 +154,30 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         When threshold is None, uses the backend's default (BM25: 0.15, LLM: 0.2).
         """
         try:
-            ks = store.load_store(project)
-            if not ks.learnings:
-                return json.dumps({"project": project, "results": [], "total": 0})
-            if not context and not tags:
-                results = store.list_learnings(ks)
-                return json.dumps({"project": project, "results": results[:limit], "total": len(results)})
-            # Lazy-embed: generate (or regenerate) embeddings for learnings that need them
-            stale = _needs_embedding(ks)
-            embedded = await _embed_learnings(stale) if stale else False
-            results = await matching.recall_learnings(
-                ks.learnings,
-                context=context or "",
-                context_tags=tags,
-                threshold=threshold,
-                limit=limit,
-                backend=_backend,
-                decay_config=_decay_params,
-            )
-            if results or embedded:
-                store.save_store(ks)
-            return json.dumps({"project": project, "results": results, "total": len(results)})
+            # P9(b) / A-R3-2: lock the full span (recall may backfill
+            # embeddings and save — a read-modify-write).
+            with store.project_lock(project):
+                ks = store.load_store(project)
+                if not ks.learnings:
+                    return json.dumps({"project": project, "results": [], "total": 0})
+                if not context and not tags:
+                    results = store.list_learnings(ks)
+                    return json.dumps({"project": project, "results": results[:limit], "total": len(results)})
+                # Lazy-embed: generate (or regenerate) embeddings for learnings that need them
+                stale = _needs_embedding(ks)
+                embedded = await _embed_learnings(stale) if stale else False
+                results = await matching.recall_learnings(
+                    ks.learnings,
+                    context=context or "",
+                    context_tags=tags,
+                    threshold=threshold,
+                    limit=limit,
+                    backend=_backend,
+                    decay_config=_decay_params,
+                )
+                if results or embedded:
+                    store.save_store(ks)
+                return json.dumps({"project": project, "results": results, "total": len(results)})
         except Exception as exc:
             from trace_mcp.extensions.learn.config import LLMFallbackError
 
@@ -201,36 +210,40 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                 return json.dumps({
                     "error": f"Invalid category '{category}'. Must be one of: {_VALID_CATEGORIES}",
                 })
-            ks = store.load_store(project)
-            if _config.dedup_enabled:
-                result = store.add_learning_dedup(
-                    ks,
-                    content=content,
-                    category=cast(LearningCategory, category),
-                    source_session=source_session,
-                    source_event=source_event,
-                    tags=tags,
-                    dedup_threshold=_config.dedup_threshold,
-                )
-                if result.is_duplicate:
-                    return json.dumps({
-                        "duplicate": True,
-                        "similar_to": result.duplicate_of,
-                        "existing": store.learning_to_dict(result.learning),
-                    })
-                lrn = result.learning
-            else:
-                lrn = store.add_learning(
-                    ks,
-                    content=content,
-                    category=cast(LearningCategory, category),
-                    source_session=source_session,
-                    source_event=source_event,
-                    tags=tags,
-                )
-            await _embed_learnings([lrn])
-            store.save_store(ks)
-            return json.dumps({"added": store.learning_to_dict(lrn)})
+            # P9(b) / Round-3 A-R3-2: lock the full load→mutate→save span
+            # so concurrent multi-session adds to the same project don't
+            # lose updates (last-writer-wins on the shared store).
+            with store.project_lock(project):
+                ks = store.load_store(project)
+                if _config.dedup_enabled:
+                    result = store.add_learning_dedup(
+                        ks,
+                        content=content,
+                        category=cast(LearningCategory, category),
+                        source_session=source_session,
+                        source_event=source_event,
+                        tags=tags,
+                        dedup_threshold=_config.dedup_threshold,
+                    )
+                    if result.is_duplicate:
+                        return json.dumps({
+                            "duplicate": True,
+                            "similar_to": result.duplicate_of,
+                            "existing": store.learning_to_dict(result.learning),
+                        })
+                    lrn = result.learning
+                else:
+                    lrn = store.add_learning(
+                        ks,
+                        content=content,
+                        category=cast(LearningCategory, category),
+                        source_session=source_session,
+                        source_event=source_event,
+                        tags=tags,
+                    )
+                await _embed_learnings([lrn])
+                store.save_store(ks)
+                return json.dumps({"added": store.learning_to_dict(lrn)})
         except Exception as exc:
             from trace_mcp.extensions.learn.config import LLMFallbackError
 
@@ -271,12 +284,13 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         Use this when a learning is outdated, wrong, or no longer relevant.
         """
         try:
-            ks = store.load_store(project)
-            removed = store.remove_learning(ks, learning_id)
-            if not removed:
-                return json.dumps({"removed": False, "error": f"Learning '{learning_id}' not found"})
-            store.save_store(ks)
-            return json.dumps({"removed": True, "learning_id": learning_id})
+            with store.project_lock(project):  # P9(b) / A-R3-2
+                ks = store.load_store(project)
+                removed = store.remove_learning(ks, learning_id)
+                if not removed:
+                    return json.dumps({"removed": False, "error": f"Learning '{learning_id}' not found"})
+                store.save_store(ks)
+                return json.dumps({"removed": True, "learning_id": learning_id})
         except Exception:
             logger.exception("Error removing learning")
             return json.dumps({"error": "Failed to remove learning", "project": project})
@@ -298,38 +312,40 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         Otherwise, extracts from all sessions for the project.
         """
         try:
-            ks = store.load_store(project)
-            all_new_ids: list[str] = []
+            # P9(b) / A-R3-2: lock the full multi-session extract→embed→save.
+            with store.project_lock(project):
+                ks = store.load_store(project)
+                all_new_ids: list[str] = []
 
-            if session_id:
-                session = await storage.get_session(session_id)
-                new_ids = await extraction.extract_from_session_auto(ks, session, _config)
-                all_new_ids.extend(new_ids)
-            else:
-                summaries = await storage.list_sessions(project=project, limit=1000)
-                for s in summaries:
-                    try:
-                        session = await storage.get_session(s["id"])
-                        new_ids = await extraction.extract_from_session_auto(ks, session, _config)
-                        all_new_ids.extend(new_ids)
-                    except FileNotFoundError:
-                        continue
+                if session_id:
+                    session = await storage.get_session(session_id)
+                    new_ids = await extraction.extract_from_session_auto(ks, session, _config)
+                    all_new_ids.extend(new_ids)
+                else:
+                    summaries = await storage.list_sessions(project=project, limit=1000)
+                    for s in summaries:
+                        try:
+                            session = await storage.get_session(s["id"])
+                            new_ids = await extraction.extract_from_session_auto(ks, session, _config)
+                            all_new_ids.extend(new_ids)
+                        except FileNotFoundError:
+                            continue
 
-            # Batch-embed newly extracted learnings
-            if all_new_ids:
-                new_set = set(all_new_ids)
-                to_embed = [lrn for lrn in ks.learnings if lrn.id in new_set and lrn.embedding is None]
-                await _embed_learnings(to_embed)
-                store.save_store(ks)
+                # Batch-embed newly extracted learnings
+                if all_new_ids:
+                    new_set = set(all_new_ids)
+                    to_embed = [lrn for lrn in ks.learnings if lrn.id in new_set and lrn.embedding is None]
+                    await _embed_learnings(to_embed)
+                    store.save_store(ks)
 
-            return json.dumps(
-                {
-                    "project": project,
-                    "new_learnings": len(all_new_ids),
-                    "new_ids": all_new_ids,
-                    "total_learnings": len(ks.learnings),
-                }
-            )
+                return json.dumps(
+                    {
+                        "project": project,
+                        "new_learnings": len(all_new_ids),
+                        "new_ids": all_new_ids,
+                        "total_learnings": len(ks.learnings),
+                    }
+                )
         except Exception as exc:
             from trace_mcp.extensions.learn.config import LLMFallbackError
 

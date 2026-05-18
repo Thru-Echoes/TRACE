@@ -73,9 +73,10 @@ async def resolve_decision(
     suppress = os.environ.get("TRACE_SUPPRESS_SELF_RESOLVE_WARNING", "").lower() == "true"
 
     # FM1: Same-instance self-resolution
-    # v0.4.1: generalized from ai-only to any same-instance pair per spec §3.6
-    # Proposer Identity Rule + Attribution rule. Detects when the same Actor
-    # instance (type AND id) proposes and resolves the decision.
+    # v0.4.1 + Round-3 A1 / evt_016: generalized from ai-only per spec §3.6
+    # Proposer Identity Rule. Detects when the same Actor instance (type AND
+    # id) proposes and resolves. The ai→ai case warns unconditionally; the
+    # generalized non-ai case is gated to multi-actor sessions (see below).
     proposer = target.decision.proposed_by
     is_self_resolution = (
         proposer.type == resolved_by_type
@@ -84,28 +85,38 @@ async def resolve_decision(
 
     if is_self_resolution and not suppress:
         if resolved_by_type == "ai":
-            # Backward-compat message preserved for ai→ai (the original v0.3 case).
+            # Backward-compat message preserved for ai→ai (the original v0.3
+            # case). Fires unconditionally — AI must not resolve its own
+            # proposal regardless of how many actor types the session has.
             guard_warnings.append(
                 "AI resolved its own proposal. Decisions proposed by AI "
                 "should normally be resolved by a human."
             )
-        else:
-            # v0.4.1: catches the evt_025 pattern — human→human (or system→system)
-            # same-instance self-resolution that the original FM1 silently allowed.
+        elif session.is_multi_actor():
+            # v0.4.1 + Round-3 A1 / evt_016: the evt_025 pattern —
+            # human→human (or system→system) same-instance self-resolution.
+            # Gated to multi-actor sessions (≥2 actor types): in a
+            # single-actor session this is legitimate, not an attribution
+            # concern (the false positive A1 named with production data).
             guard_warnings.append(
                 "Same actor instance proposed and resolved this decision. "
                 "Per spec §3.6, in multi-actor workflows the proposer should "
                 "differ from the resolver."
             )
 
-    # FM25: Suspiciously fast resolution (propose + resolve <5s by same instance)
-    # v0.4.1: generalized from ai-only to any same-instance pair.
+    # FM25: Suspiciously fast resolution (propose + resolve <5s by same
+    # instance). ai→ai always warns (fast AI self-resolution is suspicious
+    # regardless of actor count); the general non-ai case is gated to
+    # multi-actor sessions, mirroring FM1 (Round-3 amendment A-R3-1 — without
+    # this split, gating FM25 wholesale would silently drop the §3-correct
+    # ai→ai FM25 warning).
     elapsed = (datetime.now(UTC) - target.timestamp).total_seconds()
     if elapsed < 5.0 and is_self_resolution and not suppress:
-        guard_warnings.append(
-            f"Decision proposed and self-resolved in {elapsed:.1f}s. "
-            "Was the other actor consulted before resolving?"
-        )
+        if resolved_by_type == "ai" or session.is_multi_actor():
+            guard_warnings.append(
+                f"Decision proposed and self-resolved in {elapsed:.1f}s. "
+                "Was the other actor consulted before resolving?"
+            )
 
     # FM31: Rejection -> suggest correction annotation
     if disposition == "rejected":

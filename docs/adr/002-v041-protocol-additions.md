@@ -29,7 +29,9 @@ The v0.3 spec at §3.6 line 220 says "the actor who proposes a decision MUST NOT
 
 The waggle audit's `evt_025` made this concrete: TRACE logged `proposed_by=human` even though the AI's words populated the entire `description` field. Three rounds of independent verification all concluded this was the dominant attribution failure mode.
 
-**Decision:** `proposed_by` MUST identify the actor who authored the CONTENT of the proposal (whose words populate `description`), regardless of who spoke last. A 4-row disambiguation table was added to spec §3.6 covering the canonical patterns. The rule is enforced at log time (FM1 generalized to all same-instance pairs) AND at session-end (new `attribution_warning_count` in `AttributionAudit`).
+**Decision:** `proposed_by` MUST identify the actor who authored the CONTENT of the proposal (whose words populate `description`), regardless of who spoke last. A 4-row disambiguation table was added to spec §3.6 covering the canonical patterns. The rule is enforced at log time (FM1/FM25) AND at session-end (`attribution_warning_count` in `AttributionAudit`).
+
+**Amended 2026-05-18 (Round-3 A1 / decision `evt_016`):** the original v0.4.1 implementation generalized FM1 to *all* same-instance pairs unconditionally, which false-fired on legitimate single-actor sessions (solo human, `system→system`) — the exact false positive the waggle audit identified with production data. The generalized **non-`ai`** same-instance check now fires only when the session involves **≥2 distinct actor *types*** (union of `metadata.participants` and event actors; mirrored in `Session.is_multi_actor()` and the `decision-audit.sh` hook). The pre-existing v0.3 **`ai→ai`** self-resolution warning remains **unconditional** (AI must not resolve its own proposal regardless of actor count). Spec §3.6 ("when the workflow involves multiple actors") was already correct; only the implementation and this record were brought into line with it.
 
 **Considered and rejected:** adding a new field like `proposal_authored_by` separate from `proposed_by`. This would just shift the bug to a new location.
 
@@ -97,7 +99,7 @@ The fix plan was developed over multiple rounds of independent subagent verifica
 
 **Adapter assets updated:**
 - `CLAUDE_BLOCK.md` (the block `trace-mcp-init` installs into consumer projects) now documents Proposer Identity Rule, URI-form references, discovery category, snippet absence markers, and subagent dispatch logging.
-- `decision-audit.sh` hook script generalizes from `ai`-only self-resolution check to any same-instance pair, and surfaces the new audit fields (missing snippets, attribution warnings).
+- `decision-audit.sh` hook script generalizes the `ai`-only self-resolution check to non-`ai` same-instance pairs **in multi-actor sessions** (Round-3 A1 / `evt_016`; mirrors the server-side `Session.is_multi_actor()` guard — single-actor sessions are exempt), and surfaces the new audit fields (missing snippets, attribution warnings).
 
 **Delivered in this batch (originally listed as deferred):**
 - Schema file rename `schemas/trace-v0.3.json` → `schemas/trace-v0.4.json` with the `$id` cascade applied to `scripts/generate_schema.py`, `scripts/validate_session.py`, README, CONTRIBUTING, spec, and conformance tests. The PROV namespace URI and `Session.context` URL remain at v0.3 per D6.

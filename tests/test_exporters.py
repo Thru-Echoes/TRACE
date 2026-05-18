@@ -193,6 +193,17 @@ class TestMarkdownExport:
 # ── PROV JSON-LD Export ──────────────────────────────────────────────────────
 
 
+def _nodes(raw: str) -> dict[str, dict]:
+    """Index the conformant JSON-LD @graph by @id."""
+    doc = json.loads(raw)
+    return {n["@id"]: n for n in doc["@graph"]}
+
+
+def _types(node: dict) -> set[str]:
+    t = node.get("@type")
+    return set(t) if isinstance(t, list) else {t} if t else set()
+
+
 class TestProvJsonLdExport:
     def test_has_context(self, sample_session: Session) -> None:
         raw = export_prov_jsonld(sample_session)
@@ -202,39 +213,26 @@ class TestProvJsonLdExport:
         assert "trace" in ctx
 
     def test_has_agents(self, sample_session: Session) -> None:
-        raw = export_prov_jsonld(sample_session)
-        doc = json.loads(raw)
-        bundle_key = list(doc["bundle"].keys())[0]
-        bundle = doc["bundle"][bundle_key]
-        assert "agent" in bundle
-        assert any("researcher-jane" in k for k in bundle["agent"])
+        nodes = _nodes(export_prov_jsonld(sample_session))
+        agents = [n for n in nodes.values() if "prov:Agent" in _types(n)]
+        assert agents
+        assert any("researcher-jane" in n["@id"] for n in agents)
 
     def test_has_activities(self, sample_session: Session) -> None:
-        raw = export_prov_jsonld(sample_session)
-        doc = json.loads(raw)
-        bundle_key = list(doc["bundle"].keys())[0]
-        bundle = doc["bundle"][bundle_key]
-        assert "activity" in bundle
+        nodes = _nodes(export_prov_jsonld(sample_session))
+        assert any("prov:Activity" in _types(n) for n in nodes.values())
 
     def test_decision_revision_link(self, sample_session: Session) -> None:
-        raw = export_prov_jsonld(sample_session)
-        doc = json.loads(raw)
-        bundle_key = list(doc["bundle"].keys())[0]
-        bundle = doc["bundle"][bundle_key]
-        # evt_003 revises evt_002 so wasRevisionOf should exist
-        assert "wasRevisionOf" in bundle
-        revisions = bundle["wasRevisionOf"]
-        assert len(revisions) > 0
+        nodes = _nodes(export_prov_jsonld(sample_session))
+        # evt_003 revises evt_002 → some node carries prov:wasRevisionOf
+        assert any("prov:wasRevisionOf" in n for n in nodes.values())
 
     def test_contribution_activity(self, sample_session: Session) -> None:
-        raw = export_prov_jsonld(sample_session)
-        doc = json.loads(raw)
-        bundle_key = list(doc["bundle"].keys())[0]
-        bundle = doc["bundle"][bundle_key]
+        nodes = _nodes(export_prov_jsonld(sample_session))
         # evt_005 is a contribution
-        assert "trace:evt_005" in bundle["activity"]
-        activity = bundle["activity"]["trace:evt_005"]
-        assert activity["prov:type"] == "trace:Contribution"
+        activity = nodes["trace:evt_005"]
+        assert "prov:Activity" in _types(activity)
+        assert activity["trace:kind"] == "Contribution"
         assert activity["trace:direction"] == "human"
         assert activity["trace:execution"] == "ai"
 
@@ -262,11 +260,11 @@ class TestEmptySessionExport:
         assert "Total events" in md
 
     def test_empty_session_prov_jsonld_valid(self) -> None:
-        """Empty session produces valid JSON-LD."""
+        """Empty session produces valid conformant JSON-LD."""
         raw = export_prov_jsonld(self._empty_session())
         doc = json.loads(raw)
         assert "@context" in doc
-        assert "bundle" in doc
+        assert "@graph" in doc and isinstance(doc["@graph"], list)
 
 
 class TestMarkdownEdgeCases:
@@ -332,12 +330,11 @@ class TestMarkdownEdgeCases:
                 ),
             ],
         )
-        raw = export_prov_jsonld(session)
-        doc = json.loads(raw)
-        bundle_key = list(doc["bundle"].keys())[0]
-        bundle = doc["bundle"][bundle_key]
-        activity = bundle["activity"]["trace:evt_001"]
-        assert activity["trace:warnings"] == ["Watch out for false positives"]
+        nodes = _nodes(export_prov_jsonld(session))
+        activity = nodes["trace:evt_001"]
+        # Non-scalar property values are JSON-stringified to remain valid
+        # JSON-LD literals; round-trips back to the original list.
+        assert json.loads(activity["trace:warnings"]) == ["Watch out for false positives"]
 
     def test_very_long_description_markdown(self) -> None:
         """A 10K character description doesn't crash markdown export."""

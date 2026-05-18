@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.4.1] — In progress
+## [0.4.1] — 2026-05-18
 
 > **Audit-driven release.** Targets the five quality issues surfaced by the 2026-05-13 waggle-session audit (`audit_2026-05-13_waggle_session/trace_audit_findings.md`). All changes are additive and backward-compatible with v0.3.x and v0.4.0 wire format. Three rounds of independent verification incorporated; remediation plan and HTML checklist live alongside the audit.
 
@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added (server-side audit)
 - `AttributionAudit` extended with five new counts: `missing_snippet_contribution_count`, `missing_snippet_correction_count`, `explicit_absence_snippet_count`, `orphan_discovery_hint_count`, `attribution_warning_count`. Surfaced in the session-end audit block in severity order.
 - Structural attribution-warning detector: counts decisions where `proposed_by == resolved_by` (same Actor instance) in multi-actor sessions — catches the question→AI-proposal→human-accept self-resolution pattern without regex.
-- Orphan-discovery hint: surfaces contributions whose description contains discovery-language (`"discovered"`, `"found a bug"`, `"load-bearing fix"`, `"turned out"`) without a near-in-time discovery/correction/gotcha annotation.
+- Orphan-discovery hint: surfaces, as a low-severity hint (not a warning), contributions whose description contains discovery-language (`"discovered"`, `"found a bug"`, `"load-bearing fix"`) without a near-in-time discovery/correction/gotcha annotation.
 
 ### Added (spec)
 - §3.4.1 — normative MUST clause on `conversation_snippet` for `contribution` and `correction`-category `annotation`; absence-marker convention (`<autonomous-stretch>`, `<no recent user message>`).
@@ -169,7 +169,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tool-call logging, session and event queries.
 - Knowledge persistence, behavioral checks, checkpoints.
 
-[Unreleased]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.1.0...v0.2.0

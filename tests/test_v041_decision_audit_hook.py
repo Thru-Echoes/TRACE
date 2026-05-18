@@ -71,10 +71,11 @@ class TestHookExecutesUnderMacOSBash:
         assert "syntax error" not in result.stderr.lower()
         assert "command not found" not in result.stderr.lower()
 
-    def test_hook_handles_session_with_human_self_resolution(self, tmp_path: Path) -> None:
-        """v0.4.1: same-instance human→human self-resolution must be flagged.
-
-        Previously this was silently allowed (v0.3 FM1 was ai→ai only).
+    def test_hook_single_actor_human_self_resolution_not_flagged(self, tmp_path: Path) -> None:
+        """Round-3 A1 / decision evt_016 (M1/A-R3-4): in a SINGLE-actor
+        session ({human} only) the hook must NOT emit the same-instance
+        self-resolution warning — mirrors the server-side multi-actor
+        guard. This restores the contract Round-1/2/3 found inverted.
         """
         session = {
             "id": "trace_smoke",
@@ -98,8 +99,45 @@ class TestHookExecutesUnderMacOSBash:
 
         result = _run_hook(tmp_path)
         assert result.returncode == 0
+        assert "same-instance self-resolution" not in result.stdout.lower(), (
+            f"single-actor session must not be flagged, got: {result.stdout!r}"
+        )
+
+    def test_hook_multi_actor_human_self_resolution_flagged(self, tmp_path: Path) -> None:
+        """Round-3 A1: in a MULTI-actor session (≥2 actor types across
+        participants ∪ event actors) the same-instance human→human
+        self-resolution IS the evt_025 pattern and MUST be flagged.
+        """
+        session = {
+            "id": "trace_smoke",
+            "trace_version": "0.4.1",
+            "metadata": {
+                "project": "smoke",
+                "participants": [
+                    {"type": "human", "id": "researcher"},
+                    {"type": "ai", "id": "claude"},
+                ],
+            },
+            "events": [
+                {
+                    "id": "evt_001",
+                    "type": "decision",
+                    "actor": {"type": "human", "id": "researcher"},
+                    "decision": {
+                        "description": "lower threshold",
+                        "proposed_by": {"type": "human", "id": "researcher"},
+                        "disposition": "accepted",
+                        "resolved_by": {"type": "human", "id": "researcher"},
+                    },
+                },
+            ],
+        }
+        _write_session(tmp_path, "trace_multi_actor_self", session)
+
+        result = _run_hook(tmp_path)
+        assert result.returncode == 0
         assert "same-instance self-resolution" in result.stdout.lower(), (
-            f"expected same-instance warning, got: {result.stdout!r}"
+            f"expected same-instance warning in multi-actor session, got: {result.stdout!r}"
         )
 
     def test_hook_handles_missing_snippet_on_contribution(self, tmp_path: Path) -> None:

@@ -2,7 +2,20 @@
   "mcpServers": {
     "trace": {
       "command": "uvx",
-      "args": ["--from", ".", "--refresh-package", "trace-mcp", "trace-mcp"]
+      "args": [
+        "--from",
+        ".",
+        "--with",
+        "openai",
+        "--with",
+        "numpy",
+        "--with",
+        "model2vec",
+        "--with",
+        "filelock",
+        "--refresh",
+        "trace-mcp"
+      ]
     }
   }
 }
