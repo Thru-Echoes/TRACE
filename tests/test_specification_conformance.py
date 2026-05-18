@@ -949,52 +949,29 @@ class TestSpecProvMapping:
         """PROV export generates agent, activity, entity, and relationships."""
         doc_dict = await _trace_generated_session(tmp_path)
         session = Session.model_validate(doc_dict)
-        raw = export_prov_jsonld(session)
-        prov = json.loads(raw)
+        prov = json.loads(export_prov_jsonld(session))
+        graph = prov["@graph"]
 
-        bundle_key = list(prov["bundle"].keys())[0]
-        bundle = prov["bundle"][bundle_key]
+        def _t(n: dict) -> set:
+            tv = n.get("@type")
+            return set(tv) if isinstance(tv, list) else {tv} if tv else set()
 
-        assert "agent" in bundle, "PROV export missing agents"
-        assert "activity" in bundle, "PROV export missing activities"
-        assert "entity" in bundle, "PROV export missing entities"
+        assert any("prov:Agent" in _t(n) for n in graph), "PROV export missing agents"
+        assert any("prov:Activity" in _t(n) for n in graph), "PROV export missing activities"
+        assert any("prov:Entity" in _t(n) for n in graph), "PROV export missing entities"
 
-        # Decisions should be activities
-        decision_activities = {
-            k: v for k, v in bundle["activity"].items()
-            if v.get("prov:type") == "trace:Decision"
-        }
-        assert len(decision_activities) >= 1
-
-        # Contributions should be activities
-        contribution_activities = {
-            k: v for k, v in bundle["activity"].items()
-            if v.get("prov:type") == "trace:Contribution"
-        }
-        assert len(contribution_activities) >= 1
-
-        # Tool call inputs should be entities
-        input_entities = {
-            k: v for k, v in bundle["entity"].items()
-            if v.get("prov:type") == "trace:ToolInput"
-        }
-        assert len(input_entities) >= 1
-
-        # Annotations should be entities with wasAttributedTo
-        assert "wasAttributedTo" in bundle
+        assert sum(1 for n in graph if n.get("trace:kind") == "Decision") >= 1
+        assert sum(1 for n in graph if n.get("trace:kind") == "Contribution") >= 1
+        assert sum(1 for n in graph if n.get("trace:kind") == "ToolInput") >= 1
+        # Annotations carry prov:wasAttributedTo
+        assert any("prov:wasAttributedTo" in n for n in graph)
 
     async def test_prov_export_has_revision_links(self, tmp_path: Path) -> None:
         """Decision chains produce wasRevisionOf in PROV."""
         doc_dict = await _trace_generated_session(tmp_path)
         session = Session.model_validate(doc_dict)
-        raw = export_prov_jsonld(session)
-        prov = json.loads(raw)
-
-        bundle_key = list(prov["bundle"].keys())[0]
-        bundle = prov["bundle"][bundle_key]
-
-        assert "wasRevisionOf" in bundle
-        assert len(bundle["wasRevisionOf"]) >= 1
+        prov = json.loads(export_prov_jsonld(session))
+        assert any("prov:wasRevisionOf" in n for n in prov["@graph"])
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
