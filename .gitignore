@@ -87,3 +87,13 @@ logs/
 *.temp
 *.bak
 *.orig
+
+# Local-only working trails — NEVER push to the repo.
+# Dated audit/review directories document the status of changes,
+# cross-project context, session JSON dumps, etc. They are strictly local
+# working artifacts. Explicit entries cover the two committed-in-error
+# precedents; the date-prefix patterns prevent future recurrences.
+audit_2026-05-13_waggle_session/
+review_2026-05-18_v041_status/
+audit_2*-*-*_*/
+review_2*-*-*_*/
