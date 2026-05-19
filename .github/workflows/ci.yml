@@ -42,5 +42,8 @@ jobs:
       - name: Type check (pyright)
         run: uv run pyright src/
 
+      - name: Core/extension boundary invariant (governance ADR 003)
+        run: uv run pytest tests/test_v041_core_extension_boundary.py -q
+
       - name: Tests
         run: uv run pytest --tb=short

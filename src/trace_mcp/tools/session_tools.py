@@ -65,15 +65,15 @@ def _is_explicit_absence(s: str | None) -> bool:
 
 
 # v0.4.1: phrase list for orphan-discovery hint detector (spec §3.7 + §8.1).
-# Tightened per Round 3 amendments: dropped "all along" and "as it turns
-# out" (high false-positive rate in routine prose). The remaining phrases
-# are technical-discovery markers that strongly suggest a load-bearing
-# finding that should have been its own discovery/correction/gotcha event.
+# Tightened in the v0.4.1 remediation (P4 / A8): dropped the over-broad
+# "turned out" (false-positive on routine prose like "turned out cleaner").
+# The remaining phrases are technical-discovery markers that strongly
+# suggest a load-bearing finding that should have been its own
+# discovery/correction/gotcha event.
 _DISCOVERY_PHRASES = (
     "discovered",
     "found a bug",
     "load-bearing fix",
-    "turned out",
 )
 
 
@@ -322,14 +322,19 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
                 if d.proposed_by.type == d.resolved_by.type == "ai":
                     self_resolved_ids.append(e.id)
 
-                # v0.4.1 L5.4: STRUCTURAL attribution-warning detector.
-                # Catches same-instance self-resolution regardless of actor
-                # type. Per spec §3.6 Proposer Identity Rule. Catches the
-                # evt_025 pattern (human-proposes plan, human-accepts) that
-                # the ai-only check above silently allows.
+                # v0.4.1 L5.4 + Round-3 A1 / evt_016: STRUCTURAL
+                # attribution-warning detector. Same-instance self-resolution
+                # (type AND id), gated to MULTI-ACTOR sessions (≥2 actor
+                # types). Catches the evt_025 pattern (human-proposes plan,
+                # human-accepts) in a real multi-actor workflow, while not
+                # false-firing on single-actor sessions (solo human, ai→ai
+                # solo, system→system) — the false positive A1 named with
+                # production data. ai→ai is still surfaced separately and
+                # unconditionally via self_resolved_ids above.
                 if (
                     d.proposed_by.type == d.resolved_by.type
                     and d.proposed_by.id == d.resolved_by.id
+                    and session.is_multi_actor()
                 ):
                     attribution_warning_ids.append(e.id)
 
@@ -375,12 +380,10 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
             f"{unlinked_correction_count} correction(s) lack corrects_event_ids — "
             "link them for full provenance."
         )
-    if orphan_discovery_ids:
-        audit_warnings.append(
-            f"{len(orphan_discovery_ids)} contribution(s) contain discovery-language "
-            "but have no near-in-time discovery/correction/gotcha annotation — "
-            "consider logging at the moment of discovery per spec §8.1."
-        )
+    # P4 / A8: orphan-discovery is surfaced ONLY as the low-severity
+    # `orphan_discovery_hint_count` (rendered separately). It is deliberately
+    # NOT pushed into `audit_warnings` — duplicating a heuristic signal at
+    # warning severity over-weighted it (Round-1/2/3 finding).
     if missing_snippet_contribution or missing_snippet_correction:
         parts3: list[str] = []
         if missing_snippet_contribution:
@@ -509,12 +512,17 @@ async def start_session(
     )
 
     path = storage._session_path(session.id) if hasattr(storage, "_session_path") else "disk"  # type: ignore[attr-defined]
+    # Core-level, fail-safe probe of the OPTIONAL trace-learn extension
+    # (keeps the core/extension boundary intact — governance evt_002).
+    from trace_mcp.extension_status import get_extension_status
+
     return (
         f"TRACE audit logging is now active.\n"
         f"Session: {session.id}\n"
         f"Project: {project}\n"
         f"File: {path}\n"
-        f"All tool calls, decisions, and annotations will be recorded."
+        f"All tool calls, decisions, and annotations will be recorded.\n"
+        f"{get_extension_status()}"
     )
 
 

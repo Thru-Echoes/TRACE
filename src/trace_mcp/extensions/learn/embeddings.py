@@ -12,7 +12,7 @@ Auto-selection: openai (if key + pkg) → model2vec (if pkg) → None.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     import numpy as np
@@ -53,7 +53,13 @@ class EmbeddingProvider(Protocol):
     """Interface for embedding generation backends."""
 
     model_name: str
-    dimensions: int
+
+    @property
+    def dimensions(self) -> int:
+        """Embedding vector dimensionality. Read-only so providers may
+        compute it lazily (P9(a)) without violating Protocol invariance;
+        a concrete ``int`` attribute also satisfies this."""
+        ...
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         """Generate embeddings for a batch of texts."""
@@ -97,15 +103,29 @@ class Model2VecEmbeddingProvider:
     def __init__(self, model_name: str = "minishlab/potion-base-8M") -> None:
         if not _HAS_MODEL2VEC:
             raise RuntimeError("model2vec package is required for local embeddings")
-        from model2vec import StaticModel
-
-        self._model = StaticModel.from_pretrained(model_name)
         self.model_name = model_name
-        self.dimensions: int = int(self._model.dim)
+        # P9(a): the StaticModel is loaded LAZILY on first embedding use, not
+        # at construction. The provider is built in the extension's
+        # register() at server startup; eager loading meant every concurrent
+        # session held a resident model (large idle RAM) and paid a
+        # cold-start latency (the FM7 E2E-flake root cause).
+        self._model: Any = None
+
+    def _get_model(self) -> Any:
+        """Load and cache the StaticModel on first use (P9(a) lazy load)."""
+        if self._model is None:
+            from model2vec import StaticModel
+
+            self._model = StaticModel.from_pretrained(self.model_name)
+        return self._model
+
+    @property
+    def dimensions(self) -> int:
+        return int(self._get_model().dim)
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         # model2vec encode is sync and <0.1 ms per query — safe inline.
-        embeddings = self._model.encode(texts)
+        embeddings = self._get_model().encode(texts)
         return [emb.tolist() for emb in embeddings]
 
 

@@ -154,8 +154,22 @@ def _compute_knowledge_metrics(project: str) -> dict[str, Any]:
 
     Returns total learnings, category breakdown, most-surfaced learnings,
     never-surfaced count, and average recall count.
+
+    Core/extension boundary (governance: TRACE decision evt_002): the
+    trace-learn extension is OPTIONAL. When it is absent, this fails open
+    with the zero sentinel so the core tool `trace_project_summary` stays
+    functional — `import` must never break a core tool.
     """
-    from trace_mcp.extensions.learn.store import load_store
+    try:
+        from trace_mcp.extensions.learn.store import load_store
+    except ImportError:
+        return {
+            "total": 0,
+            "by_category": {},
+            "most_surfaced": [],
+            "never_surfaced": 0,
+            "avg_recall_count": 0.0,
+        }
 
     store = load_store(project)
     if not store.learnings:

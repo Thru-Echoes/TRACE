@@ -68,3 +68,25 @@ class Session(BaseModel):
     def next_event_id(self) -> str:
         """Generate the next sequential event ID."""
         return f"evt_{len(self.events) + 1:03d}"
+
+    def distinct_actor_types(self) -> set[str]:
+        """Unique actor types across declared participants ∪ event actors.
+
+        Per Round-3 amendment A1 / decision evt_016: the union of declared
+        participants and observed event actors. When participants is empty
+        this naturally falls back to the event actors alone (Round-3 A7).
+        """
+        types: set[str] = {p.type for p in self.metadata.participants}
+        types.update(e.actor.type for e in self.events)
+        return types
+
+    def is_multi_actor(self) -> bool:
+        """True when the session involves ≥2 distinct actor *types*.
+
+        Gates the general-case (non-ai) same-instance self-resolution
+        warning (spec §3.6 Proposer Identity Rule). In a single-actor
+        session the same actor proposing and resolving is legitimate, not
+        an attribution concern — flagging it is the false positive Round-3
+        amendment A1 identified with production data.
+        """
+        return len(self.distinct_actor_types()) >= 2

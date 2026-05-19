@@ -142,7 +142,21 @@ class TestMCPConfiguration:
         )
         args = trace_config["args"]
         assert "--from" in args, "uvx args should include --from"
-        assert "--refresh-package" in args, "uvx args should include --refresh-package"
+        # trace-mcp is a LOCAL-only package (not published to PyPI): the
+        # source after --from must be the local path '.', never a PyPI
+        # package spec. This is the load-bearing local-only guarantee.
+        assert args[args.index("--from") + 1] == ".", (
+            "uvx --from must point at the local path '.', not a PyPI "
+            f"package. Got: {args[args.index('--from') + 1]!r}"
+        )
+        # A refresh flag must be present so local source changes are picked
+        # up on server restart. Either form is valid: `--refresh-package
+        # trace-mcp` (targeted) or `--refresh` (whole-cache, used when extra
+        # `--with` embedding deps are pinned).
+        assert "--refresh-package" in args or "--refresh" in args, (
+            "uvx args should include a refresh flag (--refresh-package or "
+            f"--refresh) so local edits are rebuilt. Got: {args}"
+        )
 
     def test_mcp_json_command_resolves(self) -> None:
         """The uvx command should be available on PATH."""

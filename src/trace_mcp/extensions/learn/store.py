@@ -10,6 +10,8 @@ import json
 import logging
 import os
 import tempfile
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,6 +37,55 @@ def _store_path(project: str, directory: str | None = None) -> Path:
     from trace_mcp.storage.json_file import sanitize_name
 
     return _get_directory(directory) / f"{sanitize_name(project)}.json"
+
+
+_warned_no_filelock = False
+
+
+@contextmanager
+def project_lock(project: str, directory: str | None = None) -> Iterator[None]:
+    """Per-project cross-process lock around a load→mutate→save span.
+
+    P9(b) / Round-3 amendment A-R3-2. The shared knowledge store is
+    read-modify-write; without a lock, two TRACE sessions mutating the
+    SAME project concurrently silently lose one update (last-writer-wins).
+    The lock is keyed per-project (not whole-directory) so unrelated
+    projects never contend — important with many concurrent sessions.
+
+    Degrades gracefully: if the optional ``filelock`` dependency is not
+    installed, this is a no-op (with a one-time warning) rather than a
+    hard failure — a missing lock lib must not break the extension. On
+    lock-acquire timeout it proceeds (warned) rather than blocking an
+    interactive tool indefinitely.
+    """
+    global _warned_no_filelock
+    try:
+        from filelock import FileLock, Timeout
+    except Exception:
+        if not _warned_no_filelock:
+            logger.warning(
+                "filelock not installed — knowledge-store writes are not "
+                "cross-process locked; concurrent multi-session writes to the "
+                "same project can lose updates. Install the trace-mcp 'all' or "
+                "'embeddings' extra (or `pip install filelock`) to enable."
+            )
+            _warned_no_filelock = True
+        yield
+        return
+
+    timeout = float(os.environ.get("TRACE_LOCK_TIMEOUT", "15"))
+    lock_path = str(_store_path(project, directory)) + ".lock"
+    try:
+        with FileLock(lock_path, timeout=timeout):
+            yield
+    except Timeout:
+        logger.warning(
+            "Timed out after %.0fs acquiring knowledge-store lock for "
+            "project %r; proceeding without the lock to avoid blocking.",
+            timeout,
+            project,
+        )
+        yield
 
 
 class StoreLoadError(Exception):
@@ -264,7 +315,21 @@ def save_embeddings_cache(store: KnowledgeStore, directory: str | None = None) -
             matrix[i] = lrn.embedding
 
     path = _embeddings_cache_path(store.project, directory)
-    np.save(str(path), matrix)
+    # P9(c) / Round-3 A-R3-8: atomic write — a crash or a concurrent reader
+    # must never observe a torn .npy sidecar. Mirrors the temp + os.replace
+    # atomic pattern used for the JSON store. Same-directory temp guarantees
+    # os.replace is an atomic rename on the same filesystem.
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), suffix=".npy.tmp")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            np.save(fh, matrix)
+        os.replace(tmp_name, path)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
     return path
 
 

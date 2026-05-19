@@ -238,6 +238,65 @@ class TestAttributionWarningDetector:
         assert audit.attribution_warning_count == 1
         assert event.id in audit.attribution_warning_ids
 
+    async def test_single_actor_human_self_resolution_no_warning(
+        self, storage: JsonFileStorage
+    ) -> None:
+        """Round-3 A1 / decision evt_016: in a SINGLE-actor session
+        ({human} only), human→human same-instance self-resolution must
+        NOT increment attribution_warning_count. This is the false
+        positive A1 named with production data."""
+        session = Session(
+            id="trace_single_actor_human",
+            metadata=SessionMetadata(project="single-actor"),
+        )
+        await storage.create_session(session)
+        same = Actor(type="human", id="researcher")
+        event = TraceEvent(
+            session_id=session.id,
+            type="decision",
+            actor=same,
+            decision=DecisionData(
+                description="solo decision",
+                proposed_by=same,
+                disposition="accepted",
+                resolved_by=same,
+            ),
+        )
+        await append_event(storage, session, event)
+
+        audit = _build_attribution_audit(session)
+        assert audit.attribution_warning_count == 0
+        assert audit.attribution_warning_ids == []
+
+    async def test_single_actor_ai_self_resolution_asymmetry(
+        self, storage: JsonFileStorage
+    ) -> None:
+        """Round-3 GAP-1: single-actor ai→ai self-resolution →
+        self_resolution_count==1 (ai-only, ungated, backward-compat) but
+        attribution_warning_count==0 (multi-actor-gated)."""
+        session = Session(
+            id="trace_single_actor_ai",
+            metadata=SessionMetadata(project="single-actor"),
+        )
+        await storage.create_session(session)
+        same = Actor(type="ai", id="claude")
+        event = TraceEvent(
+            session_id=session.id,
+            type="decision",
+            actor=same,
+            decision=DecisionData(
+                description="solo ai decision",
+                proposed_by=same,
+                disposition="accepted",
+                resolved_by=same,
+            ),
+        )
+        await append_event(storage, session, event)
+
+        audit = _build_attribution_audit(session)
+        assert audit.self_resolution_count == 1
+        assert audit.attribution_warning_count == 0
+
     async def test_different_human_instances_no_warning(
         self, storage: JsonFileStorage
     ) -> None:
@@ -343,6 +402,58 @@ class TestOrphanDiscoveryHint:
         audit = _build_attribution_audit(session)
         assert audit.orphan_discovery_hint_count == 1
         assert event.id in audit.orphan_discovery_event_ids
+
+    async def test_orphan_discovery_is_hint_only_not_a_warning(
+        self, storage: JsonFileStorage
+    ) -> None:
+        """P4 / A8: orphan-discovery is a low-severity HINT
+        (orphan_discovery_hint_count). It must NOT also be pushed into the
+        higher-severity `warnings` list — that duplicate over-weighted a
+        heuristic signal."""
+        session = _make_session("trace_test_orphan_not_warning")
+        await storage.create_session(session)
+        event = TraceEvent(
+            session_id=session.id,
+            type="contribution",
+            actor=Actor(type="ai", id="claude"),
+            contribution=ContributionData(
+                description="Implemented the matcher and discovered a Pydantic crash",
+                direction="ai",
+                execution="ai",
+            ),
+            context=EventContext(conversation_snippet="<autonomous-stretch>"),
+        )
+        await append_event(storage, session, event)
+
+        audit = _build_attribution_audit(session)
+        assert audit.orphan_discovery_hint_count == 1  # still surfaced as a hint
+        assert not any(
+            "discovery-language" in w or "moment of discovery" in w
+            for w in audit.warnings
+        ), f"orphan-discovery must not be a high-severity warning: {audit.warnings!r}"
+
+    async def test_innocuous_turned_out_phrase_does_not_fire(
+        self, storage: JsonFileStorage
+    ) -> None:
+        """P4 / A8: 'turned out' is too broad ('turned out cleaner' etc.)
+        and is dropped from the phrase list to cut false positives."""
+        session = _make_session("trace_test_innocuous_phrase")
+        await storage.create_session(session)
+        event = TraceEvent(
+            session_id=session.id,
+            type="contribution",
+            actor=Actor(type="ai", id="claude"),
+            contribution=ContributionData(
+                description="Refactored the loader; the code turned out cleaner this way",
+                direction="ai",
+                execution="ai",
+            ),
+            context=EventContext(conversation_snippet="<autonomous-stretch>"),
+        )
+        await append_event(storage, session, event)
+
+        audit = _build_attribution_audit(session)
+        assert audit.orphan_discovery_hint_count == 0
 
     async def test_contribution_with_nearby_discovery_annotation_no_fire(
         self, storage: JsonFileStorage
