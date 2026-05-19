@@ -35,6 +35,24 @@ except Exception:
 
 events = data.get("events", [])
 
+# Round-3 A1 / decision evt_016: multi-actor guard, mirroring server-side
+# Session.is_multi_actor(). Union of declared participants and observed
+# event actor *types*; the generalized (non-ai) same-instance warning only
+# fires when the session has >=2 distinct actor types. A single-actor
+# session (solo human, system->system) legitimately self-resolves and must
+# NOT be flagged (the false positive the audit named with production data).
+_meta = data.get("metadata") or {}
+_actor_types = {
+    (p or {}).get("type")
+    for p in (_meta.get("participants") or [])
+    if (p or {}).get("type")
+}
+for _e in events:
+    _at = (_e.get("actor") or {}).get("type")
+    if _at:
+        _actor_types.add(_at)
+multi_actor = len(_actor_types) >= 2
+
 unresolved = 0
 ai_self_resolved = 0           # backward-compat (v0.3): ai→ai only
 same_instance_self_resolved = 0  # v0.4.1: any same-instance pair
@@ -65,8 +83,9 @@ for e in events:
             # v0.3 ai-only backward-compat metric
             if pb.get("type") == rb.get("type") == "ai":
                 ai_self_resolved += 1
-            # v0.4.1 generalized: same (type, id) pair
-            if pb.get("type") == rb.get("type") and pb.get("id") == rb.get("id"):
+            # v0.4.1 generalized: same (type, id) pair, gated to
+            # multi-actor sessions per Round-3 A1 / decision evt_016.
+            if multi_actor and pb.get("type") == rb.get("type") and pb.get("id") == rb.get("id"):
                 same_instance_self_resolved += 1
 
     if a and a.get("category") == "correction":

@@ -381,6 +381,7 @@ Each event MUST populate exactly one type-specific data field, and it MUST match
 - `retries_event_id`, `revises_event_id`, `related_event_ids`, and `related_decision_ids` SHOULD reference valid event IDs within the same session.
 - `corrects_event_ids` entries SHOULD reference valid event IDs within the same session, OR MAY use URI-form references as defined in §3.7.1 when the corrected item is not a TRACE event.
 - Consumers MUST tolerate dangling references (the referenced event may have been removed or may exist in a different session).
+- **Implementation note (v0.4.x):** the reference implementation currently *hard-rejects* a relation reference (e.g. `revises_event_id`) that points outside the current session, at `append_event` time — stricter than the SHOULD above. Relaxing this to full spec-compliant dangling-tolerance is deferred to v1.1; producers should not rely on cross-session references in v0.4.x.
 
 ---
 

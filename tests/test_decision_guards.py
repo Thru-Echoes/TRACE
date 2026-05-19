@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from trace_mcp.schema import Session
+from trace_mcp.schema import Actor, Session
 from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import decision_tools, logging_tools, session_tools
 
@@ -81,19 +81,20 @@ class TestSameActorWarning:
         )
         assert "AI resolved its own proposal" not in result
 
-    async def test_human_self_resolves_warns(
+    async def test_human_self_resolves_clean(
         self, storage: JsonFileStorage, active: dict[str, Session]
     ) -> None:
-        """v0.4.1: human\u2192human same-instance self-resolution NOW warns.
+        """Round-3 A1 / decision evt_016: human\u2192human same-instance
+        self-resolution in a SINGLE-ACTOR session must NOT warn.
 
-        Inverted from v0.3.x behavior. Per spec \u00a73.6 Proposer Identity Rule
-        and the Attribution rule, the proposer should differ from the
-        resolver in multi-actor workflows. The waggle audit's evt_025
-        was exactly this pattern (human-proposes plan\u2192human-accepts) and
-        was silently allowed by the v0.3.x ai-only FM1.
-
-        The warning uses the v0.4.1 general-case message rather than the
-        ai-specific one (which is reserved for ai\u2192ai backward compat).
+        This restores the v0.3.x contract that Round-1/2/3 found had been
+        wrongly inverted. Per spec \u00a73.6, the Proposer Identity Rule applies
+        only "when the workflow involves multiple actors". A solo human
+        running TRACE (one actor type in the session) legitimately proposes
+        and accepts their own decisions \u2014 flagging that is the false
+        positive A1 named with production data. The multi-actor guard
+        (\u22652 unique actor TYPES across participants \u222a event actors) gates
+        the general-case warning; this session has only {human}.
         """
         session = await _make_session(storage, active)
         evt_id = await decision_tools.propose_decision(
@@ -107,10 +108,76 @@ class TestSameActorWarning:
             event_id=evt_id, disposition="accepted",
             resolved_by_type="human", resolved_by_id="researcher",
         )
-        # v0.4.1: same-instance human\u2192human DOES warn (general-case message)
-        assert "Same actor instance proposed and resolved this decision" in result
-        assert "spec \u00a73.6" in result
-        # The ai-specific message should NOT appear for human\u2192human
+        # Single-actor session ({human} only) \u2192 NO general-case warning
+        assert "Same actor instance proposed and resolved this decision" not in result
+        assert "AI resolved its own proposal" not in result
+
+    async def test_single_actor_system_self_resolves_clean(
+        self, storage: JsonFileStorage, active: dict[str, Session]
+    ) -> None:
+        """Round-3 A1 / A-R3-5: single-actor system\u2192system self-resolution
+        (e.g. an automated pipeline) must NOT warn \u2014 {system} is one type."""
+        session = await _make_session(storage, active)
+        evt_id = await decision_tools.propose_decision(
+            storage, session,
+            description="auto-pick threshold",
+            proposed_by_type="system", proposed_by_id="pipeline",
+        )
+        evt_id = evt_id.split("\n")[0]
+        result = await decision_tools.resolve_decision(
+            storage, session,
+            event_id=evt_id, disposition="accepted",
+            resolved_by_type="system", resolved_by_id="pipeline",
+        )
+        assert "Same actor instance proposed and resolved this decision" not in result
+        assert "AI resolved its own proposal" not in result
+
+    async def test_ai_self_resolves_fast_still_warns_fm25(
+        self, storage: JsonFileStorage, active: dict[str, Session]
+    ) -> None:
+        """Round-3 GAP-2 / A-R3-5 regression guard: ai\u2192ai fast (<5s)
+        self-resolution in a SINGLE-actor session must STILL emit the
+        FM25 warning. Gating FM25 wholesale by the multi-actor guard
+        would silently drop this \u00a73-correct warning \u2014 the split must
+        keep ai\u2192ai unconditional."""
+        session = await _make_session(storage, active)
+        evt_id = await decision_tools.propose_decision(
+            storage, session,
+            description="Use method X",
+            proposed_by_type="ai", proposed_by_id="claude",
+        )
+        evt_id = evt_id.split("\n")[0]
+        result = await decision_tools.resolve_decision(
+            storage, session,
+            event_id=evt_id, disposition="accepted",
+            resolved_by_type="ai", resolved_by_id="claude",
+        )
+        # FM25 literal must be present for ai\u2192ai even in a single-actor session
+        assert "Decision proposed and self-resolved in" in result
+
+    async def test_multi_actor_different_human_instances_clean(
+        self, storage: JsonFileStorage, active: dict[str, Session]
+    ) -> None:
+        """Round-3 A-R3-5: in a MULTI-actor session (\u22652 actor types),
+        two DIFFERENT human instances proposing/resolving must NOT warn \u2014
+        decouples id-inequality from the multi-actor gate (the warning is
+        driven by same-instance, not merely by being multi-actor)."""
+        session = await _make_session(storage, active)
+        # Make the session multi-actor by TYPE (human + ai participants).
+        session.metadata.participants.append(Actor(type="ai", id="claude"))
+        evt_id = await decision_tools.propose_decision(
+            storage, session,
+            description="Use threshold 0.80",
+            proposed_by_type="human", proposed_by_id="researcher-alice",
+        )
+        evt_id = evt_id.split("\n")[0]
+        result = await decision_tools.resolve_decision(
+            storage, session,
+            event_id=evt_id, disposition="accepted",
+            resolved_by_type="human", resolved_by_id="researcher-bob",
+        )
+        # Multi-actor, but different instances \u2192 not same-instance \u2192 no warn
+        assert "Same actor instance proposed and resolved this decision" not in result
         assert "AI resolved its own proposal" not in result
 
     async def test_human_different_instance_self_resolves_clean(
