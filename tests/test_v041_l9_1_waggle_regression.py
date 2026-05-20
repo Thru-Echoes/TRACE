@@ -18,11 +18,7 @@ from pathlib import Path
 from trace_mcp.schema import Session
 from trace_mcp.tools.session_tools import _build_attribution_audit
 
-_WAGGLE_JSON = (
-    Path(__file__).resolve().parents[1]
-    / "audit_2026-05-13_waggle_session"
-    / "trace_session_trace_20260513_446733.json"
-)
+_WAGGLE_JSON = Path(__file__).parent / "fixtures" / "waggle_session_2026-05-13.json"
 
 
 def _load() -> Session:
