@@ -122,20 +122,30 @@ async def trace_start_session(
     description: str | None = None,
     participants: list[dict[str, Any]] | None = None,
     tags: list[str] | None = None,
-    recall_learnings: bool = True,
+    recall_learnings: bool = False,
     recall_limit: int = 5,
 ) -> str:
     """Start a new TRACE audit session.
 
-    Call this at the beginning of any scientific workflow or experiment.
-    Returns a session ID to use in all subsequent TRACE calls.
+    Call this ONCE at the beginning of a multi-step workflow. It returns a
+    session id plus a bounded prior-session orientation, so you do NOT need to
+    follow it with trace_list_sessions / trace_get_events / trace_health_check
+    to get your bearings — that opening fan-out inflates a single assistant
+    turn and can trip the Claude Code thinking-block API-400. Log events
+    sequentially as they happen (1-2 trace calls per turn).
 
-    When recall_learnings is True (default), automatically surfaces the
-    most relevant past learnings based on the session description and tags.
-    Only the top recall_limit results are returned (default 5).
+    recall_learnings defaults to False to keep session start cheap and quiet.
+    Set recall_learnings=True only when past learnings are likely relevant; it
+    surfaces up to recall_limit (default 5) learnings based on description/tags.
     """
     global _current_session_id
     try:
+        # Bounded orientation (reads <=25 files) on PRIOR state, computed before
+        # creating the new session so it never counts the session being started.
+        # This gives the model its bearings so it need not fan out to the query
+        # tools in the opening interleaved-thinking turn.
+        brief = await storage.session_brief(project)
+
         session = await session_tools.create_session(
             storage,
             active_sessions,
@@ -148,23 +158,23 @@ async def trace_start_session(
         _current_session_id = session.id
 
         path = storage._session_path(session.id) if hasattr(storage, "_session_path") else "disk"  # type: ignore[attr-defined]
-        result = (
-            f"TRACE audit logging is now active.\n"
-            f"Session: {session.id}\n"
-            f"Project: {project}\n"
-            f"File: {path}\n"
-            f"All tool calls, decisions, and annotations will be recorded."
-        )
 
-        # Layer 1: Auto-recall relevant learnings at session start
+        # Recall is OFF by default (v0.4.2): opt-in only, rendered once.
+        recalled_block = ""
         if recall_learnings and description:
             recalled = await hooks.recall_if_available(
                 project, description, tags, recall_limit
             )
             if recalled:
-                result += hooks.format_recalled_learnings(recalled)
+                recalled_block = hooks.format_recalled_learnings(recalled)
 
-        return result
+        return session_tools.format_bootstrap_message(
+            session_id=session.id,
+            project=project,
+            path=str(path),
+            brief=brief,
+            recalled_block=recalled_block,
+        )
     except Exception as e:
         logger.exception("Error starting session")
         return f"Error starting session: {e}"

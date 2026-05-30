@@ -116,6 +116,12 @@ indent-style = "space"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Import the package straight from src/ so the suite never depends on a fragile
+# editable install. `uv run` re-syncs the env on every invocation and can drop
+# the `pip install -e` editable wheel, which silently broke `uv run pytest`
+# (it then fell back to a different interpreter without the package). pythonpath
+# makes test collection deterministic regardless of editable-install state.
+pythonpath = ["src"]
 addopts = "-v --tb=short"
 asyncio_mode = "auto"
 

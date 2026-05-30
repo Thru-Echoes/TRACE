@@ -455,6 +455,65 @@ def _auto_environment() -> Environment:
     )
 
 
+# v0.4.2: sequential-cadence steering for the session bootstrap. The Claude
+# Code thinking-block 400 fires when one interleaved-thinking assistant turn
+# accumulates a large content-block count; the opening TRACE bootstrap was the
+# most automatic recurring inflator (eager list/get/health fan-out). This note
+# tells the model it already has what it needs, so it logs sequentially rather
+# than batching many trace_* calls into the first turn.
+_BOOTSTRAP_CADENCE = (
+    "Log sequentially: record events as they happen (1-2 trace calls per turn; "
+    "do not batch many trace_* calls into a single turn). You have what you need "
+    "to begin — no need to enumerate prior sessions to orient."
+)
+
+
+def format_bootstrap_message(
+    *,
+    session_id: str,
+    project: str,
+    path: str,
+    brief: dict[str, Any] | None = None,
+    recalled_block: str = "",
+) -> str:
+    """Build the start_session bootstrap message (pure function, no I/O).
+
+    Inputs:
+      session_id / project / path — identity of the new session.
+      brief — bounded orientation from ``storage.session_brief`` (or None).
+      recalled_block — pre-rendered learnings block (empty unless the caller
+        explicitly opted into recall; recall is OFF by default in v0.4.2).
+
+    Output: the full human/agent-facing activation message, including a bounded
+    prior-session orientation line and the sequential-cadence steering note.
+    """
+    if brief and brief.get("most_recent"):
+        mr = brief["most_recent"]
+        plus = "+" if brief.get("capped") else ""
+        created = (mr.get("created") or "")[:10]
+        orientation = (
+            f"Prior context: {brief.get('matched', 0)}{plus} recent session(s) for "
+            f"'{project}'; most recent: {mr['id']} ({mr.get('event_count', 0)} events"
+            f"{', ' + created if created else ''})."
+        )
+    else:
+        orientation = f"Prior context: No prior TRACE sessions recorded for '{project}'."
+
+    lines = [
+        "TRACE audit logging is now active.",
+        f"Session: {session_id}",
+        f"Project: {project}",
+        f"File: {path}",
+        orientation,
+        _BOOTSTRAP_CADENCE,
+    ]
+    msg = "\n".join(lines)
+    if recalled_block:
+        msg += recalled_block
+    msg += "\nAll tool calls, decisions, and annotations will be recorded."
+    return msg
+
+
 async def create_session(
     storage: TraceStorage,
     active_sessions: dict[str, Session],

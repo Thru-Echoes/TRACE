@@ -100,6 +100,23 @@ async def _start_server(sessions_dir: str) -> asyncio.subprocess.Process:
     """Start the TRACE MCP server as a subprocess."""
     env = os.environ.copy()
     env["TRACE_SESSIONS_DIR"] = sessions_dir
+    # Import trace_mcp from src/ in the spawned server regardless of whether an
+    # editable install is present/healthy (uv re-syncs can silently drop it).
+    # Mirrors the pytest `pythonpath = ["src"]` config used for in-process imports.
+    src = str(TRACE_ROOT / "src")
+    env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
+    # Keep the server-lifecycle e2e deterministic and offline: force the
+    # rule-based (BM25) matching path so the trace-learn extension never
+    # triggers a lazy model2vec model download or OpenAI call on first
+    # recall/extract (a multi-second blocking cold-load that intermittently
+    # blew the 15s read timeout). strict_llm must be off and the API key
+    # dropped, otherwise strict mode refuses the BM25 fallback and the whole
+    # extension fails to register. Embedding/LLM behaviour is covered by the
+    # dedicated test_learn_* suites.
+    env["TRACE_EMBEDDING_BACKEND"] = "none"
+    env["TRACE_LLM_ENABLED"] = "false"
+    env["TRACE_STRICT_LLM"] = "false"
+    env.pop("OPENAI_API_KEY", None)
 
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
