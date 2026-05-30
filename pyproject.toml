@@ -45,8 +45,47 @@ dev = [
 trace-mcp = "trace_mcp.server:main"
 trace-mcp-init = "trace_mcp.init_project:main"
 
+[tool.hatch.build]
+# Belt-and-suspenders guard: never ship local working artifacts, private
+# notes, crash/debugging handoff dumps, or macOS file-duplication cruft —
+# even if one slips past .gitignore. The sdist previously shipped notes/
+# (confidential IP/legal material) and a ~4 MB crash-handoff tree to PyPI;
+# these excludes plus the explicit sdist allowlist below prevent recurrence.
+exclude = [
+    "notes",
+    "notes/**",
+    "*-handoff-*",
+    "*-handoff-*/**",
+    "audit_*",
+    "audit_*/**",
+    "review_*",
+    "review_*/**",
+    "**/* 2.py",
+    "**/* 2.md",
+    "**/* 2.json",
+    "**/*.local.json",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/trace_mcp"]
+
+[tool.hatch.build.targets.sdist]
+# Explicit allowlist (default-deny): the sdist ships package source, tests,
+# and essential metadata ONLY. Anything not listed here is excluded by
+# construction — the safest posture for preventing private-data leaks.
+include = [
+    "src/trace_mcp/**/*.py",
+    "tests/**/*.py",
+    "tests/fixtures/**",
+    "docs/specification.md",
+    "schemas/**",
+    "scripts/**",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "CHANGELOG.md",
+    "pyproject.toml",
+]
 
 
 [tool.ruff]
