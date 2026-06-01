@@ -6,6 +6,7 @@ import platform
 import re
 import sys
 import uuid
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Any
 
@@ -711,29 +712,52 @@ async def append_event(
 ) -> str:
     """Append an event to a session and flush to disk. Returns event ID.
 
-    Raises ValueError if the session is already completed (immutability guard).
-    Raises ValueError if event references point to nonexistent events (FM13/FM16).
+    Concurrency-safe (v0.4.2): the read-modify-write runs under a per-session
+    lock and reloads the authoritative on-disk events before appending. This
+    closes the lost-update + duplicate-evt_id defect where a second writer
+    (another process, or a stale in-memory Session) overwrote the first writer's
+    event and both were assigned the same positional id. Storage backends
+    without a ``lock`` degrade to a no-op context (no behaviour change).
+
+    Raises ValueError if the session is already completed (immutability guard)
+    or if event references point to nonexistent events (FM13/FM16/FM17).
     """
-    # Guard: prevent logging to completed sessions — immutability guarantee
+    # Fast-path guard on the in-memory view.
     if session.status == "completed":
         raise ValueError(
             f"Cannot append events to completed session '{session.id}'. "
             f"Session ended at {session.ended}. Start a new session instead."
         )
 
-    if not event.id:
-        event.id = session.next_event_id()
-    event.session_id = session.id
+    lock_factory = getattr(storage, "lock", None)
+    lock_cm = lock_factory(session.id) if lock_factory is not None else nullcontext()
+    async with lock_cm:
+        # Reload authoritative on-disk state so we never clobber events another
+        # writer persisted since this Session was last read.
+        try:
+            disk = await storage.get_session(session.id)
+            if disk.status == "completed":
+                raise ValueError(
+                    f"Cannot append events to completed session '{session.id}'. "
+                    f"Session ended at {disk.ended}. Start a new session instead."
+                )
+            session.events = disk.events
+        except FileNotFoundError:
+            pass  # brand-new session, not yet persisted
 
-    # FM13/FM16/FM17: Validate referential integrity — reject invalid references
-    ref_errors = _check_referential_integrity(session, event)
-    if ref_errors:
-        raise ValueError(
-            f"Invalid event references in {event.id}:\n"
-            + "\n".join(f"  - {e}" for e in ref_errors)
-        )
+        if not event.id:
+            event.id = session.next_event_id()
+        event.session_id = session.id
 
-    session.events.append(event)
-    await storage.update_session(session)
+        # FM13/FM16/FM17: validate referential integrity against the merged state.
+        ref_errors = _check_referential_integrity(session, event)
+        if ref_errors:
+            raise ValueError(
+                f"Invalid event references in {event.id}:\n"
+                + "\n".join(f"  - {e}" for e in ref_errors)
+            )
+
+        session.events.append(event)
+        await storage.update_session(session)
 
     return event.id
