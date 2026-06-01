@@ -1,0 +1,88 @@
+name: Release
+
+# Tag-triggered publish to PyPI via Trusted Publishing (OIDC — no stored token).
+# Tag the release commit with `vX.Y.Z` (matching pyproject `version`) and push
+# the tag; this builds, runs the full quality gate + a leak guard, then publishes.
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build & verify distribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      - name: Lint (ruff)
+        run: uv run ruff check src/
+
+      - name: Type check (pyright)
+        run: uv run pyright src/
+
+      - name: Tests
+        run: uv run pytest -q -k "not uvx and not Uvx"
+
+      - name: Build sdist + wheel
+        run: uv build
+
+      - name: Leak guard — no private/cruft files in artifacts
+        run: |
+          set -euo pipefail
+          if tar tzf dist/*.tar.gz | grep -Eiq 'notes/|-handoff-|meeting-takeaways| 2\.(py|md|json)$'; then
+            echo "::error::Private notes / handoff dump / macOS duplicate leaked into the sdist"
+            tar tzf dist/*.tar.gz | grep -Ei 'notes/|-handoff-|meeting-takeaways| 2\.(py|md|json)$'
+            exit 1
+          fi
+          if python -m zipfile -l dist/*.whl | grep -Eiq ' 2\.py'; then
+            echo "::error::macOS duplicate shipped in the wheel"
+            exit 1
+          fi
+          echo "Artifacts clean."
+
+      - name: Check metadata (twine)
+        run: uvx twine check dist/*
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    name: Publish to PyPI
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    environment:
+      name: pypi
+      url: https://pypi.org/p/trace-mcp
+    permissions:
+      id-token: write # OIDC for PyPI Trusted Publishing
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI (Trusted Publishing)
+        uses: pypa/gh-action-pypi-publish@release/v1

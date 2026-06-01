@@ -1,0 +1,43 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.thru-echoes/trace-mcp",
+  "description": "TRACE: an MCP server providing a standardized decision-provenance audit trail for AI-assisted research and coding workflows — who proposed what, who accepted or revised it, and why.",
+  "version": "0.4.2",
+  "websiteUrl": "https://github.com/Thru-Echoes/TRACE",
+  "repository": {
+    "url": "https://github.com/Thru-Echoes/TRACE",
+    "source": "github"
+  },
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "trace-mcp",
+      "version": "0.4.2",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "TRACE_DEFAULT_PROJECT",
+          "description": "Project name to attribute sessions to when one cannot be inferred. Optional.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "TRACE_KNOWLEDGE_DIR",
+          "description": "Override directory for the optional trace-learn cross-session knowledge store (default ~/.trace/knowledge/). Optional.",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "OPENAI_API_KEY",
+          "description": "Enables the optional LLM backend in the trace-learn extension. Core makes no network calls; if unset, trace-learn falls back to local lexical matching.",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}
