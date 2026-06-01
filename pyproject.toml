@@ -4,10 +4,34 @@ build-backend = "hatchling.build"
 
 [project]
 name = "trace-mcp"
-version = "0.4.1"
+version = "0.4.2"
 description = "TRACE: Transparent Recording of AI-assisted Collaboration Experiments — MCP audit protocol for scientific workflows"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
+authors = [{ name = "Oliver Muellerklein", email = "omuellerklein@berkeley.edu" }]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "provenance",
+    "attribution",
+    "ai-collaboration",
+    "audit",
+    "reproducibility",
+    "research",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
 dependencies = [
     "mcp>=1.0.0",
     "pydantic>=2.0",
@@ -44,6 +68,13 @@ dev = [
 [project.scripts]
 trace-mcp = "trace_mcp.server:main"
 trace-mcp-init = "trace_mcp.init_project:main"
+
+[project.urls]
+Homepage = "https://github.com/Thru-Echoes/TRACE"
+Repository = "https://github.com/Thru-Echoes/TRACE"
+Issues = "https://github.com/Thru-Echoes/TRACE/issues"
+Changelog = "https://github.com/Thru-Echoes/TRACE/blob/main/CHANGELOG.md"
+Specification = "https://github.com/Thru-Echoes/TRACE/blob/main/docs/specification.md"
 
 [tool.hatch.build]
 # Belt-and-suspenders guard: never ship local working artifacts, private
@@ -83,7 +114,10 @@ include = [
     "README.md",
     "LICENSE",
     "NOTICE",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
     "CHANGELOG.md",
+    "server.json",
     "pyproject.toml",
 ]
 
