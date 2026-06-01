@@ -166,9 +166,9 @@ Claude: -> trace_end_session(summary="Analyzed 47 passages...")
         (learnings auto-extracted and persisted for future sessions)
 ```
 
-## Available tools (23 total)
+## Available tools (22 total)
 
-### Core tools (18)
+### Core tools (17)
 
 | Tool | Description |
 |------|-------------|

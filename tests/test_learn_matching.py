@@ -437,6 +437,7 @@ class TestBackendSelection:
 
     def test_embedding_preferred_over_llm(self):
         """When model2vec is available, EmbeddingBackend is selected even with API key."""
+        pytest.importorskip("model2vec")  # optional dep — skip cleanly when absent
         from trace_mcp.extensions.learn.matching import EmbeddingBackend
 
         config = LearnConfig(openai_api_key=None, llm_enabled=False)
