@@ -41,6 +41,17 @@ active_sessions: dict[str, Session] = {}
 _current_session_id: str | None = None
 
 
+def _compact(obj: Any) -> str:
+    """Serialize a query-tool result compactly.
+
+    Query/retrieval results land directly in the model's context window, where
+    indentation is pure token waste (~20-30% overhead) and compounds the
+    context bloat behind the API-400 crash. The human/artifact-facing path
+    (``trace_export``) uses pretty JSON instead.
+    """
+    return json.dumps(obj, separators=(",", ":"), default=str)
+
+
 # ── Auto-Session Infrastructure ────────────────────────────────────────────
 
 
@@ -573,14 +584,14 @@ async def trace_get_session(session_id: str) -> str:
         return f"Error: Session '{session_id}' not found."
 
     summary = query_tools.get_session_summary(session)
-    return json.dumps(summary, indent=2, default=str)
+    return _compact(summary)
 
 
 @mcp.tool()
 async def trace_get_events(
     session_id: str,
     type: str | None = None,
-    limit: int = 100,
+    limit: int = query_tools.DEFAULT_EVENTS_LIMIT,
 ) -> str:
     """List events in a session, optionally filtered by type."""
     try:
@@ -589,7 +600,7 @@ async def trace_get_events(
         return f"Error: Session '{session_id}' not found."
 
     events = query_tools.get_events(session, type_filter=type, limit=limit)
-    return json.dumps(events, indent=2, default=str)
+    return _compact(events)
 
 
 @mcp.tool()
@@ -605,7 +616,7 @@ async def trace_get_decisions(
         return f"Error: Session '{session_id}' not found."
 
     decisions = query_tools.get_decisions(session, disposition=disposition, proposed_by_type=proposed_by_type)
-    return json.dumps(decisions, indent=2, default=str)
+    return _compact(decisions)
 
 
 @mcp.tool()
@@ -625,22 +636,36 @@ async def trace_get_decision_chain(
     chain = query_tools.get_decision_chain(session, event_id=event_id)
     if not chain:
         return f"Error: Decision '{event_id}' not found."
-    return json.dumps(chain, indent=2, default=str)
+    return _compact(chain)
 
 
 @mcp.tool()
 async def trace_search(
     session_id: str,
     query: str,
+    limit: int = query_tools.DEFAULT_SEARCH_LIMIT,
 ) -> str:
-    """Search events in a session by text content (case-insensitive)."""
+    """Search events in a session by text content (case-insensitive).
+
+    Returns at most `limit` matching events (clamped to a hard ceiling). The
+    response reports total_matched / returned / truncated so a capped result is
+    explicit rather than a silently-truncated list.
+    """
     try:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
 
-    results = query_tools.search_events(session, query=query)
-    return json.dumps(results, indent=2, default=str)
+    all_results = query_tools.search_events(session, query=query)
+    cap = max(1, min(limit, query_tools.MAX_SEARCH_LIMIT))
+    returned = all_results[:cap]
+    return _compact({
+        "query": query,
+        "total_matched": len(all_results),
+        "returned": len(returned),
+        "truncated": len(all_results) > len(returned),
+        "results": returned,
+    })
 
 
 @mcp.tool()
@@ -655,7 +680,7 @@ async def trace_project_summary(
     """
     try:
         summary = await query_tools.project_summary(storage, project=project)
-        return json.dumps(summary, indent=2, default=str)
+        return _compact(summary)
     except Exception as e:
         logger.exception("Error generating project summary")
         return f"Error generating project summary: {e}"
@@ -675,7 +700,7 @@ async def trace_health_check(
         result = await query_tools.health_check(
             storage, project=project, session_id=session_id
         )
-        return json.dumps(result, indent=2, default=str)
+        return _compact(result)
     except Exception as e:
         logger.exception("Error running health check")
         return f"Error running health check: {e}"
@@ -688,10 +713,15 @@ async def trace_health_check(
 async def trace_export(
     session_id: str,
     format: str,
+    pretty: bool = True,
 ) -> str:
     """Export a session in a specific format.
 
-    Supported formats: 'json', 'markdown', 'prov-jsonld'.
+    Supported formats: 'json', 'markdown', 'prov-jsonld'. This is the
+    human/artifact-facing path, so JSON is indented (pretty) by default — pass
+    pretty=False for a compact JSON artifact. (The query/retrieval tools emit
+    compact JSON unconditionally because their output goes into the model's
+    context window.)
     """
     try:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
@@ -699,7 +729,7 @@ async def trace_export(
         return f"Error: Session '{session_id}' not found."
 
     try:
-        return export_tools.export_session(session, format=format)
+        return export_tools.export_session(session, format=format, pretty=pretty)
     except Exception as e:
         logger.exception("Error exporting session")
         return f"Error exporting session: {e}"
@@ -713,7 +743,7 @@ async def trace_list_sessions(
     """List all TRACE sessions, optionally filtered by project name."""
     try:
         summaries = await storage.list_sessions(project=project, limit=limit)
-        return json.dumps(summaries, indent=2, default=str)
+        return _compact(summaries)
     except Exception as e:
         logger.exception("Error listing sessions")
         return f"Error listing sessions: {e}"
