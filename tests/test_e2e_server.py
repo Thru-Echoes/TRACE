@@ -380,8 +380,11 @@ class TestSessionLifecycleE2E:
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
-                results = json.loads(result_text)
-                assert len(results) >= 1
+                search = json.loads(result_text)
+                # v0.4.2: trace_search returns a capped object with truncation info.
+                assert search["total_matched"] >= 1
+                assert len(search["results"]) == search["returned"] >= 1
+                assert search["truncated"] is False  # tiny session, nothing dropped
 
                 # 9. Get session summary
                 response = await _call_tool(proc, "trace_get_session", {

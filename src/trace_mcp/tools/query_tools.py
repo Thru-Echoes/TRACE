@@ -10,6 +10,16 @@ import trace_mcp
 from trace_mcp.schema import Session
 from trace_mcp.storage.base import TraceStorage
 
+# v0.4.2 Phase 3: HARD payload caps. Unbounded query results are the primary
+# context-bloat surface compounding the API-400 crash. These ceilings bind even
+# when the caller requests more (the crashing model overrode list_sessions to
+# 30/40), so a too-large `limit` is clamped, not honoured.
+DEFAULT_EVENTS_LIMIT = 25
+MAX_EVENTS_LIMIT = 200
+DEFAULT_SEARCH_LIMIT = 25
+MAX_SEARCH_LIMIT = 100
+MAX_SESSION_SCAN = 500  # health_check / project_summary file-read ceiling
+
 
 def get_session_summary(session: Session) -> dict[str, Any]:
     """Get session data (excluding events for brevity)."""
@@ -23,9 +33,14 @@ def get_events(
     session: Session,
     *,
     type_filter: str | None = None,
-    limit: int = 100,
+    limit: int = DEFAULT_EVENTS_LIMIT,
 ) -> list[dict[str, Any]]:
-    """List events in a session, optionally filtered by type."""
+    """List events in a session, optionally filtered by type.
+
+    ``limit`` is clamped to [1, MAX_EVENTS_LIMIT]; a request above the ceiling
+    is silently capped rather than honoured (context-bloat guard).
+    """
+    limit = max(1, min(limit, MAX_EVENTS_LIMIT))
     events = session.events
     if type_filter:
         events = [e for e in events if e.type == type_filter]
@@ -216,6 +231,7 @@ def _compute_knowledge_metrics(project: str) -> dict[str, Any]:
 async def project_summary(
     storage: TraceStorage,
     project: str,
+    scan_cap: int = MAX_SESSION_SCAN,
 ) -> dict[str, Any]:
     """Aggregate metrics across all sessions for a project.
 
@@ -223,7 +239,8 @@ async def project_summary(
     direction/execution matrix, annotation categories, unique participants,
     and knowledge store metrics.
     """
-    session_summaries = await storage.list_sessions(project=project, limit=1000)
+    session_summaries = await storage.list_sessions(project=project, limit=scan_cap)
+    scan_truncated = len(session_summaries) >= scan_cap
     sessions: list[Session] = []
     for s in session_summaries:
         try:
@@ -306,6 +323,7 @@ async def project_summary(
     return {
         "project": project,
         "session_count": len(sessions),
+        "scan_truncated": scan_truncated,
         "total_events": total_events,
         "events_by_type": events_by_type,
         "decisions": {
@@ -340,10 +358,14 @@ async def health_check(
     *,
     project: str | None = None,
     session_id: str | None = None,
+    scan_cap: int = MAX_SESSION_SCAN,
 ) -> dict[str, Any]:
     """Return system health info and event-level statistics.
 
-    Optionally scoped to a single project or session.
+    Optionally scoped to a single project or session. When scanning all
+    sessions, at most ``scan_cap`` (most-recent) session files are read so a
+    health probe never becomes an unbounded full-store read; ``scan_truncated``
+    flags when more sessions exist beyond the scan window.
     """
     # Storage paths
     storage_dir = getattr(storage, "_dir", None)
@@ -358,15 +380,17 @@ async def health_check(
         knowledge_dir = str(Path(os.environ.get("TRACE_KNOWLEDGE_DIR", "~/.trace/knowledge")).expanduser())
     knowledge_dir_exists = Path(knowledge_dir).is_dir()
 
-    # Load sessions
+    # Load sessions (bounded: read at most scan_cap most-recent files).
     sessions: list[Session] = []
+    scan_truncated = False
     if session_id:
         try:
             sessions.append(await storage.get_session(session_id))
         except FileNotFoundError:
             pass
     else:
-        summaries = await storage.list_sessions(project=project, limit=10000)
+        summaries = await storage.list_sessions(project=project, limit=scan_cap)
+        scan_truncated = len(summaries) >= scan_cap
         for s in summaries:
             try:
                 sessions.append(await storage.get_session(s["id"]))
@@ -393,6 +417,8 @@ async def health_check(
             "knowledge_dir_exists": knowledge_dir_exists,
         },
         "session_count": len(sessions),
+        "sessions_scanned": len(sessions),
+        "scan_truncated": scan_truncated,
         "project_filter": project,
         "session_filter": session_id,
         "events": {
