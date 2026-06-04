@@ -23,9 +23,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import trace_mcp
-
 import pytest  # noqa: F401 (used by pytest-asyncio for test collection)
+
+import trace_mcp
 
 TRACE_ROOT = Path(__file__).parent.parent
 
@@ -96,8 +96,15 @@ async def _send_and_receive(
             return parsed
 
 
-async def _start_server(sessions_dir: str) -> asyncio.subprocess.Process:
-    """Start the TRACE MCP server as a subprocess."""
+async def _start_server(
+    sessions_dir: str, env_extra: dict[str, str] | None = None
+) -> asyncio.subprocess.Process:
+    """Start the TRACE MCP server as a subprocess.
+
+    env_extra, if given, overrides individual env vars after the deterministic
+    offline defaults below are applied — e.g. to point the server at a specific
+    knowledge dir, or to opt a single test into a real embedding backend.
+    """
     env = os.environ.copy()
     env["TRACE_SESSIONS_DIR"] = sessions_dir
     # Import trace_mcp from src/ in the spawned server regardless of whether an
@@ -117,6 +124,8 @@ async def _start_server(sessions_dir: str) -> asyncio.subprocess.Process:
     env["TRACE_LLM_ENABLED"] = "false"
     env["TRACE_STRICT_LLM"] = "false"
     env.pop("OPENAI_API_KEY", None)
+    if env_extra:
+        env.update(env_extra)
 
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -175,7 +184,7 @@ async def _shutdown_server(proc: asyncio.subprocess.Process) -> None:
     proc.stdin.close()
     try:
         await asyncio.wait_for(proc.wait(), timeout=5)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
 

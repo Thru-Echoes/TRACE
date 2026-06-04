@@ -22,6 +22,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ── Feature detection ────────────────────────────────────────────────
+# NB: these are module-level imports (not importlib.util.find_spec) on purpose:
+# the optional-backend symbols (AsyncOpenAI, StaticModel) double as the patch
+# targets the provider unit tests mock, so they must exist as module attributes.
 
 try:
     import numpy as _np  # noqa: F401 (runtime probe)
