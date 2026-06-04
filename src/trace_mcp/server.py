@@ -168,7 +168,7 @@ async def trace_start_session(
         )
         _current_session_id = session.id
 
-        path = storage._session_path(session.id) if hasattr(storage, "_session_path") else "disk"  # type: ignore[attr-defined]
+        path = storage.session_location(session.id)
 
         # Recall is OFF by default (v0.4.2): opt-in only, rendered once.
         recalled_block = ""

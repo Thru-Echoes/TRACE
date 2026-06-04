@@ -39,3 +39,19 @@ class TraceStorage(ABC):
     async def delete_session(self, session_id: str) -> None:
         """Delete a session."""
         ...
+
+    def location(self) -> str:
+        """Human-readable location of this backend (e.g. a directory path).
+
+        Diagnostics/reporting only — never control flow. Backends without a
+        filesystem location return ``"unknown"``.
+        """
+        return "unknown"
+
+    def session_location(self, session_id: str) -> str:
+        """Human-readable location of a single session's record.
+
+        Default is a generic ``"session:<id>"`` label; file-based backends
+        override with the concrete path.
+        """
+        return f"session:{session_id}"

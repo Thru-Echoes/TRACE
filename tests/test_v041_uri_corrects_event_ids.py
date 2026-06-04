@@ -24,7 +24,7 @@ from trace_mcp.schema import Session, SessionMetadata
 from trace_mcp.schema.events import AnnotationData, EventContext, TraceEvent
 from trace_mcp.schema.session import Actor
 from trace_mcp.storage.json_file import JsonFileStorage
-from trace_mcp.tools.session_tools import _is_uri_form_reference, append_event
+from trace_mcp.tools.session_tools import append_event, is_uri_form_reference
 
 
 @pytest.fixture
@@ -62,7 +62,7 @@ def _make_correction(session_id: str, corrects_event_ids: list[str], snippet: st
 
 
 class TestUriSchemeHelperUnit:
-    """Direct tests on the _is_uri_form_reference helper.
+    """Direct tests on the is_uri_form_reference helper.
 
     The helper is the basis of the carve-out; if its discrimination
     is wrong, both false-positives and false-negatives cascade through
@@ -70,43 +70,43 @@ class TestUriSchemeHelperUnit:
     """
 
     def test_external_scheme_matches(self) -> None:
-        assert _is_uri_form_reference("external:https://example.com/foo")
+        assert is_uri_form_reference("external:https://example.com/foo")
 
     def test_jsonl_scheme_matches(self) -> None:
-        assert _is_uri_form_reference("jsonl:/path/to/file.jsonl#L225")
+        assert is_uri_form_reference("jsonl:/path/to/file.jsonl#L225")
 
     def test_subagent_scheme_matches(self) -> None:
-        assert _is_uri_form_reference("subagent:abc-123")
+        assert is_uri_form_reference("subagent:abc-123")
 
     def test_tool_result_scheme_matches(self) -> None:
-        assert _is_uri_form_reference("tool-result:xyz-789")
+        assert is_uri_form_reference("tool-result:xyz-789")
 
     def test_event_id_does_not_match(self) -> None:
-        assert not _is_uri_form_reference("evt_001")
+        assert not is_uri_form_reference("evt_001")
 
     def test_event_id_with_digits_does_not_match(self) -> None:
-        assert not _is_uri_form_reference("evt_42")
+        assert not is_uri_form_reference("evt_42")
 
     def test_empty_string_does_not_match(self) -> None:
-        assert not _is_uri_form_reference("")
+        assert not is_uri_form_reference("")
 
     def test_uppercase_scheme_does_not_match(self) -> None:
         # Spec §3.7.1: scheme MUST be lowercase ASCII
-        assert not _is_uri_form_reference("EXTERNAL:foo")
+        assert not is_uri_form_reference("EXTERNAL:foo")
 
     def test_scheme_starting_with_digit_does_not_match(self) -> None:
         # Spec §3.7.1: scheme MUST start with a letter
-        assert not _is_uri_form_reference("1abc:foo")
+        assert not is_uri_form_reference("1abc:foo")
 
     def test_scheme_with_one_char_does_not_match(self) -> None:
         # Spec regex requires at least 2 chars before colon: [a-z][a-z0-9-]+
-        assert not _is_uri_form_reference("a:foo")
+        assert not is_uri_form_reference("a:foo")
 
     def test_scheme_with_hyphen_matches(self) -> None:
-        assert _is_uri_form_reference("tool-result:abc")
+        assert is_uri_form_reference("tool-result:abc")
 
     def test_no_colon_does_not_match(self) -> None:
-        assert not _is_uri_form_reference("external")
+        assert not is_uri_form_reference("external")
 
 
 class TestUriFormCorrectsEventIdsE2E:

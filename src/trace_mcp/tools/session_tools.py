@@ -666,7 +666,7 @@ async def get_or_load_session(
 _URI_SCHEME_RE = re.compile(r"^[a-z][a-z0-9-]+:")
 
 
-def _is_uri_form_reference(s: str) -> bool:
+def is_uri_form_reference(s: str) -> bool:
     """True if s is a URI-form reference per spec §3.7.1.
 
     Used to exempt out-of-session anchors (subagent outputs, external
@@ -691,7 +691,7 @@ def _check_referential_integrity(
     # outside the TRACE event log).
     if event.annotation and event.annotation.corrects_event_ids:
         for ref_id in event.annotation.corrects_event_ids:
-            if _is_uri_form_reference(ref_id):
+            if is_uri_form_reference(ref_id):
                 continue
             ids_to_check.append((ref_id, "corrects_event_ids"))
 
