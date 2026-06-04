@@ -55,6 +55,8 @@ all = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "coverage[toml]>=7.4",
     "ruff>=0.4",
     "pyright>=1.1.350",
     "openai>=1.0",
@@ -63,6 +65,7 @@ dev = [
     "filelock>=3.12",
     "jsonschema>=4.0",
     "rdflib>=7.0",
+    "twine>=5.0",
 ]
 
 [project.scripts]
@@ -159,17 +162,27 @@ pythonpath = ["src"]
 addopts = "-v --tb=short"
 asyncio_mode = "auto"
 
-[tool.pyright]
-include = ["src"]
-exclude = ["tests", "**/__pycache__"]
-pythonVersion = "3.11"
-typeCheckingMode = "basic"
-reportMissingImports = true
-reportMissingTypeStubs = false
+# NB: pyright is configured in the standalone pyrightconfig.json (include
+# src+tests+scripts), which takes precedence over any [tool.pyright] here. A
+# duplicate [tool.pyright] block was removed to keep a single source of truth —
+# the prior block excluded tests/, contradicting the checked-in config and
+# masking test-tree type errors that `uv run pyright` actually reports.
 
 [tool.coverage.run]
 source = ["trace_mcp"]
 omit = ["*/tests/*", "*/__pycache__/*"]
+# Subprocess coverage for the E2E suite: test_e2e_server.py spawns the MCP
+# server via `python -m trace_mcp.server`. Without this, server.py reads as
+# ~34% (or 0% when only the E2E suite runs) because the subprocess's execution
+# is invisible to the parent coverage process. `parallel = true` makes each
+# process write its own `.coverage.<host>.<pid>` data file; `concurrency`
+# covers both the multiple OS processes and the asyncio/thread interleaving.
+# The spawned server runs `coverage.process_startup()` via `src/sitecustomize.py`
+# (src/ is on the subprocess PYTHONPATH) when `COVERAGE_PROCESS_START` is set in
+# the environment. pytest-cov combines the per-process files at end of run, so
+# CI needs no separate `coverage combine` step.
+parallel = true
+concurrency = ["multiprocessing", "thread"]
 
 [tool.coverage.report]
 exclude_lines = [
