@@ -14,12 +14,40 @@ data-loss and ID-collision can no longer happen.
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import decision_tools, logging_tools, session_tools
+
+# A self-contained worker run in a separate OS process (via `python -c`) to
+# exercise the per-session lock under the real cross-process threat model.
+_CROSS_PROCESS_WORKER = """
+import asyncio
+import sys
+
+from trace_mcp.storage.json_file import JsonFileStorage
+from trace_mcp.tools import logging_tools
+
+
+async def main() -> None:
+    directory, session_id, worker_id, n_events = (
+        sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
+    )
+    storage = JsonFileStorage(directory=directory)
+    session = await storage.get_session(session_id)
+    for i in range(n_events):
+        await logging_tools.log_annotation(
+            storage, session, category="gotcha", content=f"w{worker_id}-e{i}",
+        )
+
+
+asyncio.run(main())
+"""
 
 
 @pytest.fixture
@@ -133,3 +161,52 @@ async def test_resolve_decision_preserves_concurrent_append(storage):
     assert decision_evt.decision is not None
     assert decision_evt.decision.disposition == "accepted"
     assert len(final.events) == 2
+
+
+def test_cross_process_concurrent_appends_no_loss(tmp_path):
+    """Real OS processes appending concurrently to one session lose nothing.
+
+    The single-process asyncio tests above cannot exercise the actual deployment
+    threat model — separate processes contending for the same session file. This
+    spawns N real subprocesses that each append M events through the storage API
+    and asserts the O_CREAT|O_EXCL per-session lock serialized them with zero
+    lost writes and zero positional-id collisions.
+    """
+    directory = str(tmp_path)
+
+    async def _create() -> str:
+        storage = JsonFileStorage(directory=directory)
+        active: dict = {}
+        session = await session_tools.create_session(storage, active, project="cc")
+        return session.id
+
+    session_id = asyncio.run(_create())
+
+    src = str(Path(__file__).resolve().parent.parent / "src")
+    env = os.environ.copy()
+    env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
+    # Keep the workers offline/fast — annotations never touch embeddings, but be explicit.
+    env["TRACE_EMBEDDING_BACKEND"] = "none"
+    env["TRACE_LLM_ENABLED"] = "false"
+
+    n_workers, n_events = 4, 10
+    procs = [
+        subprocess.Popen(
+            [sys.executable, "-c", _CROSS_PROCESS_WORKER, directory, session_id, str(w), str(n_events)],
+            env=env,
+            stderr=subprocess.PIPE,
+            stdout=subprocess.DEVNULL,
+            text=True,
+        )
+        for w in range(n_workers)
+    ]
+    for p in procs:
+        _, err = p.communicate(timeout=120)
+        assert p.returncode == 0, f"worker process failed:\n{err}"
+
+    async def _load():
+        return await JsonFileStorage(directory=directory).get_session(session_id)
+
+    final = asyncio.run(_load())
+    assert len(final.events) == n_workers * n_events  # no lost writes across processes
+    assert len({e.id for e in final.events}) == n_workers * n_events  # no positional-id collision
