@@ -49,6 +49,14 @@ class JsonFileStorage(TraceStorage):
     def _session_path(self, session_id: str) -> Path:
         return self._dir / f"{sanitize_name(session_id)}.json"
 
+    def location(self) -> str:
+        """The sessions directory backing this store."""
+        return str(self._dir)
+
+    def session_location(self, session_id: str) -> str:
+        """The on-disk path of a session's JSON file."""
+        return str(self._session_path(session_id))
+
     def _write_file(self, path: Path, data: str) -> None:
         """Write data to file using atomic write (temp file + fsync + rename).
 

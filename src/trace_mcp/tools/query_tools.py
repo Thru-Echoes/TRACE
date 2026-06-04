@@ -367,17 +367,15 @@ async def health_check(
     health probe never becomes an unbounded full-store read; ``scan_truncated``
     flags when more sessions exist beyond the scan window.
     """
-    # Storage paths
-    storage_dir = getattr(storage, "_dir", None)
-    sessions_dir = str(storage_dir) if storage_dir is not None else "unknown"
-    sessions_dir_exists = Path(sessions_dir).is_dir() if sessions_dir != "unknown" else False
+    # Storage paths (reported for diagnostics only — never control flow).
+    sessions_dir = storage.location()
+    sessions_dir_exists = sessions_dir != "unknown" and Path(sessions_dir).is_dir()
 
-    try:
-        from trace_mcp.extensions.learn.store import _get_directory
-
-        knowledge_dir = str(_get_directory())
-    except Exception:
-        knowledge_dir = str(Path(os.environ.get("TRACE_KNOWLEDGE_DIR", "~/.trace/knowledge")).expanduser())
+    # Knowledge dir is reported for diagnostics only. Compute it from the env
+    # WITHOUT importing the trace-learn extension — core must not depend on the
+    # extension (HARD CONSTRAINT #1 / governance evt_002). This mirrors the
+    # extension's own default resolution.
+    knowledge_dir = str(Path(os.environ.get("TRACE_KNOWLEDGE_DIR", "~/.trace/knowledge")).expanduser())
     knowledge_dir_exists = Path(knowledge_dir).is_dir()
 
     # Load sessions (bounded: read at most scan_cap most-recent files).
