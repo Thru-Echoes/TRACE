@@ -86,11 +86,12 @@ Host adapters (`src/trace_mcp/adapters/<host>/`) install hook scripts and config
 
 ## Pull request guidelines
 
-1. All tests must pass (`uv run pytest`)
-2. No new ruff or pyright errors on `src/`
-3. Add tests for new functionality
-4. Keep PRs focused — one feature or fix per PR
-5. If modifying schema models, regenerate the JSON Schema
+1. **Never push directly to `main`** — always work on a feature branch and open a PR.
+2. All tests must pass (`uv run pytest`).
+3. No new ruff or pyright errors (`uv run ruff check .` and `uv run pyright` — both cover `src/`, `tests/`, and `scripts/`).
+4. Add tests for new functionality.
+5. Keep PRs focused — one feature or fix per PR.
+6. If modifying schema models, regenerate the JSON Schema (`python scripts/generate_schema.py`).
 
 ## Development roadmap
 

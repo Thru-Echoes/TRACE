@@ -35,6 +35,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Docs
 - Corrected stale counts: **22 tools (17 core + 5 trace-learn)** (was "23 / 18 core"), test count "322+" → "880+". Added the "≤1–2 trace calls per turn, never batch, don't fan out at session start" cadence guidance to the global protocol and the `trace-session` skill (maintained out-of-repo).
 
+### Migration notes
+- **`trace_search` response shape changed (breaking).** It now returns an object
+  `{query, total_matched, returned, truncated, results}` instead of a bare list.
+  Consumers that indexed the result directly should read the `results` array
+  (`resp["results"]`), and may check `truncated` / `total_matched` for capped queries.
+- **Versioning:** shipped as **0.4.2** under SemVer §4 (pre-1.0, `0.y.z`): the
+  LLM-facing breaking changes above (`trace_search` shape, `recall_learnings`
+  default) are permitted within this bump, and the on-disk wire format is
+  unchanged (still schema v0.4.1).
+
 ### Deferred
 - The `.npy` embedding sidecar is redundant (embeddings already persist in the JSON store) but is an intentional, tested feature; removing it would break the embeddings tests, and the correct fix (exclude embeddings from JSON and load from the sidecar) is an architectural change with migration cost — deferred to a future release.
 
@@ -200,7 +210,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tool-call logging, session and event queries.
 - Knowledge persistence, behavioral checks, checkpoints.
 
-[Unreleased]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.2.0...v0.3.0
