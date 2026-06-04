@@ -711,6 +711,7 @@
     },
     "trace_version": {
       "default": "0.4.1",
+      "description": "Wire/schema format version this record conforms to. Decoupled from the package version (trace_mcp.__version__): wire-compatible releases keep this at the schema version. See SCHEMA_VERSION.",
       "title": "Trace Version",
       "type": "string"
     },
