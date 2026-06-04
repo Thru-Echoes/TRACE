@@ -24,6 +24,8 @@ TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy 
 
 > The schema URI is an identifier (per W3C PROV convention) and is not currently a resolvable URL. The machine-readable JSON Schema lives at [`schemas/trace-v0.4.json`](schemas/trace-v0.4.json) in this repository.
 
+**What's new in 0.4.2** (hardening — no protocol or wire changes; sessions stay at schema v0.4.1): a critical storage lost-update / event-ID-collision fix — a per-session file lock + disk-reload across *all* write paths (append, end, resolve), verified across real OS processes; hard payload caps on the query tools; a cheap, quiet session bootstrap; and packaging hardening. Full details in [CHANGELOG.md](CHANGELOG.md).
+
 **What's new in 0.4.1** (additive — v0.3.x and v0.4.0 sessions load unchanged): the **Proposer Identity Rule** (`proposed_by` identifies the *author* of proposal content, not the speaker of the resolving directive — spec §3.6); a `discovery` annotation category for non-trivial findings surfaced during autonomous execution (§3.7); **URI-form `corrects_event_ids`** with schemes `external:`, `jsonl:`, `subagent:`, `tool-result:` for correcting things that aren't TRACE events (§3.7.1); `host` and `parent_event_id` on `tool_call` to cover MCP, host-internal, and external tools and to link subagent-dispatch chains (§3.5); a normative MUST on `conversation_snippet` for contributions and corrections with an explicit `<autonomous-stretch>` absence marker (§3.4.1). The PROV-LD correction mapping splits along the event-ID vs URI-form axis — downstream consumers matching `prov:wasRevisionOf` for corrections should switch to `prov:wasInvalidatedBy` (event IDs) and `prov:wasInfluencedBy` with `prov:atLocation` (URI form). Full details in [CHANGELOG.md](CHANGELOG.md) and [docs/adr/002-v041-protocol-additions.md](docs/adr/002-v041-protocol-additions.md); worked examples in [docs/examples.md](docs/examples.md).
 
 ## Why decision provenance?
@@ -45,7 +47,7 @@ Three events from a real `corp-sus-report-extractor` session: a human-proposed s
 
 ## Preliminary deployment results
 
-Four weeks since the v0.3 release (2026-03-19 → present), TRACE has been used across **5 research workflows**:
+Since the v0.3 release (2026-03-19), TRACE has been used across **5 research workflows**:
 
 | Project | Domain | Sessions | Events | Decisions | Corrections |
 |---|---|---:|---:|---:|---:|
