@@ -16,11 +16,12 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import jsonschema
 import pytest
 
+from trace_mcp.exporters import export_prov_jsonld
 from trace_mcp.schema import (
     Actor,
     AnnotationData,
@@ -37,7 +38,6 @@ from trace_mcp.schema.events import EventContext
 from trace_mcp.schema.prov_mapping import PROV_CONTEXT, PROV_MAPPING
 from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import decision_tools, logging_tools, query_tools, session_tools
-from trace_mcp.exporters import export_prov_jsonld
 
 SCHEMA_PATH = Path(__file__).parent.parent / "schemas" / "trace-v0.4.json"
 SPEC_PATH = Path(__file__).parent.parent / "docs" / "specification.md"
@@ -682,7 +682,8 @@ class TestSpecDataModelCoverage:
 
     def test_session_status_values(self) -> None:
         # §3.1: status MUST be one of active, completed, abandoned
-        for status in ["active", "completed", "abandoned"]:
+        statuses: list[Literal["active", "completed", "abandoned"]] = ["active", "completed", "abandoned"]
+        for status in statuses:
             s = Session(id="test", metadata=SessionMetadata(project="t"), status=status)
             assert s.status == status
 
@@ -709,7 +710,8 @@ class TestSpecDataModelCoverage:
             assert f in fields, f"Actor missing field: {f}"
 
     def test_actor_type_values(self) -> None:
-        for t in ["human", "ai", "system"]:
+        actor_types: list[Literal["human", "ai", "system"]] = ["human", "ai", "system"]
+        for t in actor_types:
             a = Actor(type=t, id="test")
             assert a.type == t
 
@@ -722,8 +724,6 @@ class TestSpecDataModelCoverage:
 
     def test_event_type_values(self) -> None:
         types = ["tool_call", "decision", "annotation", "state_change", "contribution"]
-        schema = TraceEvent.model_json_schema()
-        defs = schema.get("$defs", {})
         # Check the type enum directly from the model
         for t in types:
             # Just verify each type can be set without error
@@ -743,7 +743,8 @@ class TestSpecDataModelCoverage:
             assert f in fields, f"ToolCallData missing field: {f}"
 
     def test_tool_call_status_values(self) -> None:
-        for status in ["success", "error", "timeout"]:
+        tc_statuses: list[Literal["success", "error", "timeout"]] = ["success", "error", "timeout"]
+        for status in tc_statuses:
             tc = ToolCallData(server="s", name="n", input={}, status=status)
             assert tc.status == status
 
@@ -755,7 +756,10 @@ class TestSpecDataModelCoverage:
             assert f in fields, f"DecisionData missing field: {f}"
 
     def test_decision_disposition_values(self) -> None:
-        for d in ["proposed", "accepted", "revised", "rejected"]:
+        dispositions: list[Literal["proposed", "accepted", "revised", "rejected"]] = [
+            "proposed", "accepted", "revised", "rejected",
+        ]
+        for d in dispositions:
             if d == "proposed":
                 dec = DecisionData(description="t", proposed_by=Actor(type="ai", id="x"), disposition=d)
             else:
@@ -770,7 +774,10 @@ class TestSpecDataModelCoverage:
             assert dec.disposition == d
 
     def test_suggestion_type_values(self) -> None:
-        for st in ["proactive", "requested", "collaborative"]:
+        suggestion_types: list[Literal["proactive", "requested", "collaborative"]] = [
+            "proactive", "requested", "collaborative",
+        ]
+        for st in suggestion_types:
             d = DecisionData(description="t", proposed_by=Actor(type="ai", id="x"), suggestion_type=st)
             assert d.suggestion_type == st
 
@@ -781,7 +788,10 @@ class TestSpecDataModelCoverage:
             assert f in fields, f"AnnotationData missing field: {f}"
 
     def test_annotation_category_values(self) -> None:
-        for cat in ["learning", "gotcha", "observation", "correction", "todo", "question", "discovery", "other"]:
+        categories: list[
+            Literal["learning", "gotcha", "observation", "correction", "todo", "question", "discovery", "other"]
+        ] = ["learning", "gotcha", "observation", "correction", "todo", "question", "discovery", "other"]
+        for cat in categories:
             a = AnnotationData(category=cat, content="test")
             assert a.category == cat
 
@@ -798,12 +808,14 @@ class TestSpecDataModelCoverage:
             assert f in fields, f"ContributionData missing field: {f}"
 
     def test_contribution_direction_values(self) -> None:
-        for d in ["human", "ai", "collaborative"]:
+        directions: list[Literal["human", "ai", "collaborative"]] = ["human", "ai", "collaborative"]
+        for d in directions:
             c = ContributionData(description="t", direction=d, execution="ai")
             assert c.direction == d
 
     def test_contribution_execution_values(self) -> None:
-        for e in ["human", "ai", "collaborative"]:
+        executions: list[Literal["human", "ai", "collaborative"]] = ["human", "ai", "collaborative"]
+        for e in executions:
             c = ContributionData(description="t", direction="human", execution=e)
             assert c.execution == e
 
@@ -1018,6 +1030,7 @@ class TestSpecInterchangeFormat:
         data = s.model_dump(mode="json")
         restored = Session.model_validate(data)
         assert restored.metadata.custom["lab_id"] == "lab-42"
+        assert restored.metadata.environment is not None
         assert restored.metadata.environment.custom["gpu_count"] == 4
 
 

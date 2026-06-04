@@ -7,11 +7,10 @@ timestamp updates, strict mode.
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 
-from trace_mcp.extensions.learn.models import KnowledgeStore, Learning
+from trace_mcp.extensions.learn.models import KnowledgeStore
 from trace_mcp.extensions.learn.store import (
     DedupResult,
     StoreLoadError,

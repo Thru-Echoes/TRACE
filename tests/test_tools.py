@@ -1237,6 +1237,7 @@ class TestAutoSession:
     ) -> None:
         """_infer_project prefers TRACE_DEFAULT_PROJECT env var."""
         import os
+
         import trace_mcp.server as srv
 
         orig_storage = srv.storage
