@@ -62,6 +62,8 @@ Decisions: **45% AI-proposed / 55% human-proposed**. Of resolved decisions, 86% 
 
 Contributions: **73% human-directed → AI-executed, 20% collaborative-directed, 8% AI-directed**. Pure AI-directed-and-executed work is a minority; the dominant pattern is human direction with AI execution — which existing attribution norms cannot describe.
 
+> These figures are aggregated from per-session TRACE logs in `~/.trace/sessions/`, which are not committed to this repository (they contain project-internal content). They are reproducible from those logs via `trace_project_summary`; an aggregated, de-identified export can be provided on request.
+
 ## Architecture
 
 ```
