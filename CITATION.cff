@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use TRACE, please cite it as below."
+title: "TRACE: Transparent Recording of AI-assisted Collaboration Experiments"
+abstract: >-
+  TRACE is a Model Context Protocol (MCP) server that produces a standardized,
+  human-readable audit trail for AI-assisted research and software workflows. It
+  records decision-level provenance: who proposed each step, who accepted, revised,
+  or rejected it, the rationale, and how the approach evolved, and exports to W3C
+  PROV as JSON-LD.
+type: software
+authors:
+  - given-names: Oliver
+    family-names: Muellerklein
+    affiliation: "Department of Environmental Science, Policy, and Management, University of California, Berkeley"
+    # orcid: "https://orcid.org/<ORCID-TBD>"   # TODO(PI): add ORCID before release/JOSS
+license: Apache-2.0
+repository-code: "https://github.com/Thru-Echoes/TRACE"
+version: 0.4.2
+keywords:
+  - provenance
+  - artificial intelligence
+  - reproducibility
+  - Model Context Protocol
+  - research integrity
+# DOI is minted on archival (Zenodo) at release; add here once available:
+# doi: "10.5281/zenodo.<TBD>"
