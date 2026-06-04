@@ -601,18 +601,35 @@ async def end_session(
         except FileNotFoundError:
             return f"Error: Session '{session_id}' not found."
 
-    # Guard: prevent double-ending — completed sessions are immutable
+    # Fast-path guard on the in-memory view (the definitive disk check is under the lock).
     if session.status == "completed":
         return (
             f"Error: Session '{session_id}' already ended at {session.ended}. "
             f"Completed sessions are immutable and cannot be ended again."
         )
 
-    session.ended = datetime.now(UTC)
-    session.status = "completed"
-    session.summary = summary
+    # Concurrency-safe (v0.4.2 symmetry with append_event): mutate + write under
+    # the per-session lock, reloading authoritative on-disk events first, so a
+    # concurrent append landing between read and write is preserved (not
+    # clobbered) and the immutability guard sees disk truth.
+    lock_factory = getattr(storage, "lock", None)
+    lock_cm = lock_factory(session_id) if lock_factory is not None else nullcontext()
+    async with lock_cm:
+        try:
+            disk = await storage.get_session(session_id)
+            if disk.status == "completed":
+                return (
+                    f"Error: Session '{session_id}' already ended at {disk.ended}. "
+                    f"Completed sessions are immutable and cannot be ended again."
+                )
+            session.events = disk.events
+        except FileNotFoundError:
+            pass  # brand-new session, not yet persisted
+        session.ended = datetime.now(UTC)
+        session.status = "completed"
+        session.summary = summary
+        await storage.update_session(session)
 
-    await storage.update_session(session)
     active_sessions.pop(session_id, None)
 
     # Count events by type
