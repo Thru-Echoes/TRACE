@@ -28,7 +28,7 @@ scope creep into core.
 
 2. **The delete-the-extension invariant is binding and CI-enforced.**
    Deleting `extensions/learn/` MUST leave a fully functional
-   18-core-tool provenance system. Enforced by
+   17-core-tool provenance system. Enforced by
    `tests/test_v041_core_extension_boundary.py`, run as a named CI step.
 
 3. **Tier-3 stays extension-scoped.** The Tier-3 roadmap (RL-style

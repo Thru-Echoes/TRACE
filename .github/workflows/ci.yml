@@ -43,7 +43,32 @@ jobs:
         run: uv run pyright src/
 
       - name: Core/extension boundary invariant (governance ADR 003)
-        run: uv run pytest tests/test_v041_core_extension_boundary.py -q
+        run: uv run pytest tests/test_v041_core_extension_boundary.py -q -p no:cov
 
-      - name: Tests
-        run: uv run pytest --tb=short
+      - name: Tests (with coverage)
+        # COVERAGE_PROCESS_START points the spawned MCP server (test_e2e_server.py
+        # runs `python -m trace_mcp.server` as a subprocess) at the coverage config
+        # so the child self-measures via src/sitecustomize.py ->
+        # coverage.process_startup(). With `[tool.coverage.run] parallel = true`
+        # each process writes its own `.coverage.<id>` file; pytest-cov combines
+        # them at the end of the run, so server.py is reported accurately (~60%)
+        # instead of the misleading in-process ~34%/0% the subprocess would yield.
+        # (Verified locally: server.py reads 0% with COVERAGE_PROCESS_START unset,
+        # 60% with it set — the wiring is load-bearing.)
+        env:
+          COVERAGE_PROCESS_START: pyproject.toml
+        run: |
+          uv run coverage erase
+          uv run pytest --cov=trace_mcp --cov-report=term-missing --cov-report=xml --tb=short
+
+      - name: Upload coverage to Codecov (non-blocking)
+        # Optional: uploads coverage.xml if a CODECOV_TOKEN secret is configured.
+        # `continue-on-error` + `fail_ci_if_error: false` keep CI green even when
+        # the token is absent (e.g. forks), so coverage upload never gates the build.
+        if: matrix.python-version == '3.13'
+        continue-on-error: true
+        uses: codecov/codecov-action@v4
+        with:
+          files: coverage.xml
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}

@@ -72,7 +72,7 @@ This updates `schemas/trace-v0.4.json` from `Session.model_json_schema()`.
 
 Extensions live in `src/trace_mcp/extensions/<name>/` and are auto-discovered via `pkgutil.iter_modules`. Each extension must expose a `register(mcp, storage)` function in its `__init__.py`. See `extensions/learn/` for the reference implementation.
 
-Core (`server.py`, `schema/`, `storage/`, `tools/`, `exporters/`, `scratchpad.py`, `extension_status.py`) must not import from `extensions/` — extensions integrate via the hook registry in `extension_hooks.py`. This boundary is **normative**; see [ADR 003](docs/adr/003-core-extension-boundary.md) for the rationale and the Tier-3 scope rule. It is CI-enforced by `tests/test_v041_core_extension_boundary.py` — deleting `extensions/learn/` must leave all 18 core tools functional.
+Core (`server.py`, `schema/`, `storage/`, `tools/`, `exporters/`, `scratchpad.py`, `extension_status.py`) must not import from `extensions/` — extensions integrate via the hook registry in `extension_hooks.py`. This boundary is **normative**; see [ADR 003](docs/adr/003-core-extension-boundary.md) for the rationale and the Tier-3 scope rule. It is CI-enforced by `tests/test_v041_core_extension_boundary.py` — deleting `extensions/learn/` must leave all 17 core tools functional.
 
 ## Adapter development
 

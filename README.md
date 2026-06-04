@@ -20,7 +20,7 @@ TRACE is an MCP server that provides a standardized audit trail for AI-assisted 
 
 TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy or intercept calls — the AI client explicitly logs events to TRACE, creating a complete, human-readable provenance record.
 
-**Version:** 0.4.1 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
+**Version:** 0.4.2 | **Spec:** v0.4.1 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
 
 > The schema URI is an identifier (per W3C PROV convention) and is not currently a resolvable URL. The machine-readable JSON Schema lives at [`schemas/trace-v0.4.json`](schemas/trace-v0.4.json) in this repository.
 
@@ -28,7 +28,7 @@ TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy 
 
 ## Why decision provenance?
 
-Existing AI observability stacks (LangSmith, Langfuse, OpenTelemetry GenAI semconv) capture **call-level** traces — what tool an agent called, with what inputs, and what came back. They do not capture **decision-level provenance** — who proposed each step, whether a human reviewed it, what alternatives were rejected. The cost is empirically visible: a structured rubric audit of agentic-AI deployments in environmental science finds analytical decision provenance scoring less than half of basic workflow description, with multiple recently-published papers reporting wrong model parameter counts, mismatched code/text descriptions, or experiments that were never run.
+Existing AI observability stacks (LangSmith, Langfuse, OpenTelemetry GenAI semconv) capture **call-level** traces — what tool an agent called, with what inputs, and what came back. They do not capture **decision-level provenance** — who proposed each step, whether a human reviewed it, what alternatives were rejected. The cost is visible in practice: in a preliminary rubric audit of agentic-AI deployments in environmental science, *analytical* decision provenance scored markedly lower than basic workflow description, and several recently-published papers showed discrepancies such as model details that did not match the cited models, or analyses that could not be reproduced from the reported description.
 
 The need is also moving from norm to regulation. The **EU AI Act** (Articles 12, 19; applicable to high-risk systems August 2, 2026), **California SB 942 (Transparency AI Act)** (applicable August 2, 2026), **Colorado SB 24-205** (effective June 30, 2026), the **FDA PCCP final guidance** (December 2024), the **NIST AI Risk Management Framework**, and **ISO/IEC 42001:2023** all require some form of decision-process documentation. TRACE is designed so that documentation is a workflow byproduct, not an after-the-fact compilation.
 
