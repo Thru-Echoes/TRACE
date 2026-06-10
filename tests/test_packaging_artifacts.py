@@ -127,22 +127,37 @@ class TestWheelContainsRequiredFiles:
         )
 
     def test_wheel_matches_package_tree(self, built_dist: dict[str, Path]) -> None:
-        """Tree parity: every non-Python file under src/trace_mcp must reach
-        the wheel. Direct-from-tree builds (uvx --from <path>) include the
-        whole package dir, but uv build goes through the sdist allowlist —
-        any file missing there silently produces two DIFFERENT wheels from
-        the same commit depending on the build path. This guard self-extends
-        to files added in the future."""
+        """Tree parity: every TRACKED non-Python file under src/trace_mcp must
+        reach the wheel. Direct-from-tree builds (uvx --from <path>) include
+        the whole package dir, but uv build goes through the sdist allowlist —
+        any file missing there silently produces two DIFFERENT wheels from the
+        same commit depending on the build path. This guard self-extends to
+        files added in the future.
+
+        The universe is `git ls-files` (committed files), not a raw tree scan:
+        the build legitimately excludes gitignored/untracked local junk
+        (.DS_Store, macOS ' 2' duplicates, *.local.json), and a raw rglob would
+        false-positive on those during local dev."""
+        ls = subprocess.run(
+            ["git", "ls-files", "--", "src/trace_mcp"],
+            cwd=TRACE_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        if ls.returncode != 0:
+            pytest.skip("git unavailable or not a git checkout — tree-parity universe needs git ls-files")
+
         members = get_wheel_members(built_dist["wheel"])
         tree_files = sorted(
-            str(p.relative_to(TRACE_ROOT / "src"))
-            for p in (TRACE_ROOT / "src" / "trace_mcp").rglob("*")
-            if p.is_file() and p.suffix != ".py" and "__pycache__" not in p.parts
+            line.removeprefix("src/")
+            for line in ls.stdout.splitlines()
+            if line and not line.endswith(".py")
         )
-        assert tree_files, "Expected non-Python package files in the source tree"
+        assert tree_files, "Expected tracked non-Python package files under src/trace_mcp"
         missing = [f for f in tree_files if f not in members]
         assert not missing, (
-            f"Package files present in the source tree but missing from the wheel "
+            f"Tracked package files missing from the wheel "
             f"(sdist allowlist gap — tree-built and sdist-built wheels now differ): {missing}"
         )
 
@@ -158,8 +173,18 @@ class TestWheelInstallE2E:
         venv_dir = tmp_path / "venv"
         subprocess.run(["uv", "venv", str(venv_dir)], check=True, capture_output=True, timeout=120)
         python = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
+        # Install through the [validate] extra (PEP 508 direct reference) so the
+        # extra itself is exercised — installing jsonschema manually would let a
+        # broken/renamed extra pass every test.
         subprocess.run(
-            ["uv", "pip", "install", "--python", str(python), str(built_dist["wheel"]), "jsonschema"],
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(python),
+                f"trace-mcp[validate] @ {built_dist['wheel'].as_uri()}",
+            ],
             check=True,
             capture_output=True,
             timeout=300,
@@ -187,6 +212,33 @@ class TestWheelInstallE2E:
         assert "FAIL" in bad.stdout
 
 
+class TestNoPersonalDataInSdist:
+    """Content-level leak guard: no file shipped in the sdist may contain a
+    personal home-directory path. The release.yml leak-guard only checks file
+    NAMES in the tarball; this catches personal paths inside file contents
+    (e.g. real transcript paths in session fixtures)."""
+
+    def test_no_personal_home_paths_in_sdist_contents(self, built_dist: dict[str, Path]) -> None:
+        # Built by concatenation so this test file (which ships in the sdist)
+        # can never contain the contiguous needle and self-trigger.
+        needle = "/Users/" + "echoes"
+        offenders: list[str] = []
+        with tarfile.open(built_dist["sdist"], "r:gz") as tf:
+            for member in tf.getmembers():
+                if not member.isfile():
+                    continue
+                fh = tf.extractfile(member)
+                if fh is None:
+                    continue
+                content = fh.read()
+                if needle.encode("utf-8") in content:
+                    offenders.append(member.name)
+        assert not offenders, (
+            f"Personal home-directory paths found inside sdist file contents "
+            f"(sanitize before shipping): {offenders}"
+        )
+
+
 class TestSdistContainsRequiredFiles:
     """uv build constructs the wheel from the sdist, so the sdist is the
     root-cause surface: anything missing here is missing from the wheel."""
@@ -200,3 +252,12 @@ class TestSdistContainsRequiredFiles:
         expected = ["src/" + a for a in get_expected_asset_relpaths()]
         missing = [a for a in expected if a not in members]
         assert not missing, f"Adapter assets missing from the sdist allowlist: {missing}"
+
+    def test_sdist_contains_anchored_top_level_metadata(self, built_dist: dict[str, Path]) -> None:
+        """The top-level metadata entries are anchored with a leading slash
+        (gitignore-style patterns otherwise match at any depth); make sure the
+        anchored syntax still ships them at the sdist root."""
+        members = get_sdist_members(built_dist["sdist"])
+        expected = ["README.md", "LICENSE", "NOTICE", "SECURITY.md", "CONTRIBUTING.md", "CHANGELOG.md", "server.json", "pyproject.toml"]
+        missing = [f for f in expected if f not in members]
+        assert not missing, f"Anchored top-level metadata missing from the sdist: {missing}"

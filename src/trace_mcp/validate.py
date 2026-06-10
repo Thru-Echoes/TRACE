@@ -56,6 +56,11 @@ def validate_file(path: Path, schema: dict) -> bool:
     except json.JSONDecodeError as e:
         print(f"  FAIL  {path}: Invalid JSON: {e}")
         return False
+    except (OSError, UnicodeDecodeError) as e:
+        # Unreadable input (missing file, directory, permissions, non-UTF8):
+        # a per-file FAIL keeps multi-file runs going instead of a traceback.
+        print(f"  FAIL  {path}: {e}")
+        return False
 
 
 def main(argv: list[str] | None = None) -> int:

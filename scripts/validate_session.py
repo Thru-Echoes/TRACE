@@ -16,7 +16,11 @@ from pathlib import Path
 
 try:
     from trace_mcp.validate import main
-except ImportError:  # source checkout without an installed package
+except ImportError:
+    # No installed package, or a stale install that predates trace_mcp.validate.
+    # The failed import leaves the stale package object in sys.modules, so evict
+    # it before retrying with the source tree first on sys.path.
+    sys.modules.pop("trace_mcp", None)
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
     from trace_mcp.validate import main
 
