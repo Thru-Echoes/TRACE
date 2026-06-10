@@ -126,6 +126,26 @@ class TestWheelContainsRequiredFiles:
             "trace-mcp validate would crash on any installed package"
         )
 
+    def test_wheel_matches_package_tree(self, built_dist: dict[str, Path]) -> None:
+        """Tree parity: every non-Python file under src/trace_mcp must reach
+        the wheel. Direct-from-tree builds (uvx --from <path>) include the
+        whole package dir, but uv build goes through the sdist allowlist —
+        any file missing there silently produces two DIFFERENT wheels from
+        the same commit depending on the build path. This guard self-extends
+        to files added in the future."""
+        members = get_wheel_members(built_dist["wheel"])
+        tree_files = sorted(
+            str(p.relative_to(TRACE_ROOT / "src"))
+            for p in (TRACE_ROOT / "src" / "trace_mcp").rglob("*")
+            if p.is_file() and p.suffix != ".py" and "__pycache__" not in p.parts
+        )
+        assert tree_files, "Expected non-Python package files in the source tree"
+        missing = [f for f in tree_files if f not in members]
+        assert not missing, (
+            f"Package files present in the source tree but missing from the wheel "
+            f"(sdist allowlist gap — tree-built and sdist-built wheels now differ): {missing}"
+        )
+
 
 class TestWheelInstallE2E:
     """Install the built wheel into a clean venv and exercise the console
