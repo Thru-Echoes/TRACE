@@ -39,6 +39,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[all]`. A missing dependency now produces an install hint instead of a
   stack trace.
 
+### Changed
+
+- **Test-suite hygiene: the suite is now fully isolated from the developer's
+  real `~/.trace` data.** A root conftest points `TRACE_KNOWLEDGE_DIR` and
+  `TRACE_SESSIONS_DIR` at per-run temp directories (previously, tests that
+  forgot an explicit directory deposited `e2e-*`/`fm-test`/`guard-e2e`/
+  `export-test` stores into the real knowledge dir), config tests no longer
+  read a real `./.env`, and the real-data integration tests are opt-in via
+  `TRACE_REAL_DATA_TESTS=1` (registered `real_data` marker). The suite is
+  deterministic on any machine — contributors no longer see failures caused
+  by the maintainer's personal data. `LearnConfig.openai_api_key` is
+  `repr=False` so the key cannot leak into pytest output or logs;
+  uvx-dependent installation checks skip instead of failing when uv isn't
+  installed.
+
 ## [0.4.2] — 2026-06-01
 
 > **Crash-surface + publication-hardening release.** Reduces TRACE's contribution to a Claude Code extended-thinking API-400 (a *client-side* signed-thinking-block re-serialization bug that TRACE cannot fix — only avoid triggering), fixes a critical storage data-loss bug, caps query payloads, and makes the package safe and ready to publish. The upstream client report is in `docs/upstream-claude-code-thinking-block-400.md`.
