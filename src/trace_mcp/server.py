@@ -11,13 +11,22 @@ import json
 import logging
 import os
 import sys
-from typing import Any
+from typing import Any, Literal
 
 from mcp.server.fastmcp import FastMCP
 
 from trace_mcp import __version__
 from trace_mcp import extension_hooks as hooks
-from trace_mcp.schema import Session
+from trace_mcp.schema import (
+    ActorType,
+    AnnotationCategory,
+    ContributionAttribution,
+    DecisionDisposition,
+    Session,
+    SuggestionType,
+    ToolCallHost,
+    ToolCallStatus,
+)
 from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import (
     decision_tools,
@@ -86,7 +95,21 @@ async def _ensure_session(session_id: str | None) -> tuple[Session, str]:
         session = await session_tools.get_or_load_session(
             storage, active_sessions, session_id
         )
-        _current_session_id = session_id
+        # Only an ACTIVE session may become the new current session. An
+        # explicit session_id targeting a completed session (e.g. resolving
+        # a decision proposed in a prior, now-closed session) must not move
+        # the pointer — otherwise every subsequent pointer-less call tries
+        # to append to the completed session and fails. The cached copy may
+        # be stale (another process may have completed the session), so the
+        # status is confirmed against disk before the pointer moves.
+        status = session.status
+        if status == "active":
+            try:
+                status = (await storage.get_session(session_id)).status
+            except FileNotFoundError:
+                pass  # not yet persisted — in-memory status is authoritative
+        if status == "active":
+            _current_session_id = session_id
         return session, ""
 
     # 2. Re-use the current session from earlier in this server process
@@ -95,7 +118,13 @@ async def _ensure_session(session_id: str | None) -> tuple[Session, str]:
             session = await session_tools.get_or_load_session(
                 storage, active_sessions, _current_session_id
             )
-            return session, ""
+            if session.status == "active":
+                return session, ""
+            # The current session was completed/abandoned (e.g. ended from
+            # another process): clear the pointer and fall through to
+            # auto-create rather than wedging every subsequent pointer-less
+            # call on an immutable session.
+            _current_session_id = None
         except FileNotFoundError:
             _current_session_id = None
 
@@ -276,14 +305,14 @@ async def trace_log_tool_call(
     input: dict[str, Any],
     output: Any = None,
     duration_ms: int | None = None,
-    status: str = "success",
+    status: ToolCallStatus = "success",
     error_message: str | None = None,
     retries_event_id: str | None = None,
-    actor_type: str = "ai",
+    actor_type: ActorType = "ai",
     actor_id: str = "ai-assistant",
     reasoning: str | None = None,
     conversation_turn: int | None = None,
-    host: str = "mcp",
+    host: ToolCallHost = "mcp",
     parent_event_id: str | None = None,
     session_id: str | None = None,
 ) -> str:
@@ -334,12 +363,12 @@ async def trace_log_tool_call(
 
 @mcp.tool()
 async def trace_log_annotation(
-    category: str,
+    category: AnnotationCategory,
     content: str,
     tags: list[str] | None = None,
     corrects_event_ids: list[str] | None = None,
     related_event_ids: list[str] | None = None,
-    actor_type: str = "ai",
+    actor_type: ActorType = "ai",
     actor_id: str = "ai-assistant",
     conversation_snippet: str | None = None,
     session_id: str | None = None,
@@ -382,12 +411,12 @@ async def trace_log_annotation(
 @mcp.tool()
 async def trace_log_contribution(
     description: str,
-    direction: str,
-    execution: str,
+    direction: ContributionAttribution,
+    execution: ContributionAttribution,
     artifact: str | None = None,
     related_decision_ids: list[str] | None = None,
     tags: list[str] | None = None,
-    actor_type: str = "ai",
+    actor_type: ActorType = "ai",
     actor_id: str = "ai-assistant",
     conversation_snippet: str | None = None,
     session_id: str | None = None,
@@ -434,7 +463,7 @@ async def trace_log_state_change(
     old_value: Any = None,
     new_value: Any = None,
     reason: str | None = None,
-    actor_type: str = "ai",
+    actor_type: ActorType = "ai",
     actor_id: str = "ai-assistant",
     session_id: str | None = None,
 ) -> str:
@@ -476,11 +505,11 @@ async def trace_log_state_change(
 @mcp.tool()
 async def trace_propose_decision(
     description: str,
-    proposed_by_type: str,
+    proposed_by_type: ActorType,
     proposed_by_id: str,
     rationale: str | None = None,
     revises_event_id: str | None = None,
-    suggestion_type: str | None = None,
+    suggestion_type: SuggestionType | None = None,
     tags: list[str] | None = None,
     conversation_snippet: str | None = None,
     session_id: str | None = None,
@@ -536,8 +565,8 @@ async def trace_propose_decision(
 @mcp.tool()
 async def trace_resolve_decision(
     event_id: str,
-    disposition: str,
-    resolved_by_type: str,
+    disposition: Literal["accepted", "revised", "rejected"],
+    resolved_by_type: ActorType,
     resolved_by_id: str,
     revision_note: str | None = None,
     session_id: str | None = None,
@@ -606,8 +635,8 @@ async def trace_get_events(
 @mcp.tool()
 async def trace_get_decisions(
     session_id: str,
-    disposition: str | None = None,
-    proposed_by_type: str | None = None,
+    disposition: DecisionDisposition | None = None,
+    proposed_by_type: ActorType | None = None,
 ) -> str:
     """List all decisions in a session, optionally filtered by disposition status and/or proposer type."""
     try:
@@ -712,7 +741,7 @@ async def trace_health_check(
 @mcp.tool()
 async def trace_export(
     session_id: str,
-    format: str,
+    format: Literal["json", "markdown", "prov-jsonld"],
     pretty: bool = True,
 ) -> str:
     """Export a session in a specific format.

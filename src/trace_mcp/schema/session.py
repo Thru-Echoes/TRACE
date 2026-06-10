@@ -25,10 +25,16 @@ changes — never for a packaging/patch release. The spec namespace URL in
 """
 
 
+# Canonical enum value-sets. Single source of truth — the MCP tool
+# signatures in server.py import these so the protocol edge can never
+# drift from the schema.
+ActorType = Literal["human", "ai", "system"]
+
+
 class Actor(BaseModel):
     """Who performed an action."""
 
-    type: Literal["human", "ai", "system"]
+    type: ActorType
     id: str
     role: str | None = None
 

@@ -1,17 +1,24 @@
 """TRACE schema definitions — Pydantic models for sessions and events."""
 
 from trace_mcp.schema.events import (
+    AnnotationCategory,
     AnnotationData,
+    ContributionAttribution,
     ContributionData,
     DecisionData,
+    DecisionDisposition,
     EventContext,
     StateChangeData,
+    SuggestionType,
     ToolCallData,
+    ToolCallHost,
+    ToolCallStatus,
     TraceEvent,
 )
 from trace_mcp.schema.session import (
     SCHEMA_VERSION,
     Actor,
+    ActorType,
     Environment,
     Session,
     SessionMetadata,
@@ -24,6 +31,13 @@ Session.model_rebuild()
 __all__ = [
     "SCHEMA_VERSION",
     "Actor",
+    "ActorType",
+    "AnnotationCategory",
+    "ContributionAttribution",
+    "DecisionDisposition",
+    "SuggestionType",
+    "ToolCallHost",
+    "ToolCallStatus",
     "AnnotationData",
     "ContributionData",
     "DecisionData",
