@@ -183,6 +183,9 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-v --tb=short"
 asyncio_mode = "auto"
+markers = [
+    "real_data: reads the developer's real ~/.trace data; skipped unless TRACE_REAL_DATA_TESTS=1",
+]
 
 # NB: pyright is configured in the standalone pyrightconfig.json (include
 # src+tests+scripts), which takes precedence over any [tool.pyright] here. A
