@@ -119,9 +119,15 @@ class TestEmbeddingE2ESubprocess:
 _REAL_STORE = Path.home() / ".trace" / "knowledge" / "TRACE.json"
 
 
+@pytest.mark.real_data
 @pytest.mark.skipif(not _REAL_STORE.exists(), reason="No real TRACE knowledge store")
 class TestRealDataE2E:
-    """E2E tests using real TRACE knowledge data."""
+    """E2E tests using real TRACE knowledge data.
+
+    Opt-in via TRACE_REAL_DATA_TESTS=1 (real_data marker, enforced in
+    conftest): recall assertions depend on the personal store's contents,
+    which drift over time.
+    """
 
     async def test_recall_real_knowledge(self):
         """Recall against real TRACE knowledge store via MCP server."""

@@ -41,18 +41,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Test-suite hygiene: the suite is now fully isolated from the developer's
-  real `~/.trace` data.** A root conftest points `TRACE_KNOWLEDGE_DIR` and
-  `TRACE_SESSIONS_DIR` at per-run temp directories (previously, tests that
-  forgot an explicit directory deposited `e2e-*`/`fm-test`/`guard-e2e`/
-  `export-test` stores into the real knowledge dir), config tests no longer
-  read a real `./.env`, and the real-data integration tests are opt-in via
-  `TRACE_REAL_DATA_TESTS=1` (registered `real_data` marker). The suite is
-  deterministic on any machine — contributors no longer see failures caused
-  by the maintainer's personal data. `LearnConfig.openai_api_key` is
-  `repr=False` so the key cannot leak into pytest output or logs;
-  uvx-dependent installation checks skip instead of failing when uv isn't
-  installed.
+- **Test-suite hygiene: the default suite no longer reads or writes the
+  developer's real `~/.trace` data.** A root conftest points
+  `TRACE_KNOWLEDGE_DIR`, `TRACE_SESSIONS_DIR`, and `TRACE_SCRATCHPAD_DIR` at
+  per-run temp directories, set in `pytest_configure` so even module-level
+  imports during collection resolve the isolated paths. Previously, suite
+  runs deposited `e2e-*`/`fm-test`/`guard-e2e`/`export-test` stores into the
+  real knowledge dir and **overwrote the developer's real
+  `.claude/SCRATCHPAD.md` on every run** (session-end scratchpads from e2e
+  server subprocesses). All four real-data test classes
+  (`TestRealDataEmbeddings`, `TestRealDataE2E`, `TestRealSessionDataIntegrity`,
+  `TestCrossProjectConsistency`) are opt-in via `TRACE_REAL_DATA_TESTS=1` — the
+  registered `real_data` marker is load-bearing (a conftest collection hook
+  skips marked tests unless opted in, so a class can't forget its gate), and
+  their recall expectations are derived from store content at runtime instead
+  of pinned learning IDs, so personal-store drift can't fail them. Config
+  tests that need key-absence scrub the env var, `~/.trace/.env`, **and** the
+  checkout's `./.env`; the real-LLM integration tests intentionally still
+  read the developer's real key. `LearnConfig.openai_api_key` is `repr=False`
+  so the key cannot leak into pytest output or logs; the uvx installation
+  check (`test_mcp_json_command_resolves`) skips instead of failing when uv
+  isn't installed.
 
 ## [0.4.2] — 2026-06-01
 
