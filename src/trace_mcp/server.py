@@ -41,6 +41,17 @@ active_sessions: dict[str, Session] = {}
 _current_session_id: str | None = None
 
 
+def _compact(obj: Any) -> str:
+    """Serialize a query-tool result compactly.
+
+    Query/retrieval results land directly in the model's context window, where
+    indentation is pure token waste (~20-30% overhead) and compounds the
+    context bloat behind the API-400 crash. The human/artifact-facing path
+    (``trace_export``) uses pretty JSON instead.
+    """
+    return json.dumps(obj, separators=(",", ":"), default=str)
+
+
 # ── Auto-Session Infrastructure ────────────────────────────────────────────
 
 
@@ -122,20 +133,30 @@ async def trace_start_session(
     description: str | None = None,
     participants: list[dict[str, Any]] | None = None,
     tags: list[str] | None = None,
-    recall_learnings: bool = True,
+    recall_learnings: bool = False,
     recall_limit: int = 5,
 ) -> str:
     """Start a new TRACE audit session.
 
-    Call this at the beginning of any scientific workflow or experiment.
-    Returns a session ID to use in all subsequent TRACE calls.
+    Call this ONCE at the beginning of a multi-step workflow. It returns a
+    session id plus a bounded prior-session orientation, so you do NOT need to
+    follow it with trace_list_sessions / trace_get_events / trace_health_check
+    to get your bearings — that opening fan-out inflates a single assistant
+    turn and can trip the Claude Code thinking-block API-400. Log events
+    sequentially as they happen (1-2 trace calls per turn).
 
-    When recall_learnings is True (default), automatically surfaces the
-    most relevant past learnings based on the session description and tags.
-    Only the top recall_limit results are returned (default 5).
+    recall_learnings defaults to False to keep session start cheap and quiet.
+    Set recall_learnings=True only when past learnings are likely relevant; it
+    surfaces up to recall_limit (default 5) learnings based on description/tags.
     """
     global _current_session_id
     try:
+        # Bounded orientation (reads <=25 files) on PRIOR state, computed before
+        # creating the new session so it never counts the session being started.
+        # This gives the model its bearings so it need not fan out to the query
+        # tools in the opening interleaved-thinking turn.
+        brief = await storage.session_brief(project)
+
         session = await session_tools.create_session(
             storage,
             active_sessions,
@@ -147,24 +168,24 @@ async def trace_start_session(
         )
         _current_session_id = session.id
 
-        path = storage._session_path(session.id) if hasattr(storage, "_session_path") else "disk"  # type: ignore[attr-defined]
-        result = (
-            f"TRACE audit logging is now active.\n"
-            f"Session: {session.id}\n"
-            f"Project: {project}\n"
-            f"File: {path}\n"
-            f"All tool calls, decisions, and annotations will be recorded."
-        )
+        path = storage.session_location(session.id)
 
-        # Layer 1: Auto-recall relevant learnings at session start
+        # Recall is OFF by default (v0.4.2): opt-in only, rendered once.
+        recalled_block = ""
         if recall_learnings and description:
             recalled = await hooks.recall_if_available(
                 project, description, tags, recall_limit
             )
             if recalled:
-                result += hooks.format_recalled_learnings(recalled)
+                recalled_block = hooks.format_recalled_learnings(recalled)
 
-        return result
+        return session_tools.format_bootstrap_message(
+            session_id=session.id,
+            project=project,
+            path=str(path),
+            brief=brief,
+            recalled_block=recalled_block,
+        )
     except Exception as e:
         logger.exception("Error starting session")
         return f"Error starting session: {e}"
@@ -563,14 +584,14 @@ async def trace_get_session(session_id: str) -> str:
         return f"Error: Session '{session_id}' not found."
 
     summary = query_tools.get_session_summary(session)
-    return json.dumps(summary, indent=2, default=str)
+    return _compact(summary)
 
 
 @mcp.tool()
 async def trace_get_events(
     session_id: str,
     type: str | None = None,
-    limit: int = 100,
+    limit: int = query_tools.DEFAULT_EVENTS_LIMIT,
 ) -> str:
     """List events in a session, optionally filtered by type."""
     try:
@@ -579,7 +600,7 @@ async def trace_get_events(
         return f"Error: Session '{session_id}' not found."
 
     events = query_tools.get_events(session, type_filter=type, limit=limit)
-    return json.dumps(events, indent=2, default=str)
+    return _compact(events)
 
 
 @mcp.tool()
@@ -595,7 +616,7 @@ async def trace_get_decisions(
         return f"Error: Session '{session_id}' not found."
 
     decisions = query_tools.get_decisions(session, disposition=disposition, proposed_by_type=proposed_by_type)
-    return json.dumps(decisions, indent=2, default=str)
+    return _compact(decisions)
 
 
 @mcp.tool()
@@ -615,22 +636,36 @@ async def trace_get_decision_chain(
     chain = query_tools.get_decision_chain(session, event_id=event_id)
     if not chain:
         return f"Error: Decision '{event_id}' not found."
-    return json.dumps(chain, indent=2, default=str)
+    return _compact(chain)
 
 
 @mcp.tool()
 async def trace_search(
     session_id: str,
     query: str,
+    limit: int = query_tools.DEFAULT_SEARCH_LIMIT,
 ) -> str:
-    """Search events in a session by text content (case-insensitive)."""
+    """Search events in a session by text content (case-insensitive).
+
+    Returns at most `limit` matching events (clamped to a hard ceiling). The
+    response reports total_matched / returned / truncated so a capped result is
+    explicit rather than a silently-truncated list.
+    """
     try:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
 
-    results = query_tools.search_events(session, query=query)
-    return json.dumps(results, indent=2, default=str)
+    all_results = query_tools.search_events(session, query=query)
+    cap = max(1, min(limit, query_tools.MAX_SEARCH_LIMIT))
+    returned = all_results[:cap]
+    return _compact({
+        "query": query,
+        "total_matched": len(all_results),
+        "returned": len(returned),
+        "truncated": len(all_results) > len(returned),
+        "results": returned,
+    })
 
 
 @mcp.tool()
@@ -645,7 +680,7 @@ async def trace_project_summary(
     """
     try:
         summary = await query_tools.project_summary(storage, project=project)
-        return json.dumps(summary, indent=2, default=str)
+        return _compact(summary)
     except Exception as e:
         logger.exception("Error generating project summary")
         return f"Error generating project summary: {e}"
@@ -665,7 +700,7 @@ async def trace_health_check(
         result = await query_tools.health_check(
             storage, project=project, session_id=session_id
         )
-        return json.dumps(result, indent=2, default=str)
+        return _compact(result)
     except Exception as e:
         logger.exception("Error running health check")
         return f"Error running health check: {e}"
@@ -678,10 +713,15 @@ async def trace_health_check(
 async def trace_export(
     session_id: str,
     format: str,
+    pretty: bool = True,
 ) -> str:
     """Export a session in a specific format.
 
-    Supported formats: 'json', 'markdown', 'prov-jsonld'.
+    Supported formats: 'json', 'markdown', 'prov-jsonld'. This is the
+    human/artifact-facing path, so JSON is indented (pretty) by default — pass
+    pretty=False for a compact JSON artifact. (The query/retrieval tools emit
+    compact JSON unconditionally because their output goes into the model's
+    context window.)
     """
     try:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
@@ -689,7 +729,7 @@ async def trace_export(
         return f"Error: Session '{session_id}' not found."
 
     try:
-        return export_tools.export_session(session, format=format)
+        return export_tools.export_session(session, format=format, pretty=pretty)
     except Exception as e:
         logger.exception("Error exporting session")
         return f"Error exporting session: {e}"
@@ -703,7 +743,7 @@ async def trace_list_sessions(
     """List all TRACE sessions, optionally filtered by project name."""
     try:
         summaries = await storage.list_sessions(project=project, limit=limit)
-        return json.dumps(summaries, indent=2, default=str)
+        return _compact(summaries)
     except Exception as e:
         logger.exception("Error listing sessions")
         return f"Error listing sessions: {e}"

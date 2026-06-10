@@ -18,7 +18,6 @@ from trace_mcp.extensions.learn.matching import (
 )
 from trace_mcp.extensions.learn.models import Learning
 
-
 # ── compute_decay unit tests ─────────────────────────────────────────────
 
 

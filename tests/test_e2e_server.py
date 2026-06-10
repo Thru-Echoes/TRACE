@@ -23,9 +23,9 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import trace_mcp
-
 import pytest  # noqa: F401 (used by pytest-asyncio for test collection)
+
+import trace_mcp
 
 TRACE_ROOT = Path(__file__).parent.parent
 
@@ -96,10 +96,36 @@ async def _send_and_receive(
             return parsed
 
 
-async def _start_server(sessions_dir: str) -> asyncio.subprocess.Process:
-    """Start the TRACE MCP server as a subprocess."""
+async def _start_server(
+    sessions_dir: str, env_extra: dict[str, str] | None = None
+) -> asyncio.subprocess.Process:
+    """Start the TRACE MCP server as a subprocess.
+
+    env_extra, if given, overrides individual env vars after the deterministic
+    offline defaults below are applied — e.g. to point the server at a specific
+    knowledge dir, or to opt a single test into a real embedding backend.
+    """
     env = os.environ.copy()
     env["TRACE_SESSIONS_DIR"] = sessions_dir
+    # Import trace_mcp from src/ in the spawned server regardless of whether an
+    # editable install is present/healthy (uv re-syncs can silently drop it).
+    # Mirrors the pytest `pythonpath = ["src"]` config used for in-process imports.
+    src = str(TRACE_ROOT / "src")
+    env["PYTHONPATH"] = src + os.pathsep + env.get("PYTHONPATH", "")
+    # Keep the server-lifecycle e2e deterministic and offline: force the
+    # rule-based (BM25) matching path so the trace-learn extension never
+    # triggers a lazy model2vec model download or OpenAI call on first
+    # recall/extract (a multi-second blocking cold-load that intermittently
+    # blew the 15s read timeout). strict_llm must be off and the API key
+    # dropped, otherwise strict mode refuses the BM25 fallback and the whole
+    # extension fails to register. Embedding/LLM behaviour is covered by the
+    # dedicated test_learn_* suites.
+    env["TRACE_EMBEDDING_BACKEND"] = "none"
+    env["TRACE_LLM_ENABLED"] = "false"
+    env["TRACE_STRICT_LLM"] = "false"
+    env.pop("OPENAI_API_KEY", None)
+    if env_extra:
+        env.update(env_extra)
 
     proc = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -158,7 +184,7 @@ async def _shutdown_server(proc: asyncio.subprocess.Process) -> None:
     proc.stdin.close()
     try:
         await asyncio.wait_for(proc.wait(), timeout=5)
-    except asyncio.TimeoutError:
+    except TimeoutError:
         proc.kill()
         await proc.wait()
 
@@ -363,8 +389,11 @@ class TestSessionLifecycleE2E:
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
-                results = json.loads(result_text)
-                assert len(results) >= 1
+                search = json.loads(result_text)
+                # v0.4.2: trace_search returns a capped object with truncation info.
+                assert search["total_matched"] >= 1
+                assert len(search["results"]) == search["returned"] >= 1
+                assert search["truncated"] is False  # tiny session, nothing dropped
 
                 # 9. Get session summary
                 response = await _call_tool(proc, "trace_get_session", {

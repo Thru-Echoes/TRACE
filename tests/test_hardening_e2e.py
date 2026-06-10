@@ -40,7 +40,6 @@ from trace_mcp.scratchpad import (
 from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import decision_tools, logging_tools, session_tools
 
-
 # ── Fixtures ────────────────────────────────────────────────────────────────
 
 
@@ -695,7 +694,7 @@ class TestGreenNarrativePatterns:
         )
 
         # Contribution with all required fields
-        contrib = await logging_tools.log_contribution(
+        await logging_tools.log_contribution(
             storage, session,
             description="15 Pydantic models for sustainability reports",
             direction="human", execution="ai",
@@ -1210,9 +1209,13 @@ class TestDecisionChainIntegrity:
         reloaded = await storage.get_session(sid)
         events_by_id = {e.id: e for e in reloaded.events}
 
-        assert events_by_id[d3].decision.revises_event_id == d2
-        assert events_by_id[d2].decision.revises_event_id == d1
-        assert events_by_id[d1].decision.revises_event_id is None
+        dec1 = events_by_id[d1].decision
+        dec2 = events_by_id[d2].decision
+        dec3 = events_by_id[d3].decision
+        assert dec1 is not None and dec2 is not None and dec3 is not None
+        assert dec3.revises_event_id == d2
+        assert dec2.revises_event_id == d1
+        assert dec1.revises_event_id is None
 
     async def test_revision_chain_rejects_invalid_parent(
         self, storage: JsonFileStorage, active: dict[str, Session],
@@ -1260,6 +1263,7 @@ class TestToolCallRetryChains:
 
         reloaded = await storage.get_session(sid)
         retry_evt = next(e for e in reloaded.events if e.id == tc2)
+        assert retry_evt.tool_call is not None
         assert retry_evt.tool_call.retries_event_id == tc1
 
     async def test_retry_rejects_invalid_parent(

@@ -15,8 +15,6 @@ from pathlib import Path
 from typing import Literal
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from trace_mcp.extensions.learn.config import LearnConfig
 from trace_mcp.extensions.learn.extraction import (
     extract_from_session,
@@ -41,7 +39,6 @@ from trace_mcp.schema.events import (
     TraceEvent,
 )
 from trace_mcp.schema.session import Actor, SessionMetadata
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 

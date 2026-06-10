@@ -14,6 +14,17 @@ if TYPE_CHECKING:
     from trace_mcp.schema.events import TraceEvent
 
 
+SCHEMA_VERSION = "0.4.1"
+"""TRACE wire/schema format version that session documents conform to.
+
+Intentionally decoupled from the package version (``trace_mcp.__version__``):
+a wire-compatible release that adds no schema fields (e.g. 0.4.2) keeps this at
+the last format-changing version. Bump it only when the on-disk session format
+changes — never for a packaging/patch release. The spec namespace URL in
+``Session.context`` is separately pinned at v0.3 per ADR-002 D6.
+"""
+
+
 class Actor(BaseModel):
     """Who performed an action."""
 
@@ -56,7 +67,14 @@ class Session(BaseModel):
     """Top-level audit session. One session = one TRACE JSON file."""
 
     context: str = "https://trace-protocol.org/v0.3"
-    trace_version: str = "0.4.1"
+    trace_version: str = Field(
+        default=SCHEMA_VERSION,
+        description=(
+            "Wire/schema format version this record conforms to. Decoupled from "
+            "the package version (trace_mcp.__version__): wire-compatible releases "
+            "keep this at the schema version. See SCHEMA_VERSION."
+        ),
+    )
     id: str
     created: datetime = Field(default_factory=lambda: datetime.now(UTC))
     ended: datetime | None = None

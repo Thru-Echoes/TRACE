@@ -20,6 +20,10 @@ All async tests use `asyncio_mode = "auto"` — no `@pytest.mark.asyncio` needed
 
 ### What the test suite covers
 
+The authoritative count is `uv run pytest` (**889 tests** — 887 passing + 2
+environment-gated skips as of v0.4.2). The table below highlights the main
+areas; it is representative, not an exhaustive per-file tally.
+
 | Area | Tests | What's verified |
 |------|------:|-----------------|
 | **Schema validation** | 32 | Pydantic models, forward refs, event type validation, `model_rebuild()` |
@@ -37,10 +41,12 @@ All async tests use `asyncio_mode = "auto"` — no `@pytest.mark.asyncio` needed
 | **Adapters** | 47 | Host-adapter base + Claude Code installer + Codex placeholder + hook scripts (session reminder, prompt reminder, pretool guard, decision audit) |
 | **Installation health** | 34 | Import checks, config resolution, extension loading |
 | **E2E server** | 12 | Full MCP tool invocations through the server layer |
+| **Protocol additions (v0.4.1)** | 101 | Attribution audit, URI-form `corrects_event_ids`, PROV-LD correction split, decision-audit hook, `tool_call` wrapper, core/extension boundary, extension status |
+| **Hardening (v0.4.2)** | 20 | Storage lost-update + **cross-process** concurrency lock, query payload caps, cheap bootstrap, recall-count accounting |
+| **Spec conformance + guards** | 225 | Specification conformance, hardening E2E, decision guard-rails, failure-mode detectors |
 
 ### What the test suite does NOT cover
 
-- **Concurrent access** — No tests for multiple simultaneous sessions writing to the same store. File locking is not implemented; the atomic write pattern guards against torn writes but not interleaved races.
 - **Large-scale performance** — No benchmarks for stores with hundreds of learnings or sessions with hundreds of events.
 - **Network failure handling** — LLM backend tests verify fallback on API errors (mocked), but no tests simulate real network timeouts, rate limits, or partial responses.
 - **MCP transport layer** — Tests call tool functions directly. The `test_e2e_server.py` tests use the tool layer but not the actual MCP wire format.
@@ -72,7 +78,7 @@ This updates `schemas/trace-v0.4.json` from `Session.model_json_schema()`.
 
 Extensions live in `src/trace_mcp/extensions/<name>/` and are auto-discovered via `pkgutil.iter_modules`. Each extension must expose a `register(mcp, storage)` function in its `__init__.py`. See `extensions/learn/` for the reference implementation.
 
-Core (`server.py`, `schema/`, `storage/`, `tools/`, `exporters/`, `scratchpad.py`, `extension_status.py`) must not import from `extensions/` — extensions integrate via the hook registry in `extension_hooks.py`. This boundary is **normative**; see [ADR 003](docs/adr/003-core-extension-boundary.md) for the rationale and the Tier-3 scope rule. It is CI-enforced by `tests/test_v041_core_extension_boundary.py` — deleting `extensions/learn/` must leave all 18 core tools functional.
+Core (`server.py`, `schema/`, `storage/`, `tools/`, `exporters/`, `scratchpad.py`, `extension_status.py`) must not import from `extensions/` — extensions integrate via the hook registry in `extension_hooks.py`. This boundary is **normative**; see [ADR 003](docs/adr/003-core-extension-boundary.md) for the rationale and the Tier-3 scope rule. It is CI-enforced by `tests/test_v041_core_extension_boundary.py` — deleting `extensions/learn/` must leave all 17 core tools functional.
 
 ## Adapter development
 
@@ -80,11 +86,12 @@ Host adapters (`src/trace_mcp/adapters/<host>/`) install hook scripts and config
 
 ## Pull request guidelines
 
-1. All tests must pass (`uv run pytest`)
-2. No new ruff or pyright errors on `src/`
-3. Add tests for new functionality
-4. Keep PRs focused — one feature or fix per PR
-5. If modifying schema models, regenerate the JSON Schema
+1. **Never push directly to `main`** — always work on a feature branch and open a PR.
+2. All tests must pass (`uv run pytest`).
+3. No new ruff or pyright errors (`uv run ruff check .` and `uv run pyright` — both cover `src/`, `tests/`, and `scripts/`).
+4. Add tests for new functionality.
+5. Keep PRs focused — one feature or fix per PR.
+6. If modifying schema models, regenerate the JSON Schema (`python scripts/generate_schema.py`).
 
 ## Development roadmap
 
@@ -121,9 +128,15 @@ Development is organized into three tiers, implemented sequentially.
 
 ## Install extras
 
+TRACE is not yet on PyPI — the published distribution name is being finalized.
+For now, install from a local clone (`uvx --from <path-to-clone> trace-mcp`, see
+the [README](README.md#install)) or `uv pip install -e ".[dev]"` for
+development. Once published, the extras will be:
+
 ```bash
-pip install trace-mcp              # Core only (BM25 matching)
-pip install trace-mcp[llm]         # + OpenAI embeddings & LLM matching
-pip install trace-mcp[embeddings]  # + model2vec local embeddings
-pip install trace-mcp[all]         # Everything
+# After PyPI publication (distribution name pending):
+pip install <trace-dist>              # Core only (BM25 matching)
+pip install <trace-dist>[llm]         # + OpenAI embeddings & LLM matching
+pip install <trace-dist>[embeddings]  # + model2vec local embeddings
+pip install <trace-dist>[all]         # Everything
 ```

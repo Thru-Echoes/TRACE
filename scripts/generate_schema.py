@@ -8,7 +8,7 @@ Output: schemas/trace-v0.4.json (renamed from trace-v0.3.json in v0.4.1)
 import json
 from pathlib import Path
 
-from trace_mcp.schema import Session
+from trace_mcp.schema import SCHEMA_VERSION, Session
 
 SCHEMA_DIR = Path(__file__).parent.parent / "schemas"
 
@@ -17,10 +17,10 @@ def main() -> None:
     SCHEMA_DIR.mkdir(exist_ok=True)
     schema = Session.model_json_schema()
     schema["$id"] = "https://trace-protocol.org/schemas/trace-v0.4.json"
-    schema["title"] = "Decision Provenance Session Document v0.4.1"
+    schema["title"] = f"Decision Provenance Session Document v{SCHEMA_VERSION}"
     schema["description"] = (
         "JSON Schema for a session document conforming to the Decision Provenance "
-        "for AI-Assisted Workflows specification v0.4.1. "
+        f"for AI-Assisted Workflows specification v{SCHEMA_VERSION}. "
         "See: https://trace-protocol.org/v0.3 (namespace URI kept at v0.3# per ADR 002 D6 — "
         "additive extensions are valid within the same namespace)."
     )

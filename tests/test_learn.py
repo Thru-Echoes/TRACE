@@ -66,7 +66,7 @@ def _make_annotation_event(
 def _make_decision_event(
     event_id: str,
     description: str,
-    disposition: str = "proposed",
+    disposition: Literal["proposed", "accepted", "revised", "rejected"] = "proposed",
     revision_note: str | None = None,
     tags: list[str] | None = None,
 ) -> TraceEvent:

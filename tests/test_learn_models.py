@@ -49,7 +49,9 @@ class TestLearningModel:
 
     def test_all_valid_categories(self):
         """Every LearningCategory literal is accepted."""
-        valid = ["learning", "gotcha", "correction", "decision", "observation", "todo", "question", "other"]
+        valid: list[LearningCategory] = [
+            "learning", "gotcha", "correction", "decision", "observation", "todo", "question", "other",
+        ]
         for cat in valid:
             lrn = Learning(content="test", category=cat)
             assert lrn.category == cat
@@ -57,7 +59,7 @@ class TestLearningModel:
     def test_invalid_category_rejected(self):
         """Pydantic rejects categories not in the Literal union."""
         with pytest.raises(ValidationError, match="category"):
-            Learning(content="test", category="invalid_category")
+            Learning(content="test", category="invalid_category")  # pyright: ignore[reportArgumentType]
 
     def test_timestamp_auto_generated(self):
         before = datetime.now(UTC)

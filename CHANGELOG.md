@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.2] — 2026-06-01
+
+> **Crash-surface + publication-hardening release.** Reduces TRACE's contribution to a Claude Code extended-thinking API-400 (a *client-side* signed-thinking-block re-serialization bug that TRACE cannot fix — only avoid triggering), fixes a critical storage data-loss bug, caps query payloads, and makes the package safe and ready to publish. The upstream client report is in `docs/upstream-claude-code-thinking-block-400.md`.
+
+### Fixed
+- **CRITICAL — storage lost-update / event-ID collision.** `append_event` did an unsynchronized read-modify-write with positional `evt_{len+1}` IDs, so a second writer (another process, or a stale in-memory `Session`) clobbered the first writer's event and both were assigned the same id — silent provenance loss, contradicting TRACE's core guarantee. It now reloads the authoritative on-disk events under a portable per-session lock before appending, and `_write_file` fsyncs before `os.replace`. No new dependency (cross-platform `O_CREAT|O_EXCL` lockfile; core stays mcp + pydantic).
+- **trace-learn recall accounting.** `recall_learnings` incremented `recall_count` / `last_surfaced` for *every* above-threshold match before the `[:limit]` slice, inflating recall counts and resetting decay clocks for learnings that were never surfaced. It now mutates only the surfaced top-`limit`.
+
+### Changed
+- **`trace_start_session` is now a cheap, quiet bootstrap.** `recall_learnings` defaults to **False** (was True); the response carries a bounded prior-session orientation plus a sequential-cadence note so the model need not fan out into `trace_list_sessions` / `trace_get_events` / `trace_health_check` at session start — the opening MCP fan-out that inflated a single interleaved-thinking turn. Removed the start-time double-recall.
+- **Hard payload caps on query tools** (context-bloat guard — caps clamp rather than honour an over-large request): `trace_search` was UNBOUNDED → default 25 / max 100 and now returns an object `{query, total_matched, returned, truncated, results}` (**breaking**: was a bare list); `trace_get_events` default 100 → 25 (max 200); `trace_health_check` / `trace_project_summary` read ≤ 500 session files (was 10000 / 1000) with a `scan_truncated` flag.
+- **Query/retrieval tools emit compact JSON** (no indent) — their output lands in the model context where indentation is ~20-30% token waste. `trace_export` keeps pretty (indented) JSON for the human/artifact path and gains a `pretty=False` toggle for compact artifacts.
+
+### Added
+- `JsonFileStorage.session_brief()` (bounded orientation), `JsonFileStorage.lock()`, `session_tools.format_bootstrap_message()`, `export_session(pretty=...)`.
+- PyPI metadata (`readme`, authors, keywords, classifiers, `[project.urls]`) — `twine check` now passes; `NOTICE`, `SECURITY.md`, `server.json` (MCP registry manifest).
+- `.github/workflows/release.yml` — tag-triggered build + leak guard + `twine check` + PyPI Trusted Publishing (OIDC).
+- Regression suites: `test_v042_cheap_bootstrap`, `test_v042_payload_caps`, `test_v042_storage_concurrency`, `test_v042_recall_count`; plus `docs/upstream-claude-code-thinking-block-400.md`.
+
+### Security / packaging
+- **Stopped the sdist/wheel from shipping private + cruft files.** The v0.4.1 sdist included `notes/` (confidential IP/legal material marked "do not share externally") and a ~4 MB crash-handoff tree; the wheel installed a macOS-duplicate `extension_status 2.py`. Deleted 7 duplicates, hardened `.gitignore` (default-deny `notes/`, `*-handoff-*/`, `* 2.*`), and added an explicit hatch sdist include-allowlist + global exclude. The release workflow's leak guard fails the build if any slip through.
+
+### Test infrastructure
+- pytest `pythonpath = ["src"]` so collection no longer depends on a fragile editable install (`uv run` re-syncs were dropping it and silently breaking `uv run pytest`); e2e server tests inject `src` on the subprocess `PYTHONPATH` and force offline BM25 so they no longer block on a model2vec cold-load. The model2vec-dependent matching test is `importorskip`-guarded.
+
+### Docs
+- Corrected stale counts: **22 tools (17 core + 5 trace-learn)** (was "23 / 18 core"), test count "322+" → "880+". Added the "≤1–2 trace calls per turn, never batch, don't fan out at session start" cadence guidance to the global protocol and the `trace-session` skill (maintained out-of-repo).
+
+### Migration notes
+- **`trace_search` response shape changed (breaking).** It now returns an object
+  `{query, total_matched, returned, truncated, results}` instead of a bare list.
+  Consumers that indexed the result directly should read the `results` array
+  (`resp["results"]`), and may check `truncated` / `total_matched` for capped queries.
+- **Versioning:** shipped as **0.4.2** under SemVer §4 (pre-1.0, `0.y.z`): the
+  LLM-facing breaking changes above (`trace_search` shape, `recall_learnings`
+  default) are permitted within this bump, and the on-disk wire format is
+  unchanged (still schema v0.4.1).
+
+### Deferred
+- The `.npy` embedding sidecar is redundant (embeddings already persist in the JSON store) but is an intentional, tested feature; removing it would break the embeddings tests, and the correct fix (exclude embeddings from JSON and load from the sidecar) is an architectural change with migration cost — deferred to a future release.
+
 ## [0.4.1] — 2026-05-18
 
 > **Audit-driven release.** Targets the five quality issues surfaced by the 2026-05-13 waggle-session audit (`audit_2026-05-13_waggle_session/trace_audit_findings.md`). All changes are additive and backward-compatible with v0.3.x and v0.4.0 wire format. Three rounds of independent verification incorporated; remediation plan and HTML checklist live alongside the audit.
@@ -169,7 +210,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tool-call logging, session and event queries.
 - Knowledge persistence, behavioral checks, checkpoints.
 
-[Unreleased]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.2...HEAD
+[0.4.2]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.2.0...v0.3.0

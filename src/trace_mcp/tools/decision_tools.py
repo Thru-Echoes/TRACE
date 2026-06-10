@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from contextlib import nullcontext
 from datetime import UTC, datetime
 
 from trace_mcp.schema import Actor, DecisionData, Session, TraceEvent
@@ -127,12 +128,30 @@ async def resolve_decision(
         )
 
     resolver = Actor(type=resolved_by_type, id=resolved_by_id)  # type: ignore[arg-type]
-    target.decision.disposition = disposition  # type: ignore[assignment]
-    target.decision.resolved_by = resolver
-    target.decision.revision_note = revision_note
-    target.decision.warnings = guard_warnings
 
-    await storage.update_session(session)
+    # Concurrency-safe write (symmetry with append_event / end_session): reload
+    # the authoritative on-disk events under the per-session lock and re-find the
+    # target there, so a concurrent append/resolve persisted since this Session
+    # was read is not clobbered by this write.
+    lock_factory = getattr(storage, "lock", None)
+    lock_cm = lock_factory(session.id) if lock_factory is not None else nullcontext()
+    async with lock_cm:
+        try:
+            disk = await storage.get_session(session.id)
+            session.events = disk.events
+        except FileNotFoundError:
+            pass  # session not yet persisted; mutate the in-memory target
+        write_target = next(
+            (e for e in session.events if e.id == event_id and e.type == "decision"),
+            None,
+        )
+        if write_target is None or write_target.decision is None:
+            raise ValueError(f"Decision event '{event_id}' not found in session '{session.id}'")
+        write_target.decision.disposition = disposition  # type: ignore[assignment]
+        write_target.decision.resolved_by = resolver
+        write_target.decision.revision_note = revision_note
+        write_target.decision.warnings = guard_warnings
+        await storage.update_session(session)
 
     result = f"Decision {event_id} resolved: {disposition}"
     if guard_warnings:

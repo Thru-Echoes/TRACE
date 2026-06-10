@@ -2,7 +2,7 @@
 
 ## Specification v0.4.1
 
-**Status**: Draft
+**Status**: Stable — additive within the v0.4 line (backward-compatible with v0.3.x / v0.4.0). The package version (currently 0.4.2) may run ahead of this spec/wire version (0.4.1) for hardening releases that change no schema fields.
 **Last Updated**: 2026-05-14
 **JSON Schema**: [`trace-v0.4.json`](../schemas/trace-v0.4.json)
 **W3C PROV Namespace**: `https://trace-protocol.org/ns/v0.3#`

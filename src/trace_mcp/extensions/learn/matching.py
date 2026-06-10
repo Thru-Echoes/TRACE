@@ -642,19 +642,25 @@ async def recall_learnings(
             for idx, score in scored_pairs
         ]
 
-    # Filter by threshold, sort, limit
-    results: list[dict] = []
+    # Filter by threshold, then sort + cap to `limit` BEFORE recording recall.
+    # Only the learnings actually surfaced (returned) get recall_count++ and
+    # last_surfaced reset. Previously every above-threshold match was counted —
+    # including those dropped by the limit — which inflated recall_count and
+    # reset decay clocks for learnings the caller never saw (corrupting the
+    # decay/evergreen signal).
+    matched = [(idx, score) for idx, score in scored_pairs if score >= threshold]
+    matched.sort(key=lambda x: x[1], reverse=True)
+    surfaced = matched[:limit]
+
     now = datetime.now(UTC)
-    for idx, score in scored_pairs:
-        if score >= threshold:
-            # Track recall on matched learnings
-            learnings[idx].recall_count += 1
-            learnings[idx].last_surfaced = now
-            results.append({
-                "learning": learnings[idx].model_dump(
-                    mode="json", exclude={"embedding", "embedding_model"},
-                ),
-                "score": round(score, 4),
-            })
-    results.sort(key=lambda x: x["score"], reverse=True)
-    return results[:limit]
+    results: list[dict] = []
+    for idx, score in surfaced:
+        learnings[idx].recall_count += 1
+        learnings[idx].last_surfaced = now
+        results.append({
+            "learning": learnings[idx].model_dump(
+                mode="json", exclude={"embedding", "embedding_model"},
+            ),
+            "score": round(score, 4),
+        })
+    return results

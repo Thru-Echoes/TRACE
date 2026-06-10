@@ -2,7 +2,7 @@
 
 > **Full documentation**: [README.md](README.md) (architecture, tools, configuration, changelog)
 > **Formal specification**: [docs/specification.md](docs/specification.md)
-> **Version**: 0.4.1
+> **Version**: 0.4.2 (package) · protocol/schema v0.4.1
 > **TRACE project name**: "trace-mcp"
 > **Product / IP / talk-prep status (2026-05-05):** [`notes/2026-05-05-meeting-takeaways.md`](notes/2026-05-05-meeting-takeaways.md) — software-disclosure pending with Mike Cohen, LLC awaiting state, two IP lawyers referred by Heather Meeker, June 9 Berkeley Library talk locked.
 
@@ -12,7 +12,7 @@
 
 ```bash
 uv pip install -e ".[dev]"          # Install with dev dependencies
-uv run pytest                       # Run full test suite (322+ tests)
+uv run pytest                       # Run full test suite (880+ tests)
 uv run pytest -k llm                # Run real LLM integration tests
 uv run ruff check src/              # Lint
 uv run pyright src/                 # Type check
@@ -68,9 +68,9 @@ instructions are in the global `~/.claude/CLAUDE.md`. Key points:
 - End with a summary including what was accomplished and what is next
 - The scratchpad auto-generates decisions, contributions, and corrections from session events
 
-## Available Tools (23 total)
+## Available Tools (22 total)
 
-18 core tools + 5 trace-learn extension tools. See [README.md](README.md#available-tools-23-total) for the full table.
+17 core tools + 5 trace-learn extension tools. See [README.md](README.md#available-tools-22-total) for the full table.
 
 **Core**: `trace_start_session`, `trace_end_session`, `trace_log_tool_call`, `trace_log_annotation`, `trace_log_contribution`, `trace_log_state_change`, `trace_propose_decision`, `trace_resolve_decision`, `trace_get_session`, `trace_get_events`, `trace_get_decisions`, `trace_get_decision_chain`, `trace_search`, `trace_export`, `trace_list_sessions`, `trace_project_summary`, `trace_health_check`
 

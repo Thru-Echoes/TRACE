@@ -10,6 +10,7 @@ from trace_mcp.schema.events import (
     TraceEvent,
 )
 from trace_mcp.schema.session import (
+    SCHEMA_VERSION,
     Actor,
     Environment,
     Session,
@@ -21,6 +22,7 @@ from trace_mcp.schema.session import (
 Session.model_rebuild()
 
 __all__ = [
+    "SCHEMA_VERSION",
     "Actor",
     "AnnotationData",
     "ContributionData",

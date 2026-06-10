@@ -11,7 +11,6 @@ from __future__ import annotations
 import json
 import math
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
@@ -25,7 +24,6 @@ from trace_mcp.extensions.learn.embeddings import (
     get_embedding_provider,
 )
 from trace_mcp.extensions.learn.matching import (
-    BM25Backend,
     DecayParams,
     EmbeddingBackend,
     recall_learnings,
@@ -35,7 +33,6 @@ from trace_mcp.extensions.learn.store import (
     add_learning,
     load_embeddings_cache,
     load_store,
-    save_embeddings_cache,
     save_store,
 )
 
