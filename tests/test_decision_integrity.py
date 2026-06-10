@@ -178,6 +178,32 @@ class TestH1PostCompletionResolution:
         assert reloaded.status == "completed"
 
 
+class TestWarningsPreserved:
+    async def test_resolution_merges_existing_warnings(self, storage, active):
+        """Warnings already on the decision must survive resolution, not be clobbered."""
+        session, event_id = await _session_with_proposal(storage, active)
+        # Simulate a proposal-time warning persisted by an earlier writer.
+        disk = await storage.get_session(session.id)
+        evt = next(e for e in disk.events if e.id == event_id)
+        assert evt.decision is not None
+        evt.decision.warnings = ["pre-existing proposal warning"]
+        await storage.update_session(disk)
+
+        await decision_tools.resolve_decision(
+            storage,
+            session,
+            event_id=event_id,
+            disposition="rejected",
+            resolved_by_type="human",
+            resolved_by_id="human",
+            revision_note="not needed",
+        )
+        reloaded = await storage.get_session(session.id)
+        warnings = next(e for e in reloaded.events if e.id == event_id).decision.warnings
+        assert "pre-existing proposal warning" in warnings
+        assert any("Decision rejected" in w for w in warnings)  # FM31 added too
+
+
 class TestCurrentSessionPointerGuard:
     async def test_completed_session_does_not_become_current(
         self, storage, active, monkeypatch
@@ -208,6 +234,54 @@ class TestCurrentSessionPointerGuard:
         looked_up, _ = await server._ensure_session(session.id)
         assert looked_up.id == session.id
         assert server._current_session_id == session.id
+
+    async def test_stale_cached_active_but_disk_completed_does_not_move_pointer(
+        self, storage, active, monkeypatch
+    ):
+        """Pointer guard must trust disk status, not the in-memory cache."""
+        from trace_mcp import server
+
+        session, _ = await _session_with_proposal(storage, active)
+        # Another process completes the session on disk; this process's cache
+        # still holds the stale 'active' object.
+        await session_tools.end_session(storage, {}, session_id=session.id)
+        assert active[session.id].status == "active"  # stale by construction
+
+        monkeypatch.setattr(server, "storage", storage)
+        monkeypatch.setattr(server, "active_sessions", active)
+        monkeypatch.setattr(server, "_current_session_id", "sentinel-current")
+
+        looked_up, _ = await server._ensure_session(session.id)
+        assert looked_up.id == session.id
+        assert server._current_session_id == "sentinel-current"
+
+    async def test_completed_current_session_falls_through_to_autocreate(
+        self, storage, active, monkeypatch
+    ):
+        """A completed current session must not wedge pointer-less calls."""
+        from trace_mcp import server
+
+        session, _ = await _session_with_proposal(storage, active)
+        await session_tools.end_session(storage, active, session_id=session.id)
+
+        monkeypatch.setattr(server, "storage", storage)
+        monkeypatch.setattr(server, "active_sessions", active)
+        monkeypatch.setattr(server, "_current_session_id", session.id)
+
+        async def _fake_infer_project() -> str:
+            return "integrity-test"
+
+        async def _no_recall(*args, **kwargs):
+            return []
+
+        monkeypatch.setattr(server, "_infer_project", _fake_infer_project)
+        monkeypatch.setattr(server.hooks, "recall_if_available", _no_recall)
+
+        fresh, auto_msg = await server._ensure_session(None)
+        assert fresh.id != session.id
+        assert fresh.status == "active"
+        assert "Auto-created TRACE session" in auto_msg
+        assert server._current_session_id == fresh.id
 
 
 class TestLiteralSignatureSweep:
