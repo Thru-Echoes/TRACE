@@ -109,6 +109,13 @@ packages = ["src/trace_mcp"]
 # construction — the safest posture for preventing private-data leaks.
 include = [
     "src/trace_mcp/**/*.py",
+    # Non-Python package files. uv build constructs the wheel FROM the sdist,
+    # so anything missing here is missing from the wheel too: py.typed (PEP 561
+    # — required by the `Typing :: Typed` classifier) and the claude_code
+    # adapter assets that trace-mcp-init copies at runtime. Guarded by the
+    # positive checks in tests/test_packaging_artifacts.py.
+    "src/trace_mcp/py.typed",
+    "src/trace_mcp/adapters/claude_code/assets/**",
     "tests/**/*.py",
     "tests/fixtures/**",
     "docs/specification.md",
