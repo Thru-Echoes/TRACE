@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -94,6 +96,32 @@ class TestValidateFile:
         assert validate_file(garbage, load_schema()) is False
         assert "Invalid JSON" in capsys.readouterr().out
 
+    def test_nonexistent_file_fails_without_traceback(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A missing file must produce a per-file FAIL line (so multi-file
+        runs continue), never an unhandled traceback."""
+        assert validate_file(tmp_path / "does-not-exist.json", load_schema()) is False
+        assert "FAIL" in capsys.readouterr().out
+
+    def test_directory_argument_fails_without_traceback(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        assert validate_file(tmp_path, load_schema()) is False
+        assert "FAIL" in capsys.readouterr().out
+
+    def test_non_utf8_file_fails_without_traceback(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        binary = tmp_path / "binary.json"
+        binary.write_bytes(b"\xff\xfe\x00\x01")
+        assert validate_file(binary, load_schema()) is False
+        assert "FAIL" in capsys.readouterr().out
+
+    def test_multi_file_run_continues_past_unreadable_file(self, tmp_path: Path) -> None:
+        """One unreadable path must not abort validation of the rest."""
+        assert main([str(tmp_path / "missing.json"), str(FIXTURE_SESSION)]) == 1
+
 
 # ── CLI entry points ─────────────────────────────────────────────────────────
 
@@ -137,3 +165,27 @@ class TestCliMain:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         assert mod.main([str(FIXTURE_SESSION)]) == 0
+
+    def test_shim_recovers_from_stale_installed_package(self, tmp_path: Path) -> None:
+        """If an older trace_mcp WITHOUT validate.py shadows the source tree
+        (stale editable/site-packages install), the shim's src/ fallback must
+        still win — a failed `from trace_mcp.validate import ...` leaves the
+        stale package in sys.modules, so the shim has to evict it before
+        retrying."""
+        stale = tmp_path / "stale_site"
+        (stale / "trace_mcp").mkdir(parents=True)
+        (stale / "trace_mcp" / "__init__.py").write_text('__version__ = "0.4.1"\n')
+
+        result = subprocess.run(
+            [sys.executable, str(TRACE_ROOT / "scripts" / "validate_session.py"), str(FIXTURE_SESSION)],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env={**os.environ, "PYTHONPATH": str(stale)},
+            cwd=str(TRACE_ROOT),
+        )
+        assert result.returncode == 0, (
+            f"Shim failed with a stale trace_mcp shadowing the source tree:\n"
+            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+        )
+        assert "PASS" in result.stdout

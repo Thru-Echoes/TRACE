@@ -123,19 +123,27 @@ include = [
     # Packaged JSON Schema backing `trace-mcp validate` (byte-identical to the
     # top-level schemas/trace-v0.4.json; both written by scripts/generate_schema.py).
     "src/trace_mcp/schemas/**",
+    # In-package docs (linked from the top-level README; keeps tree-built and
+    # sdist-built wheels identical — see test_wheel_matches_package_tree).
+    "src/trace_mcp/adapters/codex/README.md",
     "tests/**/*.py",
     "tests/fixtures/**",
     "docs/specification.md",
     "schemas/**",
     "scripts/**",
-    "README.md",
-    "LICENSE",
-    "NOTICE",
-    "SECURITY.md",
-    "CONTRIBUTING.md",
-    "CHANGELOG.md",
-    "server.json",
-    "pyproject.toml",
+    # Top-level metadata files are anchored with a leading slash: hatchling
+    # include patterns use gitignore-style matching, so a bare "README.md"
+    # matches READMEs at ANY depth (it silently shipped docs/adr/README.md and
+    # src/trace_mcp/adapters/codex/README.md) — contradicting this allowlist's
+    # default-deny posture. Nested files that should ship are listed explicitly.
+    "/README.md",
+    "/LICENSE",
+    "/NOTICE",
+    "/SECURITY.md",
+    "/CONTRIBUTING.md",
+    "/CHANGELOG.md",
+    "/server.json",
+    "/pyproject.toml",
 ]
 
 
