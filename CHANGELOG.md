@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Wheels built from the sdist were missing 7 runtime files** (`py.typed` and
+  all six `adapters/claude_code/assets/` files: the settings template, the
+  CLAUDE block, and the four hook scripts). The sdist allowlist's only src
+  pattern was `src/trace_mcp/**/*.py`, and `uv build` constructs the wheel
+  *from the sdist* — so a clean-venv install of the built wheel installed
+  zero hooks silently, then `trace-mcp-init` crashed with `FileNotFoundError`.
+  Local `uvx --from <path>` launches build direct-from-tree and were never
+  affected. New **positive packaging guards**
+  (`tests/test_packaging_artifacts.py`) build via `uv build` and assert
+  required files are *present* in both artifacts (the release leak-guard only
+  ever checked that private files were *absent*), including a clean-venv
+  wheel-install end-to-end test.
+- **`trace-mcp validate` crashed on any installed package**: it loaded
+  `scripts/validate_session.py` via a repo-relative path that only exists in a
+  source checkout, and the JSON Schema wasn't shipped. The validator now lives
+  in the package (`trace_mcp.validate`) and loads `schemas/trace-v0.4.json` as
+  package data via `importlib.resources`. `scripts/validate_session.py`
+  remains as a compatibility shim. `scripts/generate_schema.py` writes both
+  byte-identical schema copies; freshness and identity are test-guarded.
+- **README now renders correctly on PyPI**: all relative links and image srcs
+  (which 404 without repo context) are absolute GitHub / raw.githubusercontent
+  URLs, enforced by a regression test (`tests/test_readme_pypi.py`).
+
+### Added
+
+- `validate` optional extra (`pip install "trace-mcp[validate]"`) for the
+  `jsonschema` dependency backing `trace-mcp validate`; also included in
+  `[all]`. A missing dependency now produces an install hint instead of a
+  stack trace.
+
 ## [0.4.2] — 2026-06-01
 
 > **Crash-surface + publication-hardening release.** Reduces TRACE's contribution to a Claude Code extended-thinking API-400 (a *client-side* signed-thinking-block re-serialization bug that TRACE cannot fix — only avoid triggering), fixes a critical storage data-loss bug, caps query payloads, and makes the package safe and ready to publish. The upstream client report is in `docs/upstream-claude-code-thinking-block-400.md`.
