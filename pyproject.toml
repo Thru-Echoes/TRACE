@@ -46,11 +46,15 @@ embeddings = [
     "model2vec>=0.4",
     "filelock>=3.12",
 ]
+validate = [
+    "jsonschema>=4.0",
+]
 all = [
     "openai>=1.0",
     "numpy>=1.24",
     "model2vec>=0.4",
     "filelock>=3.12",
+    "jsonschema>=4.0",
 ]
 dev = [
     "pytest>=8.0",
@@ -116,6 +120,9 @@ include = [
     # positive checks in tests/test_packaging_artifacts.py.
     "src/trace_mcp/py.typed",
     "src/trace_mcp/adapters/claude_code/assets/**",
+    # Packaged JSON Schema backing `trace-mcp validate` (byte-identical to the
+    # top-level schemas/trace-v0.4.json; both written by scripts/generate_schema.py).
+    "src/trace_mcp/schemas/**",
     "tests/**/*.py",
     "tests/fixtures/**",
     "docs/specification.md",

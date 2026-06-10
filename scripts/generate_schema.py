@@ -2,7 +2,11 @@
 """Generate JSON Schema from TRACE Pydantic models.
 
 Run: python scripts/generate_schema.py
-Output: schemas/trace-v0.4.json (renamed from trace-v0.3.json in v0.4.1)
+Output (two byte-identical copies, guarded by tests/test_validate_cli.py):
+    schemas/trace-v0.4.json                 — top-level spec artifact
+    src/trace_mcp/schemas/trace-v0.4.json   — package data for `trace-mcp validate`
+
+(Renamed from trace-v0.3.json in v0.4.1.)
 """
 
 import json
@@ -10,11 +14,15 @@ from pathlib import Path
 
 from trace_mcp.schema import SCHEMA_VERSION, Session
 
-SCHEMA_DIR = Path(__file__).parent.parent / "schemas"
+REPO_ROOT = Path(__file__).parent.parent
+OUTPUT_DIRS = [
+    REPO_ROOT / "schemas",
+    REPO_ROOT / "src" / "trace_mcp" / "schemas",
+]
 
 
-def main() -> None:
-    SCHEMA_DIR.mkdir(exist_ok=True)
+def build_schema() -> dict:
+    """Build the session-document JSON Schema dict from the Pydantic models."""
     schema = Session.model_json_schema()
     schema["$id"] = "https://trace-protocol.org/schemas/trace-v0.4.json"
     schema["title"] = f"Decision Provenance Session Document v{SCHEMA_VERSION}"
@@ -24,10 +32,17 @@ def main() -> None:
         "See: https://trace-protocol.org/v0.3 (namespace URI kept at v0.3# per ADR 002 D6 — "
         "additive extensions are valid within the same namespace)."
     )
+    return schema
 
-    out_path = SCHEMA_DIR / "trace-v0.4.json"
-    out_path.write_text(json.dumps(schema, indent=2) + "\n")
-    print(f"Generated: {out_path} ({out_path.stat().st_size} bytes)")
+
+def main() -> None:
+    """Write the generated schema to both output locations (side effect: disk writes)."""
+    payload = json.dumps(build_schema(), indent=2) + "\n"
+    for out_dir in OUTPUT_DIRS:
+        out_dir.mkdir(exist_ok=True)
+        out_path = out_dir / "trace-v0.4.json"
+        out_path.write_text(payload)
+        print(f"Generated: {out_path} ({out_path.stat().st_size} bytes)")
 
 
 if __name__ == "__main__":

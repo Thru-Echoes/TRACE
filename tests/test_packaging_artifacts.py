@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import tarfile
 import zipfile
 from pathlib import Path
@@ -115,6 +116,55 @@ class TestWheelContainsRequiredFiles:
         assert not missing, (
             f"Adapter assets missing from the wheel (trace-mcp-init is dead on arrival): {missing}"
         )
+
+    def test_wheel_contains_packaged_schema(self, built_dist: dict[str, Path]) -> None:
+        """`trace-mcp validate` loads the schema as package data; a wheel
+        without it makes the subcommand crash on installed packages."""
+        members = get_wheel_members(built_dist["wheel"])
+        assert "trace_mcp/schemas/trace-v0.4.json" in members, (
+            "trace_mcp/schemas/trace-v0.4.json missing from the wheel — "
+            "trace-mcp validate would crash on any installed package"
+        )
+
+
+class TestWheelInstallE2E:
+    """Install the built wheel into a clean venv and exercise the console
+    script — the original C2 reproduction path ('crashes on any installed
+    package'). Network + ~seconds of venv setup; uv's cache keeps it fast."""
+
+    def test_trace_mcp_validate_works_from_wheel_install(
+        self, built_dist: dict[str, Path], tmp_path: Path
+    ) -> None:
+        venv_dir = tmp_path / "venv"
+        subprocess.run(["uv", "venv", str(venv_dir)], check=True, capture_output=True, timeout=120)
+        python = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
+        subprocess.run(
+            ["uv", "pip", "install", "--python", str(python), str(built_dist["wheel"]), "jsonschema"],
+            check=True,
+            capture_output=True,
+            timeout=300,
+        )
+        trace_mcp_bin = python.parent / "trace-mcp"
+
+        fixture = TRACE_ROOT / "tests" / "fixtures" / "waggle_session_2026-05-13.json"
+        good = subprocess.run(
+            [str(trace_mcp_bin), "validate", str(fixture)], capture_output=True, text=True, timeout=60
+        )
+        assert good.returncode == 0, (
+            f"trace-mcp validate failed from a wheel install (the C2 crash path):\n"
+            f"stdout: {good.stdout}\nstderr: {good.stderr}"
+        )
+        assert "PASS" in good.stdout
+
+        # Negative control: a non-session document must yield exit 1 (proves
+        # the CLI actually validates rather than rubber-stamping).
+        bad_file = tmp_path / "bad.json"
+        bad_file.write_text('{"not": "a session"}')
+        bad = subprocess.run(
+            [str(trace_mcp_bin), "validate", str(bad_file)], capture_output=True, text=True, timeout=60
+        )
+        assert bad.returncode == 1, f"Expected exit 1 for invalid doc, got {bad.returncode}: {bad.stdout}"
+        assert "FAIL" in bad.stdout
 
 
 class TestSdistContainsRequiredFiles:

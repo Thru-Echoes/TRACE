@@ -814,15 +814,12 @@ def main() -> None:
         return
 
     if len(sys.argv) > 1 and sys.argv[1] == "validate":
-        import importlib.util
-        from pathlib import Path as _Path
+        # In-package validator (schema ships as package data) — the previous
+        # repo-relative load of scripts/validate_session.py crashed on any
+        # installed package, where scripts/ doesn't exist.
+        from trace_mcp.validate import main as validate_main
 
-        script = _Path(__file__).resolve().parent.parent.parent / "scripts" / "validate_session.py"
-        spec = importlib.util.spec_from_file_location("validate_session", script)
-        assert spec and spec.loader
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        raise SystemExit(mod.main(sys.argv[2:]))
+        raise SystemExit(validate_main(sys.argv[2:]))
 
     _load_extensions()
 
