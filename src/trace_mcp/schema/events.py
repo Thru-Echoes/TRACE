@@ -12,6 +12,18 @@ from pydantic import BaseModel, Field, model_validator
 
 from trace_mcp.schema.session import Actor
 
+# Canonical enum value-sets (single source of truth; server.py imports these
+# for the MCP tool signatures so the protocol edge can never drift from the
+# schema).
+ToolCallStatus = Literal["success", "error", "timeout"]
+ToolCallHost = Literal["mcp", "internal", "external"]
+DecisionDisposition = Literal["proposed", "accepted", "revised", "rejected"]
+SuggestionType = Literal["proactive", "requested", "collaborative"]
+AnnotationCategory = Literal[
+    "learning", "gotcha", "observation", "correction", "todo", "question", "discovery", "other"
+]
+ContributionAttribution = Literal["human", "ai", "collaborative"]
+
 
 class EventContext(BaseModel):
     """Shared context attached to any event."""
@@ -33,10 +45,10 @@ class ToolCallData(BaseModel):
     output_truncated: bool | None = None
     output_hash: str | None = None
     duration_ms: int | None = None
-    status: Literal["success", "error", "timeout"] = "success"
+    status: ToolCallStatus = "success"
     error_message: str | None = None
     retries_event_id: str | None = None
-    host: Literal["mcp", "internal", "external"] = "mcp"
+    host: ToolCallHost = "mcp"
     parent_event_id: str | None = None
 
 
@@ -46,11 +58,11 @@ class DecisionData(BaseModel):
     description: str
     rationale: str | None = None
     proposed_by: Actor
-    disposition: Literal["proposed", "accepted", "revised", "rejected"] = "proposed"
+    disposition: DecisionDisposition = "proposed"
     resolved_by: Actor | None = None
     revision_note: str | None = None
     revises_event_id: str | None = None
-    suggestion_type: Literal["proactive", "requested", "collaborative"] | None = None
+    suggestion_type: SuggestionType | None = None
     tags: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
@@ -70,7 +82,7 @@ class DecisionData(BaseModel):
 class AnnotationData(BaseModel):
     """Free-form observations, learnings, gotchas, corrections, todos."""
 
-    category: Literal["learning", "gotcha", "observation", "correction", "todo", "question", "discovery", "other"]
+    category: AnnotationCategory
     content: str
     corrects_event_ids: list[str] = Field(default_factory=list)
     related_event_ids: list[str] = Field(default_factory=list)
@@ -86,8 +98,8 @@ class ContributionData(BaseModel):
 
     description: str
     artifact: str | None = None
-    direction: Literal["human", "ai", "collaborative"]
-    execution: Literal["human", "ai", "collaborative"]
+    direction: ContributionAttribution
+    execution: ContributionAttribution
     related_decision_ids: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
 
