@@ -23,9 +23,6 @@ from typing import Any
 
 import pytest
 
-from trace_mcp.extensions.learn.matching import BM25Backend, recall_learnings
-from trace_mcp.extensions.learn.models import KnowledgeStore
-from trace_mcp.extensions.learn.store import add_learning, load_store, save_store
 from trace_mcp.extension_hooks import (
     clear_hooks,
     extract_if_available,
@@ -35,13 +32,15 @@ from trace_mcp.extension_hooks import (
     register_extract_hook,
     register_recall_hook,
 )
+from trace_mcp.extensions.learn.matching import BM25Backend, recall_learnings
+from trace_mcp.extensions.learn.models import KnowledgeStore
+from trace_mcp.extensions.learn.store import add_learning, load_store, save_store
 from trace_mcp.schema import Session
 from trace_mcp.schema.events import AnnotationData, TraceEvent
 from trace_mcp.schema.session import Actor
 from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools.decision_tools import propose_decision
 from trace_mcp.tools.session_tools import append_event, end_session, start_session
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -174,7 +173,7 @@ class TestHooksRegistry:
         register_extract_hook(_bad_hook)
         result = await extract_if_available("test", "sess_001")
         assert not result.success
-        assert "Simulated failure" in result.error
+        assert result.error is not None and "Simulated failure" in result.error
 
     async def test_clear_hooks(self, knowledge_dir):
         _seed_knowledge(knowledge_dir)

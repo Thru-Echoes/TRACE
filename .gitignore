@@ -39,6 +39,8 @@ venv.bak/
 # pytest
 .pytest_cache/
 .coverage
+.coverage.*
+coverage.xml
 htmlcov/
 .tox/
 .nox/
@@ -97,3 +99,15 @@ audit_2026-05-13_waggle_session/
 review_2026-05-18_v041_status/
 audit_2*-*-*_*/
 review_2*-*-*_*/
+
+# Private notes and crash/debugging handoff dumps — strictly local, NEVER
+# ship. notes/ holds confidential meeting/IP/legal material; *-handoff-*
+# dirs are raw transcript dossiers. Both previously leaked into the sdist.
+notes/
+*-handoff-*/
+
+# macOS Finder file-duplication artifacts ("Foo 2.py", "Bar 2.md", "Baz 2.json").
+# Byte-identical clones that pollute builds and test collection.
+* 2.py
+* 2.md
+* 2.json

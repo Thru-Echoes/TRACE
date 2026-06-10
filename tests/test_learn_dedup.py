@@ -20,7 +20,6 @@ from trace_mcp.schema import Session
 from trace_mcp.schema.events import AnnotationData, TraceEvent
 from trace_mcp.schema.session import Actor, SessionMetadata
 
-
 # ── Helpers ──────────────────────────────────────────────────────────────
 
 

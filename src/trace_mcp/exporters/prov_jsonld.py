@@ -22,7 +22,7 @@ from typing import Any
 
 from trace_mcp.schema import Session
 from trace_mcp.schema.prov_mapping import PROV_CONTEXT
-from trace_mcp.tools.session_tools import _is_uri_form_reference
+from trace_mcp.tools.session_tools import is_uri_form_reference
 
 
 def _iso(dt: Any) -> str | None:
@@ -149,7 +149,7 @@ def export_prov_jsonld(session: Session) -> str:
             rel(ent_id, "prov:wasAttributedTo", actor_id)
             # v0.4.1 correction split (spec §6).
             for idx, ref in enumerate(an.corrects_event_ids):
-                if _is_uri_form_reference(ref):
+                if is_uri_form_reference(ref):
                     infl_id = f"_:infl_{evt.id}_{idx}"
                     inf = node(infl_id, "prov:Influence")
                     inf["prov:atLocation"] = ref

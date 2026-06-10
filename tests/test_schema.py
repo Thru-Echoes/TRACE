@@ -9,6 +9,7 @@ from datetime import datetime
 import pytest
 
 from trace_mcp.schema import (
+    SCHEMA_VERSION,
     Actor,
     AnnotationData,
     ContributionData,
@@ -57,8 +58,19 @@ class TestSession:
         )
         assert s.id == "trace_20260205_abc123"
         assert s.status == "active"
-        assert s.trace_version == "0.4.1"
+        assert s.trace_version == SCHEMA_VERSION
         assert isinstance(s.created, datetime)
+
+    def test_trace_version_tracks_schema_not_package(self) -> None:
+        """trace_version is the wire/schema format version, intentionally decoupled
+        from the package version (a wire-compatible release may run ahead)."""
+        import trace_mcp
+
+        s = Session(id="t", metadata=SessionMetadata(project="p"))
+        assert s.trace_version == SCHEMA_VERSION
+        # Same major.minor family, but the package may be ahead for a
+        # wire-compatible release (e.g. package 0.4.2 / schema 0.4.1).
+        assert trace_mcp.__version__.split(".")[:2] == SCHEMA_VERSION.split(".")[:2]
 
     def test_next_event_id(self) -> None:
         s = Session(

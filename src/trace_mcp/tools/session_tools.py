@@ -6,6 +6,7 @@ import platform
 import re
 import sys
 import uuid
+from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Any
 
@@ -455,6 +456,65 @@ def _auto_environment() -> Environment:
     )
 
 
+# v0.4.2: sequential-cadence steering for the session bootstrap. The Claude
+# Code thinking-block 400 fires when one interleaved-thinking assistant turn
+# accumulates a large content-block count; the opening TRACE bootstrap was the
+# most automatic recurring inflator (eager list/get/health fan-out). This note
+# tells the model it already has what it needs, so it logs sequentially rather
+# than batching many trace_* calls into the first turn.
+_BOOTSTRAP_CADENCE = (
+    "Log sequentially: record events as they happen (1-2 trace calls per turn; "
+    "do not batch many trace_* calls into a single turn). You have what you need "
+    "to begin — no need to enumerate prior sessions to orient."
+)
+
+
+def format_bootstrap_message(
+    *,
+    session_id: str,
+    project: str,
+    path: str,
+    brief: dict[str, Any] | None = None,
+    recalled_block: str = "",
+) -> str:
+    """Build the start_session bootstrap message (pure function, no I/O).
+
+    Inputs:
+      session_id / project / path — identity of the new session.
+      brief — bounded orientation from ``storage.session_brief`` (or None).
+      recalled_block — pre-rendered learnings block (empty unless the caller
+        explicitly opted into recall; recall is OFF by default in v0.4.2).
+
+    Output: the full human/agent-facing activation message, including a bounded
+    prior-session orientation line and the sequential-cadence steering note.
+    """
+    if brief and brief.get("most_recent"):
+        mr = brief["most_recent"]
+        plus = "+" if brief.get("capped") else ""
+        created = (mr.get("created") or "")[:10]
+        orientation = (
+            f"Prior context: {brief.get('matched', 0)}{plus} recent session(s) for "
+            f"'{project}'; most recent: {mr['id']} ({mr.get('event_count', 0)} events"
+            f"{', ' + created if created else ''})."
+        )
+    else:
+        orientation = f"Prior context: No prior TRACE sessions recorded for '{project}'."
+
+    lines = [
+        "TRACE audit logging is now active.",
+        f"Session: {session_id}",
+        f"Project: {project}",
+        f"File: {path}",
+        orientation,
+        _BOOTSTRAP_CADENCE,
+    ]
+    msg = "\n".join(lines)
+    if recalled_block:
+        msg += recalled_block
+    msg += "\nAll tool calls, decisions, and annotations will be recorded."
+    return msg
+
+
 async def create_session(
     storage: TraceStorage,
     active_sessions: dict[str, Session],
@@ -541,18 +601,35 @@ async def end_session(
         except FileNotFoundError:
             return f"Error: Session '{session_id}' not found."
 
-    # Guard: prevent double-ending — completed sessions are immutable
+    # Fast-path guard on the in-memory view (the definitive disk check is under the lock).
     if session.status == "completed":
         return (
             f"Error: Session '{session_id}' already ended at {session.ended}. "
             f"Completed sessions are immutable and cannot be ended again."
         )
 
-    session.ended = datetime.now(UTC)
-    session.status = "completed"
-    session.summary = summary
+    # Concurrency-safe (v0.4.2 symmetry with append_event): mutate + write under
+    # the per-session lock, reloading authoritative on-disk events first, so a
+    # concurrent append landing between read and write is preserved (not
+    # clobbered) and the immutability guard sees disk truth.
+    lock_factory = getattr(storage, "lock", None)
+    lock_cm = lock_factory(session_id) if lock_factory is not None else nullcontext()
+    async with lock_cm:
+        try:
+            disk = await storage.get_session(session_id)
+            if disk.status == "completed":
+                return (
+                    f"Error: Session '{session_id}' already ended at {disk.ended}. "
+                    f"Completed sessions are immutable and cannot be ended again."
+                )
+            session.events = disk.events
+        except FileNotFoundError:
+            pass  # brand-new session, not yet persisted
+        session.ended = datetime.now(UTC)
+        session.status = "completed"
+        session.summary = summary
+        await storage.update_session(session)
 
-    await storage.update_session(session)
     active_sessions.pop(session_id, None)
 
     # Count events by type
@@ -589,7 +666,7 @@ async def get_or_load_session(
 _URI_SCHEME_RE = re.compile(r"^[a-z][a-z0-9-]+:")
 
 
-def _is_uri_form_reference(s: str) -> bool:
+def is_uri_form_reference(s: str) -> bool:
     """True if s is a URI-form reference per spec §3.7.1.
 
     Used to exempt out-of-session anchors (subagent outputs, external
@@ -614,7 +691,7 @@ def _check_referential_integrity(
     # outside the TRACE event log).
     if event.annotation and event.annotation.corrects_event_ids:
         for ref_id in event.annotation.corrects_event_ids:
-            if _is_uri_form_reference(ref_id):
+            if is_uri_form_reference(ref_id):
                 continue
             ids_to_check.append((ref_id, "corrects_event_ids"))
 
@@ -652,29 +729,52 @@ async def append_event(
 ) -> str:
     """Append an event to a session and flush to disk. Returns event ID.
 
-    Raises ValueError if the session is already completed (immutability guard).
-    Raises ValueError if event references point to nonexistent events (FM13/FM16).
+    Concurrency-safe (v0.4.2): the read-modify-write runs under a per-session
+    lock and reloads the authoritative on-disk events before appending. This
+    closes the lost-update + duplicate-evt_id defect where a second writer
+    (another process, or a stale in-memory Session) overwrote the first writer's
+    event and both were assigned the same positional id. Storage backends
+    without a ``lock`` degrade to a no-op context (no behaviour change).
+
+    Raises ValueError if the session is already completed (immutability guard)
+    or if event references point to nonexistent events (FM13/FM16/FM17).
     """
-    # Guard: prevent logging to completed sessions — immutability guarantee
+    # Fast-path guard on the in-memory view.
     if session.status == "completed":
         raise ValueError(
             f"Cannot append events to completed session '{session.id}'. "
             f"Session ended at {session.ended}. Start a new session instead."
         )
 
-    if not event.id:
-        event.id = session.next_event_id()
-    event.session_id = session.id
+    lock_factory = getattr(storage, "lock", None)
+    lock_cm = lock_factory(session.id) if lock_factory is not None else nullcontext()
+    async with lock_cm:
+        # Reload authoritative on-disk state so we never clobber events another
+        # writer persisted since this Session was last read.
+        try:
+            disk = await storage.get_session(session.id)
+            if disk.status == "completed":
+                raise ValueError(
+                    f"Cannot append events to completed session '{session.id}'. "
+                    f"Session ended at {disk.ended}. Start a new session instead."
+                )
+            session.events = disk.events
+        except FileNotFoundError:
+            pass  # brand-new session, not yet persisted
 
-    # FM13/FM16/FM17: Validate referential integrity — reject invalid references
-    ref_errors = _check_referential_integrity(session, event)
-    if ref_errors:
-        raise ValueError(
-            f"Invalid event references in {event.id}:\n"
-            + "\n".join(f"  - {e}" for e in ref_errors)
-        )
+        if not event.id:
+            event.id = session.next_event_id()
+        event.session_id = session.id
 
-    session.events.append(event)
-    await storage.update_session(session)
+        # FM13/FM16/FM17: validate referential integrity against the merged state.
+        ref_errors = _check_referential_integrity(session, event)
+        if ref_errors:
+            raise ValueError(
+                f"Invalid event references in {event.id}:\n"
+                + "\n".join(f"  - {e}" for e in ref_errors)
+            )
+
+        session.events.append(event)
+        await storage.update_session(session)
 
     return event.id

@@ -6,11 +6,9 @@ backend fallback chains, model change detection, real-data tests.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock
 
-import numpy as np
 import pytest
 
 from trace_mcp.extensions.learn.config import LearnConfig

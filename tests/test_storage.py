@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from trace_mcp.schema import Actor, AnnotationData, Session, SessionMetadata, TraceEvent
-from trace_mcp.storage.json_file import JsonFileStorage
+from trace_mcp.storage.json_file import JsonFileStorage, sanitize_name
 
 
 @pytest.fixture
@@ -169,8 +169,6 @@ class TestDeleteSession:
 
 # ── Path Sanitization (Phase 1b) ────────────────────────────────────────
 
-from trace_mcp.storage.json_file import sanitize_name
-
 
 class TestSanitizeName:
     def test_safe_passthrough(self) -> None:
@@ -217,12 +215,12 @@ class TestCorruptSessionJson:
         """Corrupt JSON in session file raises on get_session."""
         path = tmp_path / "trace_20260205_abc123.json"
         path.write_text("{invalid json!!!", encoding="utf-8")
-        with pytest.raises(Exception):  # json.JSONDecodeError
+        with pytest.raises(json.JSONDecodeError):
             await storage.get_session("trace_20260205_abc123")
 
     async def test_truncated_json_raises(self, storage: JsonFileStorage, tmp_path: Path) -> None:
         """Truncated JSON in session file raises on get_session."""
         path = tmp_path / "trace_20260205_abc123.json"
         path.write_text('{"id": "trace_20260205_abc', encoding="utf-8")
-        with pytest.raises(Exception):
+        with pytest.raises(json.JSONDecodeError):
             await storage.get_session("trace_20260205_abc123")

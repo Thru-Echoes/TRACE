@@ -4,10 +4,34 @@ build-backend = "hatchling.build"
 
 [project]
 name = "trace-mcp"
-version = "0.4.1"
+version = "0.4.2"
 description = "TRACE: Transparent Recording of AI-assisted Collaboration Experiments — MCP audit protocol for scientific workflows"
+readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
+authors = [{ name = "Oliver Muellerklein", email = "omuellerklein@berkeley.edu" }]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "provenance",
+    "attribution",
+    "ai-collaboration",
+    "audit",
+    "reproducibility",
+    "research",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
 dependencies = [
     "mcp>=1.0.0",
     "pydantic>=2.0",
@@ -31,6 +55,8 @@ all = [
 dev = [
     "pytest>=8.0",
     "pytest-asyncio>=0.23",
+    "pytest-cov>=5.0",
+    "coverage[toml]>=7.4",
     "ruff>=0.4",
     "pyright>=1.1.350",
     "openai>=1.0",
@@ -39,14 +65,64 @@ dev = [
     "filelock>=3.12",
     "jsonschema>=4.0",
     "rdflib>=7.0",
+    "twine>=5.0",
 ]
 
 [project.scripts]
 trace-mcp = "trace_mcp.server:main"
 trace-mcp-init = "trace_mcp.init_project:main"
 
+[project.urls]
+Homepage = "https://github.com/Thru-Echoes/TRACE"
+Repository = "https://github.com/Thru-Echoes/TRACE"
+Issues = "https://github.com/Thru-Echoes/TRACE/issues"
+Changelog = "https://github.com/Thru-Echoes/TRACE/blob/main/CHANGELOG.md"
+Specification = "https://github.com/Thru-Echoes/TRACE/blob/main/docs/specification.md"
+
+[tool.hatch.build]
+# Belt-and-suspenders guard: never ship local working artifacts, private
+# notes, crash/debugging handoff dumps, or macOS file-duplication cruft —
+# even if one slips past .gitignore. The sdist previously shipped notes/
+# (confidential IP/legal material) and a ~4 MB crash-handoff tree to PyPI;
+# these excludes plus the explicit sdist allowlist below prevent recurrence.
+exclude = [
+    "notes",
+    "notes/**",
+    "*-handoff-*",
+    "*-handoff-*/**",
+    "audit_*",
+    "audit_*/**",
+    "review_*",
+    "review_*/**",
+    "**/* 2.py",
+    "**/* 2.md",
+    "**/* 2.json",
+    "**/*.local.json",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/trace_mcp"]
+
+[tool.hatch.build.targets.sdist]
+# Explicit allowlist (default-deny): the sdist ships package source, tests,
+# and essential metadata ONLY. Anything not listed here is excluded by
+# construction — the safest posture for preventing private-data leaks.
+include = [
+    "src/trace_mcp/**/*.py",
+    "tests/**/*.py",
+    "tests/fixtures/**",
+    "docs/specification.md",
+    "schemas/**",
+    "scripts/**",
+    "README.md",
+    "LICENSE",
+    "NOTICE",
+    "SECURITY.md",
+    "CONTRIBUTING.md",
+    "CHANGELOG.md",
+    "server.json",
+    "pyproject.toml",
+]
 
 
 [tool.ruff]
@@ -77,20 +153,36 @@ indent-style = "space"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Import the package straight from src/ so the suite never depends on a fragile
+# editable install. `uv run` re-syncs the env on every invocation and can drop
+# the `pip install -e` editable wheel, which silently broke `uv run pytest`
+# (it then fell back to a different interpreter without the package). pythonpath
+# makes test collection deterministic regardless of editable-install state.
+pythonpath = ["src"]
 addopts = "-v --tb=short"
 asyncio_mode = "auto"
 
-[tool.pyright]
-include = ["src"]
-exclude = ["tests", "**/__pycache__"]
-pythonVersion = "3.11"
-typeCheckingMode = "basic"
-reportMissingImports = true
-reportMissingTypeStubs = false
+# NB: pyright is configured in the standalone pyrightconfig.json (include
+# src+tests+scripts), which takes precedence over any [tool.pyright] here. A
+# duplicate [tool.pyright] block was removed to keep a single source of truth —
+# the prior block excluded tests/, contradicting the checked-in config and
+# masking test-tree type errors that `uv run pyright` actually reports.
 
 [tool.coverage.run]
 source = ["trace_mcp"]
 omit = ["*/tests/*", "*/__pycache__/*"]
+# Subprocess coverage for the E2E suite: test_e2e_server.py spawns the MCP
+# server via `python -m trace_mcp.server`. Without this, server.py reads as
+# ~34% (or 0% when only the E2E suite runs) because the subprocess's execution
+# is invisible to the parent coverage process. `parallel = true` makes each
+# process write its own `.coverage.<host>.<pid>` data file; `concurrency`
+# covers both the multiple OS processes and the asyncio/thread interleaving.
+# The spawned server runs `coverage.process_startup()` via `src/sitecustomize.py`
+# (src/ is on the subprocess PYTHONPATH) when `COVERAGE_PROCESS_START` is set in
+# the environment. pytest-cov combines the per-process files at end of run, so
+# CI needs no separate `coverage combine` step.
+parallel = true
+concurrency = ["multiprocessing", "thread"]
 
 [tool.coverage.report]
 exclude_lines = [
