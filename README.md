@@ -7,7 +7,7 @@ What does the solution to this look like?
 **One sentence from you, fully-scoped session from Claude:**
 
 <p align="center">
-  <img src="docs/trace-use-case-3.png" width="650" alt="Claude Code: a single prompt — 'start a TRACE session and review the current manuscript for submission readiness' — produces auto-recalled learnings and a five-item task plan.">
+  <img src="https://raw.githubusercontent.com/Thru-Echoes/TRACE/main/docs/trace-use-case-3.png" width="650" alt="Claude Code: a single prompt — 'start a TRACE session and review the current manuscript for submission readiness' — produces auto-recalled learnings and a five-item task plan.">
 </p>
 
 1. From inside `TRACE/`, ask Claude to start a session and review the manuscript (which is inside sibling dir, `TRACE-research/`).
@@ -22,11 +22,11 @@ TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy 
 
 **Version:** 0.4.2 | **Spec:** v0.4.1 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
 
-> The schema URI is an identifier (per W3C PROV convention) and is not currently a resolvable URL. The machine-readable JSON Schema lives at [`schemas/trace-v0.4.json`](schemas/trace-v0.4.json) in this repository.
+> The schema URI is an identifier (per W3C PROV convention) and is not currently a resolvable URL. The machine-readable JSON Schema lives at [`schemas/trace-v0.4.json`](https://github.com/Thru-Echoes/TRACE/blob/main/schemas/trace-v0.4.json) in this repository.
 
-**What's new in 0.4.2** (hardening — no protocol or wire changes; sessions stay at schema v0.4.1): a critical storage lost-update / event-ID-collision fix — a per-session file lock + disk-reload across *all* write paths (append, end, resolve), verified across real OS processes; hard payload caps on the query tools; a cheap, quiet session bootstrap; and packaging hardening. Full details in [CHANGELOG.md](CHANGELOG.md).
+**What's new in 0.4.2** (hardening — no protocol or wire changes; sessions stay at schema v0.4.1): a critical storage lost-update / event-ID-collision fix — a per-session file lock + disk-reload across *all* write paths (append, end, resolve), verified across real OS processes; hard payload caps on the query tools; a cheap, quiet session bootstrap; and packaging hardening. Full details in [CHANGELOG.md](https://github.com/Thru-Echoes/TRACE/blob/main/CHANGELOG.md).
 
-**What's new in 0.4.1** (additive — v0.3.x and v0.4.0 sessions load unchanged): the **Proposer Identity Rule** (`proposed_by` identifies the *author* of proposal content, not the speaker of the resolving directive — spec §3.6); a `discovery` annotation category for non-trivial findings surfaced during autonomous execution (§3.7); **URI-form `corrects_event_ids`** with schemes `external:`, `jsonl:`, `subagent:`, `tool-result:` for correcting things that aren't TRACE events (§3.7.1); `host` and `parent_event_id` on `tool_call` to cover MCP, host-internal, and external tools and to link subagent-dispatch chains (§3.5); a normative MUST on `conversation_snippet` for contributions and corrections with an explicit `<autonomous-stretch>` absence marker (§3.4.1). The PROV-LD correction mapping splits along the event-ID vs URI-form axis — downstream consumers matching `prov:wasRevisionOf` for corrections should switch to `prov:wasInvalidatedBy` (event IDs) and `prov:wasInfluencedBy` with `prov:atLocation` (URI form). Full details in [CHANGELOG.md](CHANGELOG.md) and [docs/adr/002-v041-protocol-additions.md](docs/adr/002-v041-protocol-additions.md); worked examples in [docs/examples.md](docs/examples.md).
+**What's new in 0.4.1** (additive — v0.3.x and v0.4.0 sessions load unchanged): the **Proposer Identity Rule** (`proposed_by` identifies the *author* of proposal content, not the speaker of the resolving directive — spec §3.6); a `discovery` annotation category for non-trivial findings surfaced during autonomous execution (§3.7); **URI-form `corrects_event_ids`** with schemes `external:`, `jsonl:`, `subagent:`, `tool-result:` for correcting things that aren't TRACE events (§3.7.1); `host` and `parent_event_id` on `tool_call` to cover MCP, host-internal, and external tools and to link subagent-dispatch chains (§3.5); a normative MUST on `conversation_snippet` for contributions and corrections with an explicit `<autonomous-stretch>` absence marker (§3.4.1). The PROV-LD correction mapping splits along the event-ID vs URI-form axis — downstream consumers matching `prov:wasRevisionOf` for corrections should switch to `prov:wasInvalidatedBy` (event IDs) and `prov:wasInfluencedBy` with `prov:atLocation` (URI form). Full details in [CHANGELOG.md](https://github.com/Thru-Echoes/TRACE/blob/main/CHANGELOG.md) and [docs/adr/002-v041-protocol-additions.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/adr/002-v041-protocol-additions.md); worked examples in [docs/examples.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/examples.md).
 
 ## Why decision provenance?
 
@@ -39,7 +39,7 @@ The need is also moving from norm to regulation. The **EU AI Act** (Articles 12,
 Every TRACE decision carries an **actor** (who proposed, who resolved), a **disposition** (proposed → accepted / revised / rejected), a **rationale**, a **suggestion_type** (proactive / requested / collaborative), and an optional `revises_event_id` linking to a prior decision. Decisions form a provenance DAG, not a flat log — a future reader can reconstruct who proposed what, why it landed where it did, and how the approach evolved during the session.
 
 <p align="center">
-  <img src="docs/trace-example-corp-sus-extractor-2.png" width="560"
+  <img src="https://raw.githubusercontent.com/Thru-Echoes/TRACE/main/docs/trace-example-corp-sus-extractor-2.png" width="560"
        alt="Three TRACE events from a corp-sus-report-extractor session: a human-accepted decision, an AI-proposed alternative logged after rejection, and a correction annotation linking back to the rejection.">
 </p>
 
@@ -128,9 +128,9 @@ The Claude Code adapter installs four hooks:
 
 Project detection uses, in order: a `TRACE project name: "..."` line in `CLAUDE.md`, the git repository basename, then the current working directory basename. Add the explicit marker if your repo name differs from the project name you want logged.
 
-**Codex** support is scaffolded as a placeholder; see [`src/trace_mcp/adapters/codex/README.md`](src/trace_mcp/adapters/codex/README.md) for the hook primitives a Codex adapter would need.
+**Codex** support is scaffolded as a placeholder; see [`src/trace_mcp/adapters/codex/README.md`](https://github.com/Thru-Echoes/TRACE/blob/main/src/trace_mcp/adapters/codex/README.md) for the hook primitives a Codex adapter would need.
 
-Worked examples for logging decisions, corrections, contributions, and decision chains live in [`docs/examples.md`](docs/examples.md).
+Worked examples for logging decisions, corrections, contributions, and decision chains live in [`docs/examples.md`](https://github.com/Thru-Echoes/TRACE/blob/main/docs/examples.md).
 
 #### Hook environment variables
 
@@ -218,7 +218,7 @@ Claude: -> trace_end_session(summary="Analyzed 47 passages...")
 
 The default `trace-learn` extension surfaces relevant past learnings at session start, on-demand via `trace_learn_recall`, and when decisions are proposed — and auto-extracts new learnings at session end. Matching uses LLM scoring when `OPENAI_API_KEY` is configured, with BM25 fallback. Storage: `~/.trace/knowledge/{project}.json` (env: `TRACE_KNOWLEDGE_DIR`).
 
-See [`docs/extensions/trace-learn.md`](docs/extensions/trace-learn.md) for matching backends, BM25 stemming, per-backend thresholds, extraction details, and LLM configuration.
+See [`docs/extensions/trace-learn.md`](https://github.com/Thru-Echoes/TRACE/blob/main/docs/extensions/trace-learn.md) for matching backends, BM25 stemming, per-backend thresholds, extraction details, and LLM configuration.
 
 ## Configuration
 
@@ -254,13 +254,19 @@ TRACE implements the **Decision Provenance for AI-Assisted Workflows** specifica
 
 | Artifact | Location | Role |
 |----------|----------|------|
-| **Specification** | [`docs/specification.md`](docs/specification.md) | Authoritative definition of the data model, semantics, and conformance rules. Technology-neutral. |
-| **JSON Schema** | [`schemas/trace-v0.4.json`](schemas/trace-v0.4.json) | Machine-readable formalization. Any JSON document validating against this schema is a conforming session document. |
+| **Specification** | [`docs/specification.md`](https://github.com/Thru-Echoes/TRACE/blob/main/docs/specification.md) | Authoritative definition of the data model, semantics, and conformance rules. Technology-neutral. |
+| **JSON Schema** | [`schemas/trace-v0.4.json`](https://github.com/Thru-Echoes/TRACE/blob/main/schemas/trace-v0.4.json) | Machine-readable formalization. Any JSON document validating against this schema is a conforming session document. |
 | **Reference implementation** | This repository (`trace-mcp`) | An MCP server that produces conforming documents. One possible implementation — not the only one. |
 
 The specification defines five event types (tool invocations, decisions, annotations, state changes, contributions), a decision lifecycle model (proposed / accepted / revised / rejected), and an actor taxonomy (human / ai / system). Any tool that produces JSON documents conforming to the schema implements the standard — no dependency on MCP, Python, or TRACE itself.
 
-Regenerate the schema from models: `python scripts/generate_schema.py`.
+Validate session documents against the schema (the schema ships inside the package; `jsonschema` is provided by the `[validate]` or `[all]` extra):
+
+```bash
+trace-mcp validate ~/.trace/sessions/trace_*.json
+```
+
+Regenerate the schema from models: `python scripts/generate_schema.py` (writes the top-level spec artifact and the byte-identical packaged copy).
 
 ## File structure
 
@@ -293,8 +299,8 @@ The host-adapter layer is a pure installer; core has zero imports from `adapters
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, the test suite layout, code style requirements, schema regeneration, and the development roadmap.
+See [CONTRIBUTING.md](https://github.com/Thru-Echoes/TRACE/blob/main/CONTRIBUTING.md) for development setup, the test suite layout, code style requirements, schema regeneration, and the development roadmap.
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md).
+See [CHANGELOG.md](https://github.com/Thru-Echoes/TRACE/blob/main/CHANGELOG.md).

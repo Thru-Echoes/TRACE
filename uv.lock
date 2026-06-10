@@ -1820,6 +1820,7 @@ dependencies = [
 [package.optional-dependencies]
 all = [
     { name = "filelock" },
+    { name = "jsonschema" },
     { name = "model2vec" },
     { name = "numpy" },
     { name = "openai" },
@@ -1847,6 +1848,9 @@ embeddings = [
 llm = [
     { name = "openai" },
 ]
+validate = [
+    { name = "jsonschema" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -1854,7 +1858,9 @@ requires-dist = [
     { name = "filelock", marker = "extra == 'all'", specifier = ">=3.12" },
     { name = "filelock", marker = "extra == 'dev'", specifier = ">=3.12" },
     { name = "filelock", marker = "extra == 'embeddings'", specifier = ">=3.12" },
+    { name = "jsonschema", marker = "extra == 'all'", specifier = ">=4.0" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.0" },
+    { name = "jsonschema", marker = "extra == 'validate'", specifier = ">=4.0" },
     { name = "mcp", specifier = ">=1.0.0" },
     { name = "model2vec", marker = "extra == 'all'", specifier = ">=0.4" },
     { name = "model2vec", marker = "extra == 'dev'", specifier = ">=0.4" },
@@ -1874,7 +1880,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "twine", marker = "extra == 'dev'", specifier = ">=5.0" },
 ]
-provides-extras = ["llm", "embeddings", "all", "dev"]
+provides-extras = ["llm", "embeddings", "validate", "all", "dev"]
 
 [[package]]
 name = "twine"
