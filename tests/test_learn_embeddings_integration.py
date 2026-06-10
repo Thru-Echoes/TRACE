@@ -6,6 +6,7 @@ backend fallback chains, model change detection, real-data tests.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock
 
@@ -207,16 +208,32 @@ class TestModelChangeIntegration:
 
 # ── Real data tests ──────────────────────────────────────────────────────
 
-_REAL_STORE = Path.home() / ".trace" / "knowledge" / "TRACE.json"
+_REAL_KNOWLEDGE_DIR = Path.home() / ".trace" / "knowledge"
+_REAL_STORE = _REAL_KNOWLEDGE_DIR / "TRACE.json"
 
 
+@pytest.mark.real_data
+@pytest.mark.skipif(
+    not os.environ.get("TRACE_REAL_DATA_TESTS"),
+    reason=(
+        "Reads the developer's real ~/.trace/knowledge/TRACE.json — results depend on "
+        "personal machine state, and the store's contents drift over time (the Jun 2026 "
+        "learn-recovery grew it 5→29 learnings). Opt in with TRACE_REAL_DATA_TESTS=1."
+    ),
+)
 @pytest.mark.skipif(not _REAL_STORE.exists(), reason="No real TRACE knowledge store")
 class TestRealDataEmbeddings:
-    """Tests using the real TRACE.json knowledge store (~27 learnings)."""
+    """Tests using the real TRACE.json knowledge store.
+
+    Opt-in only (TRACE_REAL_DATA_TESTS=1): the suite-wide conftest isolation
+    points TRACE_KNOWLEDGE_DIR at a temp dir, so these tests pass the real
+    knowledge directory explicitly. Their assertions encode expectations about
+    specific learning IDs and may drift as the real store evolves.
+    """
 
     def test_load_real_store(self):
         """Real store loads cleanly with new code (backward compat)."""
-        ks = load_store("TRACE")
+        ks = load_store("TRACE", directory=str(_REAL_KNOWLEDGE_DIR))
         assert len(ks.learnings) > 0
         # Old stores won't have embeddings — that's fine
         for lrn in ks.learnings:
@@ -225,7 +242,7 @@ class TestRealDataEmbeddings:
 
     async def test_bm25_recall_on_real_data(self):
         """BM25 recall works on real data (baseline for comparison)."""
-        ks = load_store("TRACE")
+        ks = load_store("TRACE", directory=str(_REAL_KNOWLEDGE_DIR))
         bm25 = BM25Backend()
         results = await recall_learnings(
             ks.learnings, "schema validation rules for actors",
@@ -245,7 +262,7 @@ class TestRealDataEmbeddings:
         if provider is None:
             pytest.skip("model2vec not available")
 
-        ks = load_store("TRACE")
+        ks = load_store("TRACE", directory=str(_REAL_KNOWLEDGE_DIR))
         # Generate embeddings for all learnings
         texts = [lrn.content for lrn in ks.learnings]
         vecs = await provider.embed_texts(texts)
