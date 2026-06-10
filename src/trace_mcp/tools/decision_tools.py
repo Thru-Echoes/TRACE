@@ -5,16 +5,18 @@ from __future__ import annotations
 import os
 from contextlib import nullcontext
 from datetime import UTC, datetime
+from typing import get_args
 
-from trace_mcp.schema import Actor, DecisionData, Session, TraceEvent
+from trace_mcp.schema import Actor, DecisionData, DecisionDisposition, Session, TraceEvent
 from trace_mcp.storage.base import TraceStorage
 from trace_mcp.tools.session_tools import append_event
 
-# Terminal dispositions a proposed decision may transition to. Validated here
-# (not only via the Literal in the MCP signature) so direct library callers
-# can never write an invalid disposition that bricks the session file on the
-# next load (C1).
-VALID_RESOLUTIONS = ("accepted", "revised", "rejected")
+# Terminal dispositions a proposed decision may transition to. Derived from
+# the schema's canonical Literal (minus the initial state) so the two can
+# never drift. Validated here — not only via the Literal in the MCP
+# signature — so direct library callers can never write an invalid
+# disposition that bricks the session file on the next load (C1).
+VALID_RESOLUTIONS = tuple(v for v in get_args(DecisionDisposition) if v != "proposed")
 
 
 async def propose_decision(
@@ -81,124 +83,120 @@ async def resolve_decision(
             "Note: 'proposed' is the initial state, not a resolution."
         )
 
-    # Find the decision event
-    target = None
-    for evt in session.events:
-        if evt.id == event_id and evt.type == "decision":
-            target = evt
-            break
-
-    if target is None:
-        raise ValueError(f"Decision event '{event_id}' not found in session '{session.id}'")
-
-    if target.decision is None:
-        raise ValueError(f"Event '{event_id}' has no decision data")
-
-    # --- Guard rails ---
-    guard_warnings: list[str] = []
+    resolver = Actor(type=resolved_by_type, id=resolved_by_id)  # type: ignore[arg-type]
     suppress = os.environ.get("TRACE_SUPPRESS_SELF_RESOLVE_WARNING", "").lower() == "true"
 
-    # FM1: Same-instance self-resolution
-    # v0.4.1 + Round-3 A1 / evt_016: generalized from ai-only per spec §3.6
-    # Proposer Identity Rule. Detects when the same Actor instance (type AND
-    # id) proposes and resolves. The ai→ai case warns unconditionally; the
-    # generalized non-ai case is gated to multi-actor sessions (see below).
-    proposer = target.decision.proposed_by
-    is_self_resolution = (
-        proposer.type == resolved_by_type
-        and proposer.id == resolved_by_id
-    )
-
-    if is_self_resolution and not suppress:
-        if resolved_by_type == "ai":
-            # Backward-compat message preserved for ai→ai (the original v0.3
-            # case). Fires unconditionally — AI must not resolve its own
-            # proposal regardless of how many actor types the session has.
-            guard_warnings.append(
-                "AI resolved its own proposal. Decisions proposed by AI "
-                "should normally be resolved by a human."
-            )
-        elif session.is_multi_actor():
-            # v0.4.1 + Round-3 A1 / evt_016: the evt_025 pattern —
-            # human→human (or system→system) same-instance self-resolution.
-            # Gated to multi-actor sessions (≥2 actor types): in a
-            # single-actor session this is legitimate, not an attribution
-            # concern (the false positive A1 named with production data).
-            guard_warnings.append(
-                "Same actor instance proposed and resolved this decision. "
-                "Per spec §3.6, in multi-actor workflows the proposer should "
-                "differ from the resolver."
-            )
-
-    # FM25: Suspiciously fast resolution (propose + resolve <5s by same
-    # instance). ai→ai always warns (fast AI self-resolution is suspicious
-    # regardless of actor count); the general non-ai case is gated to
-    # multi-actor sessions, mirroring FM1 (Round-3 amendment A-R3-1 — without
-    # this split, gating FM25 wholesale would silently drop the §3-correct
-    # ai→ai FM25 warning).
-    elapsed = (datetime.now(UTC) - target.timestamp).total_seconds()
-    if elapsed < 5.0 and is_self_resolution and not suppress:
-        if resolved_by_type == "ai" or session.is_multi_actor():
-            guard_warnings.append(
-                f"Decision proposed and self-resolved in {elapsed:.1f}s. "
-                "Was the other actor consulted before resolving?"
-            )
-
-    # FM31: Rejection -> suggest correction annotation
-    if disposition == "rejected":
-        guard_warnings.append(
-            "Decision rejected. Consider logging a correction annotation "
-            "(category='correction') linking to this decision, to capture "
-            "the reasoning in the knowledge store."
-        )
-
-    resolver = Actor(type=resolved_by_type, id=resolved_by_id)  # type: ignore[arg-type]
-
-    # Concurrency-safe write (symmetry with append_event / end_session): reload
-    # the authoritative on-disk events under the per-session lock and re-find the
-    # target there, so a concurrent append/resolve persisted since this Session
-    # was read is not clobbered by this write.
+    # Concurrency-safe write (symmetry with append_event / end_session): all
+    # reads, guard-rail computation, and the write happen under the per-session
+    # lock against the authoritative on-disk session, so a concurrent
+    # append/resolve persisted since the caller loaded its Session is neither
+    # clobbered nor judged from stale state (e.g. is_multi_actor on a copy
+    # that is missing a concurrently-appended actor).
     lock_factory = getattr(storage, "lock", None)
     lock_cm = lock_factory(session.id) if lock_factory is not None else nullcontext()
     async with lock_cm:
         # Write back the disk-loaded object (not the caller's in-memory copy)
         # so a stale in-memory status/metadata can't clobber disk state —
         # e.g. resurrect a session completed by another process (H1).
-        write_session = session
         try:
             write_session = await storage.get_session(session.id)
         except FileNotFoundError:
-            pass  # session not yet persisted; mutate the in-memory target
-        write_target = next(
+            write_session = session  # not yet persisted; in-memory is authoritative
+        target = next(
             (e for e in write_session.events if e.id == event_id and e.type == "decision"),
             None,
         )
-        if write_target is None or write_target.decision is None:
+        if target is None:
             raise ValueError(f"Decision event '{event_id}' not found in session '{session.id}'")
-        if write_target.decision.disposition != "proposed":
+        if target.decision is None:
+            raise ValueError(f"Event '{event_id}' has no decision data")
+        if target.decision.disposition != "proposed":
             raise ValueError(
                 f"Decision '{event_id}' is already resolved "
-                f"(disposition='{write_target.decision.disposition}'). Re-resolution is not "
-                "allowed: propose a new decision with revises_event_id pointing at "
-                f"'{event_id}' and resolve that one instead."
+                f"(disposition='{target.decision.disposition}'), possibly by a concurrent "
+                "or earlier call. Re-resolution is not allowed: to supersede it, propose "
+                f"a new decision with revises_event_id pointing at '{event_id}' and "
+                "resolve that one instead."
             )
+
+        # --- Guard rails (computed from the authoritative disk state) ---
+        guard_warnings: list[str] = []
+
+        # FM1: Same-instance self-resolution
+        # v0.4.1 + Round-3 A1 / evt_016: generalized from ai-only per spec §3.6
+        # Proposer Identity Rule. Detects when the same Actor instance (type AND
+        # id) proposes and resolves. The ai→ai case warns unconditionally; the
+        # generalized non-ai case is gated to multi-actor sessions (see below).
+        proposer = target.decision.proposed_by
+        is_self_resolution = (
+            proposer.type == resolved_by_type
+            and proposer.id == resolved_by_id
+        )
+
+        if is_self_resolution and not suppress:
+            if resolved_by_type == "ai":
+                # Backward-compat message preserved for ai→ai (the original v0.3
+                # case). Fires unconditionally — AI must not resolve its own
+                # proposal regardless of how many actor types the session has.
+                guard_warnings.append(
+                    "AI resolved its own proposal. Decisions proposed by AI "
+                    "should normally be resolved by a human."
+                )
+            elif write_session.is_multi_actor():
+                # v0.4.1 + Round-3 A1 / evt_016: the evt_025 pattern —
+                # human→human (or system→system) same-instance self-resolution.
+                # Gated to multi-actor sessions (≥2 actor types): in a
+                # single-actor session this is legitimate, not an attribution
+                # concern (the false positive A1 named with production data).
+                guard_warnings.append(
+                    "Same actor instance proposed and resolved this decision. "
+                    "Per spec §3.6, in multi-actor workflows the proposer should "
+                    "differ from the resolver."
+                )
+
+        # FM25: Suspiciously fast resolution (propose + resolve <5s by same
+        # instance). ai→ai always warns (fast AI self-resolution is suspicious
+        # regardless of actor count); the general non-ai case is gated to
+        # multi-actor sessions, mirroring FM1 (Round-3 amendment A-R3-1 — without
+        # this split, gating FM25 wholesale would silently drop the §3-correct
+        # ai→ai FM25 warning).
+        if is_self_resolution and not suppress:
+            elapsed = (datetime.now(UTC) - target.timestamp).total_seconds()
+            if elapsed < 5.0 and (resolved_by_type == "ai" or write_session.is_multi_actor()):
+                guard_warnings.append(
+                    f"Decision proposed and self-resolved in {elapsed:.1f}s. "
+                    "Was the other actor consulted before resolving?"
+                )
+
+        # FM31: Rejection -> suggest correction annotation
+        if disposition == "rejected":
+            guard_warnings.append(
+                "Decision rejected. Consider logging a correction annotation "
+                "(category='correction') linking to this decision, to capture "
+                "the reasoning in the knowledge store."
+            )
+
         if write_session.status == "completed":
             guard_warnings.append(
                 "Resolved after session completion. Cross-session resolution of a "
                 "proposed decision is the only permitted post-completion mutation; "
                 "it is recorded here for audit transparency."
             )
-        updated = write_target.decision.model_copy(
-            update={
+
+        # Single validated construction (model_copy skips validation in
+        # Pydantic v2, so the model_validate round-trip IS the C1 guarantee:
+        # an invalid resolution state can never reach disk and brick the
+        # session file on the next load). Existing warnings are preserved,
+        # not clobbered.
+        target.decision = DecisionData.model_validate(
+            {
+                **target.decision.model_dump(),
                 "disposition": disposition,
-                "resolved_by": resolver,
+                "resolved_by": resolver.model_dump(),
                 "revision_note": revision_note,
-                "warnings": guard_warnings,
+                "warnings": [*target.decision.warnings, *guard_warnings],
             }
         )
-        # Round-trip through validation so an invalid resolution state can
-        # never reach disk and brick the session file on the next load (C1).
-        write_target.decision = DecisionData.model_validate(updated.model_dump())
         await storage.update_session(write_session)
         # Keep the caller's in-memory view coherent with what was persisted.
         session.events = write_session.events
