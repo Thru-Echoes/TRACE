@@ -11,7 +11,6 @@ schema and tooling against patterns drawn from real research workflows.
 from __future__ import annotations
 
 import json
-import os
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -542,49 +541,54 @@ class TestScratchpadGeneration:
         # No crash on empty events
         assert "### Summary" not in section  # no summary set
 
-    def test_scratchpad_write_creates_file(self, scratchpad_dir: Path) -> None:
-        """write_scratchpad creates SCRATCHPAD.md with header and content."""
+    def test_scratchpad_write_creates_file(
+        self, scratchpad_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """write_scratchpad creates SCRATCHPAD.md with header and content.
+
+        monkeypatch (not set/pop) so the suite-wide TRACE_SCRATCHPAD_DIR
+        isolation from conftest is RESTORED, not deleted — a bare
+        os.environ.pop() here silently turned isolation off for every test
+        that ran afterwards, letting e2e session-ends overwrite the real
+        cwd/.claude/SCRATCHPAD.md.
+        """
         session = _make_green_narrative_session()
         session.summary = "Test session"
         session.ended = datetime.now(UTC)
         session.status = "completed"
 
-        os.environ["TRACE_SCRATCHPAD_DIR"] = str(scratchpad_dir)
-        try:
-            path = write_scratchpad(session)
-            assert path.exists()
-            content = path.read_text()
-            assert "# SCRATCHPAD" in content
-            assert "narrative-analysis" in content
-            assert "Test session" in content
-        finally:
-            os.environ.pop("TRACE_SCRATCHPAD_DIR", None)
+        monkeypatch.setenv("TRACE_SCRATCHPAD_DIR", str(scratchpad_dir))
+        path = write_scratchpad(session)
+        assert path.exists()
+        content = path.read_text()
+        assert "# SCRATCHPAD" in content
+        assert "narrative-analysis" in content
+        assert "Test session" in content
 
-    def test_scratchpad_replaces_previous_session(self, scratchpad_dir: Path) -> None:
+    def test_scratchpad_replaces_previous_session(
+        self, scratchpad_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """write_scratchpad keeps only the most recent session."""
-        os.environ["TRACE_SCRATCHPAD_DIR"] = str(scratchpad_dir)
-        try:
-            # First session
-            s1 = _make_green_narrative_session("trace_session_1")
-            s1.summary = "First session"
-            s1.ended = datetime.now(UTC)
-            s1.status = "completed"
-            write_scratchpad(s1)
+        monkeypatch.setenv("TRACE_SCRATCHPAD_DIR", str(scratchpad_dir))
+        # First session
+        s1 = _make_green_narrative_session("trace_session_1")
+        s1.summary = "First session"
+        s1.ended = datetime.now(UTC)
+        s1.status = "completed"
+        write_scratchpad(s1)
 
-            # Second session replaces first
-            s2 = _make_green_narrative_session("trace_session_2")
-            s2.summary = "Second session"
-            s2.ended = datetime.now(UTC)
-            s2.status = "completed"
-            write_scratchpad(s2)
+        # Second session replaces first
+        s2 = _make_green_narrative_session("trace_session_2")
+        s2.summary = "Second session"
+        s2.ended = datetime.now(UTC)
+        s2.status = "completed"
+        write_scratchpad(s2)
 
-            content = (scratchpad_dir / "SCRATCHPAD.md").read_text()
-            assert "trace_session_2" in content
-            assert "Second session" in content
-            assert "trace_session_1" not in content, "Old session should be replaced"
-            assert "First session" not in content, "Old session should be replaced"
-        finally:
-            os.environ.pop("TRACE_SCRATCHPAD_DIR", None)
+        content = (scratchpad_dir / "SCRATCHPAD.md").read_text()
+        assert "trace_session_2" in content
+        assert "Second session" in content
+        assert "trace_session_1" not in content, "Old session should be replaced"
+        assert "First session" not in content, "Old session should be replaced"
 
     def test_scratchpad_with_todos(self) -> None:
         """TODO annotations appear in the TODOs section."""
@@ -1148,6 +1152,7 @@ class TestAttributionAuditAccuracy:
 
     async def test_audit_detects_ai_self_resolution(
         self, storage: JsonFileStorage, active: dict[str, Session],
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Audit must flag decisions where AI resolved its own proposal."""
         sid, session = await _create_session(storage, active)
@@ -1158,14 +1163,14 @@ class TestAttributionAuditAccuracy:
             proposed_by_type="ai", proposed_by_id="claude",
         )
 
-        os.environ["TRACE_SUPPRESS_SELF_RESOLVE_WARNING"] = "true"
-        try:
-            await decision_tools.resolve_decision(
-                storage, session, event_id=d1, disposition="accepted",
-                resolved_by_type="ai", resolved_by_id="claude",
-            )
-        finally:
-            os.environ.pop("TRACE_SUPPRESS_SELF_RESOLVE_WARNING", None)
+        # monkeypatch (not set/pop): a bare os.environ.pop() would delete any
+        # pre-existing value instead of restoring it.
+        monkeypatch.setenv("TRACE_SUPPRESS_SELF_RESOLVE_WARNING", "true")
+        await decision_tools.resolve_decision(
+            storage, session, event_id=d1, disposition="accepted",
+            resolved_by_type="ai", resolved_by_id="claude",
+        )
+        monkeypatch.delenv("TRACE_SUPPRESS_SELF_RESOLVE_WARNING")
 
         result = await session_tools.end_session(
             storage, active, session_id=sid, summary="test",
@@ -1288,12 +1293,18 @@ class TestToolCallRetryChains:
 _REAL_SESSIONS_DIR = Path.home() / ".trace" / "sessions"
 
 
+@pytest.mark.real_data
 @pytest.mark.skipif(
     not _REAL_SESSIONS_DIR.exists(),
     reason="No ~/.trace/sessions/ directory — skipping real data tests",
 )
 class TestRealSessionDataIntegrity:
-    """Load real TRACE session files and verify data integrity."""
+    """Load real TRACE session files and verify data integrity.
+
+    Opt-in via TRACE_REAL_DATA_TESTS=1 (real_data marker, enforced in
+    conftest): reads the developer's real ~/.trace/sessions, whose contents
+    depend on personal machine state.
+    """
 
     def _load_session(self, filename: str) -> Session | None:
         path = _REAL_SESSIONS_DIR / filename
@@ -1390,12 +1401,19 @@ class TestRealSessionDataIntegrity:
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.real_data
 @pytest.mark.skipif(
     not _REAL_SESSIONS_DIR.exists(),
     reason="No ~/.trace/sessions/ directory — skipping cross-project tests",
 )
 class TestCrossProjectConsistency:
-    """Verify consistency across all projects using TRACE."""
+    """Verify consistency across all projects using TRACE.
+
+    Opt-in via TRACE_REAL_DATA_TESTS=1 (real_data marker, enforced in
+    conftest): asserts properties over EVERY session in the developer's real
+    ~/.trace/sessions — a single unsummarized completed session anywhere in
+    personal data would otherwise fail the suite.
+    """
 
     def test_all_completed_sessions_have_summary(self) -> None:
         """Every completed session should have a summary."""

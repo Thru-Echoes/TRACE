@@ -207,16 +207,32 @@ class TestModelChangeIntegration:
 
 # ── Real data tests ──────────────────────────────────────────────────────
 
-_REAL_STORE = Path.home() / ".trace" / "knowledge" / "TRACE.json"
+_REAL_KNOWLEDGE_DIR = Path.home() / ".trace" / "knowledge"
+_REAL_STORE = _REAL_KNOWLEDGE_DIR / "TRACE.json"
 
 
+@pytest.mark.real_data
 @pytest.mark.skipif(not _REAL_STORE.exists(), reason="No real TRACE knowledge store")
 class TestRealDataEmbeddings:
-    """Tests using the real TRACE.json knowledge store (~27 learnings)."""
+    """Tests using the real TRACE.json knowledge store.
+
+    Opt-in only via the real_data marker (TRACE_REAL_DATA_TESTS=1, enforced in
+    conftest): the suite-wide isolation points TRACE_KNOWLEDGE_DIR at a temp
+    dir, so these tests pass the real knowledge directory explicitly. Recall
+    expectations are derived from the store's CONTENT at runtime (never pinned
+    IDs) because the real store drifts — the Jun 2026 learn-recovery grew it
+    5→29 learnings and re-issued IDs, which broke the previous hardcoded
+    lrn_001/lrn_003 assertions.
+    """
+
+    @staticmethod
+    def _ids_with_content(ks, keyword: str) -> set[str]:
+        """IDs of learnings whose content mentions `keyword` (case-insensitive)."""
+        return {lrn.id for lrn in ks.learnings if keyword.lower() in lrn.content.lower()}
 
     def test_load_real_store(self):
         """Real store loads cleanly with new code (backward compat)."""
-        ks = load_store("TRACE")
+        ks = load_store("TRACE", directory=str(_REAL_KNOWLEDGE_DIR))
         assert len(ks.learnings) > 0
         # Old stores won't have embeddings — that's fine
         for lrn in ks.learnings:
@@ -225,16 +241,20 @@ class TestRealDataEmbeddings:
 
     async def test_bm25_recall_on_real_data(self):
         """BM25 recall works on real data (baseline for comparison)."""
-        ks = load_store("TRACE")
+        ks = load_store("TRACE", directory=str(_REAL_KNOWLEDGE_DIR))
+        expected = self._ids_with_content(ks, "actor")
+        if not expected:
+            pytest.skip("real store currently has no actor-related learning to recall")
         bm25 = BM25Backend()
         results = await recall_learnings(
             ks.learnings, "schema validation rules for actors",
             backend=bm25, threshold=0.0, limit=5,
         )
         assert len(results) > 0
-        # lrn_001 is about actor type validation — should be in results
-        ids = [r["learning"]["id"] for r in results]
-        assert "lrn_001" in ids
+        ids = {r["learning"]["id"] for r in results}
+        assert ids & expected, (
+            f"Expected an actor-related learning ({sorted(expected)}) in the top results, got: {sorted(ids)}"
+        )
 
     async def test_embedding_recall_on_real_data(self):
         """Embedding recall with model2vec on real data."""
@@ -245,7 +265,7 @@ class TestRealDataEmbeddings:
         if provider is None:
             pytest.skip("model2vec not available")
 
-        ks = load_store("TRACE")
+        ks = load_store("TRACE", directory=str(_REAL_KNOWLEDGE_DIR))
         # Generate embeddings for all learnings
         texts = [lrn.content for lrn in ks.learnings]
         vecs = await provider.embed_texts(texts)
@@ -259,6 +279,10 @@ class TestRealDataEmbeddings:
             backend=backend, threshold=0.0, limit=5,
         )
         assert len(results) > 0
-        # lrn_003 is about ffmpeg audio device issues on macOS
-        ids = [r["learning"]["id"] for r in results[:5]]
-        assert "lrn_003" in ids, f"Expected lrn_003 in top 5, got: {ids}"
+        expected = self._ids_with_content(ks, "audio") | self._ids_with_content(ks, "ffmpeg")
+        if not expected:
+            pytest.skip("real store currently has no audio/ffmpeg-related learning to recall")
+        ids = {r["learning"]["id"] for r in results[:5]}
+        assert ids & expected, (
+            f"Expected an audio/ffmpeg-related learning ({sorted(expected)}) in the top 5, got: {sorted(ids)}"
+        )
