@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,11 @@ class LLMFallbackError(RuntimeError):
 class LearnConfig:
     """Configuration for trace-learn matching and extraction backends."""
 
-    openai_api_key: str | None = None
+    # repr=False: the key must never leak into pytest failure output, logs,
+    # or debugger dumps (all of which render the dataclass repr). It remains
+    # reachable via direct attribute access and dataclasses.asdict() — code
+    # and tests must never log/assert on a real key value through those.
+    openai_api_key: str | None = field(default=None, repr=False)
     llm_model: str = "gpt-5.4-mini"
     llm_extraction_model: str = "gpt-5.4-mini"
     llm_enabled: bool = True

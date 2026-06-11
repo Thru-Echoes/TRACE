@@ -495,7 +495,7 @@ class TestE2EConfig:
         config = load_config()
         assert config.openai_api_key == "sk-from-env"
 
-    def test_config_no_key_disables_llm(self, monkeypatch):
+    def test_config_no_key_disables_llm(self, monkeypatch, tmp_path):
         """When no API key is found, LLM is automatically disabled."""
         monkeypatch.delenv("OPENAI_API_KEY", raising=False)
 
@@ -504,9 +504,21 @@ class TestE2EConfig:
 
         # Prevent load_config from reading the real ~/.trace/.env
         monkeypatch.setattr(_cfg, "_TRACE_ENV_PATH", Path("/nonexistent/.env"))
+        # ...and from reading a real ./.env in the developer's checkout
+        # (load_config also merges Path.cwd()/.env — the repo root has one).
+        monkeypatch.chdir(tmp_path)
 
         config = load_config()
         assert config.llm_enabled is False
+
+    def test_api_key_never_appears_in_repr(self):
+        """The API key must not leak into reprs (pytest failure output, logs,
+        and debugger dumps all use repr)."""
+        from trace_mcp.extensions.learn.config import LearnConfig
+
+        config = LearnConfig(openai_api_key="sk-secret-test-123")
+        assert "sk-secret-test-123" not in repr(config)
+        assert "sk-secret-test-123" not in str(config)
 
     def test_config_explicit_disable(self, monkeypatch):
         """TRACE_LLM_ENABLED=false disables LLM even with API key."""

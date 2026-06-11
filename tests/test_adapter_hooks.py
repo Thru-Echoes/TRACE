@@ -394,9 +394,14 @@ class TestPreToolGuard:
 
 
 @pytest.fixture(autouse=True)
-def _no_user_env_leak(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Don't let the developer's real ~/.trace/ sneak into test runs."""
-    monkeypatch.delenv("TRACE_SESSIONS_DIR", raising=False)
+def _no_user_env_leak(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Don't let the developer's real ~/.trace/ sneak into test runs.
+
+    TRACE_SESSIONS_DIR is re-pointed (not deleted): deleting it would suspend
+    the suite-wide conftest isolation and fall back to the real
+    ~/.trace/sessions for any code path that doesn't get an explicit dir.
+    """
+    monkeypatch.setenv("TRACE_SESSIONS_DIR", str(tmp_path / "hook-sessions"))
     monkeypatch.delenv("TRACE_RUNTIME_DIR", raising=False)
     monkeypatch.delenv("CLAUDE_PROJECT_DIR", raising=False)
     monkeypatch.delenv("TRACE_PROMPT_MIN_TURNS", raising=False)
