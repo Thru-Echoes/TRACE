@@ -18,12 +18,61 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-from trace_mcp.schema import Session
+from trace_mcp.schema import SCHEMA_VERSION, Session
 from trace_mcp.storage.base import TraceStorage
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DIR = os.path.expanduser("~/.trace/sessions")
+
+
+def _minor_version(v: str) -> tuple[int, int]:
+    """Parse the (major, minor) tuple from a dotted version string."""
+    major, _, rest = v.partition(".")
+    minor, _, _ = rest.partition(".")
+    return (int(major), int(minor or 0))
+
+
+def _is_future_schema_version(file_version: str | None) -> bool:
+    """True if a session file declares a (major, minor) newer than this server.
+
+    Used to warn on version skew at read time. Combined with the schema models'
+    ``extra='allow'`` (forward-compat preservation), this surfaces the skew that
+    used to cause silent field-stripping on rewrite. Returns False on any
+    unparseable/missing version (treat as same-or-older).
+    """
+    if not file_version:
+        return False
+    try:
+        return _minor_version(file_version) > _minor_version(SCHEMA_VERSION)
+    except ValueError:
+        return False
+
+
+def _holder_status(token: bytes) -> str:
+    """Liveness of the process named in a lock token (``<pid>:<time_ns>``).
+
+    Returns ``"dead"`` (holder process is gone — safe to steal), ``"alive"``
+    (holder is running — must NOT steal, however old the lock), or
+    ``"unknown"`` (token unparseable / legacy-empty, or liveness not
+    determinable on this platform — fall back to the time-based steal). Valid
+    only under the single-host advisory-lock assumption the lock documents.
+    """
+    try:
+        pid = int(token.split(b":", 1)[0])
+    except (ValueError, IndexError):
+        return "unknown"
+    if pid <= 0:
+        return "unknown"
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return "dead"
+    except PermissionError:
+        return "alive"  # process exists, owned by another user
+    except OSError:
+        return "unknown"  # e.g. signal-0 liveness unsupported on this platform
+    return "alive"
 
 
 def sanitize_name(name: str) -> str:
@@ -93,38 +142,74 @@ class JsonFileStorage(TraceStorage):
         Implemented with an exclusive lock file (``os.O_CREAT | os.O_EXCL``) —
         cross-platform, no fcntl/filelock dependency (keeps core deps = mcp +
         pydantic). A lock older than ``steal_after`` is treated as stale (holder
-        crashed) and stolen. If the lock cannot be acquired within ``timeout``,
-        we proceed anyway (best-effort) rather than deadlock — degrading to the
-        prior unsynchronized behaviour only under pathological contention.
+        crashed) and stolen.
+
+        **Fail-closed (PR D):** if the lock cannot be acquired within
+        ``timeout`` we ``raise TimeoutError`` rather than proceed unlocked. An
+        audit store must never silently degrade to an unsynchronized write —
+        that reopens the lost-update / duplicate-evt_id window the lock exists
+        to close, invisibly to the caller and the record. The lock is
+        single-host advisory only (``O_EXCL`` does not synchronize across NFS /
+        distinct mounts); TRACE's deployment is a local per-user ``~/.trace``.
+
+        The lock file carries an identifying token (``<pid>:<time_ns>``) so the
+        stale-steal path can re-verify the lock is byte- and mtime-identical to
+        the one it judged stale before unlinking it — closing the TOCTOU window
+        where a writer could delete another writer's *fresh* lock.
 
         Side effects: creates/removes ``<session>.lock`` in the sessions dir
         (excluded from list/scan globs, which match ``trace_*.json``).
+
+        Raises:
+            TimeoutError: the lock could not be acquired within ``timeout``.
         """
         self._ensure_dir()
         lock_path = self._dir / f"{sanitize_name(session_id)}.lock"
+        token = f"{os.getpid()}:{time.time_ns()}".encode()
         acquired = False
         waited = 0.0
         while True:
             try:
                 fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.close(fd)
+                try:
+                    os.write(fd, token)
+                finally:
+                    os.close(fd)
                 acquired = True
                 break
             except FileExistsError:
-                try:
-                    if time.time() - os.path.getmtime(lock_path) > steal_after:
+                pass  # someone holds it — decide below whether to steal
+
+            # Steal the lock only if its holder is provably DEAD (single-host
+            # PID liveness), or — for an unparseable/legacy token whose holder
+            # cannot be checked — if it is older than ``steal_after`` (time
+            # backstop). A LIVE holder is never stolen, however old its lock.
+            # The byte+mtime re-verify before unlink avoids deleting a different,
+            # fresher lock (the TOCTOU the empty pre-fix lock file allowed).
+            stole = False
+            try:
+                token_seen = lock_path.read_bytes()
+                before = os.stat(lock_path)
+                holder = _holder_status(token_seen)
+                stale_by_time = (time.time() - before.st_mtime) > steal_after
+                if holder == "dead" or (holder == "unknown" and stale_by_time):
+                    after = os.stat(lock_path)
+                    if after.st_mtime_ns == before.st_mtime_ns and lock_path.read_bytes() == token_seen:
                         os.unlink(lock_path)
-                        continue  # retry immediately after stealing a stale lock
-                except OSError:
-                    continue  # lock vanished between checks — retry
-                if waited >= timeout:
-                    logger.warning(
-                        "Lock acquisition timed out for %s; proceeding best-effort.",
-                        session_id,
-                    )
-                    break
-                await asyncio.sleep(poll)
-                waited += poll
+                        stole = True
+            except OSError:
+                pass  # lock vanished mid-check — fall through to retry (counts vs budget)
+            if stole:
+                continue  # freed it — retry the create immediately
+            if waited >= timeout:
+                raise TimeoutError(
+                    f"Could not acquire the per-session lock for '{session_id}' "
+                    f"within {timeout}s; another writer is holding it. Refusing "
+                    "to write unlocked (fail-closed) to protect provenance "
+                    "integrity. Retry, or investigate a stuck/leaked lock file."
+                )
+            await asyncio.sleep(poll)
+            waited += poll
         try:
             yield
         finally:
@@ -154,6 +239,17 @@ class JsonFileStorage(TraceStorage):
             raise FileNotFoundError(f"Session not found: {session_id}")
         with open(path) as f:
             raw = json.load(f)
+        file_version = raw.get("trace_version") if isinstance(raw, dict) else None
+        if _is_future_schema_version(file_version):
+            logger.warning(
+                "Session %s declares schema version %s, newer than this server's "
+                "%s. Unknown fields are preserved (extra='allow'), but this server "
+                "may not understand newer semantics — upgrade trace-mcp to read it "
+                "fully.",
+                session_id,
+                file_version,
+                SCHEMA_VERSION,
+            )
         return Session.model_validate(raw)
 
     async def list_sessions(self, project: str | None = None, limit: int = 50) -> list[dict[str, Any]]:

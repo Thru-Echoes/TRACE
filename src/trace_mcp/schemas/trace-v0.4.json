@@ -1,6 +1,7 @@
 {
   "$defs": {
     "Actor": {
+      "additionalProperties": true,
       "description": "Who performed an action.",
       "properties": {
         "type": {
@@ -37,6 +38,7 @@
       "type": "object"
     },
     "AnnotationData": {
+      "additionalProperties": true,
       "description": "Free-form observations, learnings, gotchas, corrections, todos.",
       "properties": {
         "category": {
@@ -87,6 +89,7 @@
       "type": "object"
     },
     "ContributionData": {
+      "additionalProperties": true,
       "description": "Records a contribution with direction-vs-execution attribution.\n\nCaptures who had the idea (direction) vs who did the work (execution),\nlinking back to the decisions that motivated this contribution.",
       "properties": {
         "description": {
@@ -147,6 +150,7 @@
       "type": "object"
     },
     "DecisionData": {
+      "additionalProperties": true,
       "description": "Records a decision with full attribution and resolution status.",
       "properties": {
         "description": {
@@ -302,6 +306,7 @@
       "type": "object"
     },
     "EventContext": {
+      "additionalProperties": true,
       "description": "Shared context attached to any event.",
       "properties": {
         "conversation_turn": {
@@ -352,6 +357,7 @@
       "type": "object"
     },
     "SessionMetadata": {
+      "additionalProperties": true,
       "description": "Descriptive metadata for a session.",
       "properties": {
         "project": {
@@ -432,6 +438,7 @@
       "type": "object"
     },
     "StateChangeData": {
+      "additionalProperties": true,
       "description": "Records a change in environment, configuration, or tools.",
       "properties": {
         "description": {
@@ -478,6 +485,7 @@
       "type": "object"
     },
     "ToolCallData": {
+      "additionalProperties": true,
       "description": "Records a tool or service invocation (MCP, external non-MCP, or host-internal).",
       "properties": {
         "server": {
@@ -604,6 +612,7 @@
       "type": "object"
     },
     "TraceEvent": {
+      "additionalProperties": true,
       "description": "A single audit event. The core unit of TRACE.",
       "properties": {
         "id": {
@@ -702,6 +711,7 @@
       "type": "object"
     }
   },
+  "additionalProperties": true,
   "description": "JSON Schema for a session document conforming to the Decision Provenance for AI-Assisted Workflows specification v0.4.1. See: https://trace-protocol.org/v0.3 (namespace URI kept at v0.3# per ADR 002 D6 \u2014 additive extensions are valid within the same namespace).",
   "properties": {
     "context": {

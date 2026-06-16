@@ -6,7 +6,6 @@ import platform
 import re
 import sys
 import uuid
-from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import Any
 
@@ -14,6 +13,7 @@ from pydantic import BaseModel, Field
 
 from trace_mcp.schema import Actor, Environment, Session, SessionMetadata, TraceEvent
 from trace_mcp.storage.base import TraceStorage
+from trace_mcp.storage.locked import locked_disk_session
 
 # ── Attribution Audit Models ─────────────────────────────────────────────
 
@@ -295,7 +295,7 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
                 window_start = e.timestamp - discovery_window
                 has_anchor = any(
                     window_start <= ts <= e.timestamp
-                    for _id, ts in discovery_anchors
+                    for _, ts in discovery_anchors
                 )
                 if not has_anchor:
                     orphan_discovery_ids.append(e.id)
@@ -612,19 +612,14 @@ async def end_session(
     # the per-session lock, reloading authoritative on-disk events first, so a
     # concurrent append landing between read and write is preserved (not
     # clobbered) and the immutability guard sees disk truth.
-    lock_factory = getattr(storage, "lock", None)
-    lock_cm = lock_factory(session_id) if lock_factory is not None else nullcontext()
-    async with lock_cm:
-        try:
-            disk = await storage.get_session(session_id)
+    async with locked_disk_session(storage, session_id, fallback=session) as disk:
+        if disk is not session:
             if disk.status == "completed":
                 return (
                     f"Error: Session '{session_id}' already ended at {disk.ended}. "
                     f"Completed sessions are immutable and cannot be ended again."
                 )
             session.events = disk.events
-        except FileNotFoundError:
-            pass  # brand-new session, not yet persisted
         session.ended = datetime.now(UTC)
         session.status = "completed"
         session.summary = summary
@@ -746,25 +741,36 @@ async def append_event(
             f"Session ended at {session.ended}. Start a new session instead."
         )
 
-    lock_factory = getattr(storage, "lock", None)
-    lock_cm = lock_factory(session.id) if lock_factory is not None else nullcontext()
-    async with lock_cm:
+    async with locked_disk_session(storage, session.id, fallback=session) as disk:
         # Reload authoritative on-disk state so we never clobber events another
-        # writer persisted since this Session was last read.
-        try:
-            disk = await storage.get_session(session.id)
+        # writer persisted since this Session was last read. `disk is session`
+        # only when nothing is persisted yet (brand-new session).
+        if disk is not session:
             if disk.status == "completed":
                 raise ValueError(
                     f"Cannot append events to completed session '{session.id}'. "
                     f"Session ended at {disk.ended}. Start a new session instead."
                 )
             session.events = disk.events
-        except FileNotFoundError:
-            pass  # brand-new session, not yet persisted
 
         if not event.id:
             event.id = session.next_event_id()
         event.session_id = session.id
+
+        # PR D #2: refuse to mint/accept an id that already exists in the
+        # reloaded on-disk session. A positional next_event_id() can only
+        # collide if the record is already aliased (e.g. after a pre-fix
+        # unlocked write left two events sharing an id); writing another event
+        # under that id would silently alias revises_event_id / parent_event_id
+        # / corrects_event_ids references. Fail loudly instead of corrupting.
+        if any(e.id == event.id for e in session.events):
+            raise ValueError(
+                f"Refusing to append event with duplicate id '{event.id}' in "
+                f"session '{session.id}': that id already exists on disk. This "
+                f"indicates an aliased/corrupted session record — writing under "
+                f"the same id would alias references. Investigate the session "
+                f"file rather than appending."
+            )
 
         # FM13/FM16/FM17: validate referential integrity against the merged state.
         ref_errors = _check_referential_integrity(session, event)
