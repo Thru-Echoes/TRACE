@@ -4,7 +4,6 @@
 > **Formal specification**: [docs/specification.md](docs/specification.md)
 > **Version**: 0.4.2 (package) · protocol/schema v0.4.1
 > **TRACE project name**: "trace-mcp"
-> **Product / IP / talk-prep status (2026-05-05):** [`notes/2026-05-05-meeting-takeaways.md`](notes/2026-05-05-meeting-takeaways.md) — software-disclosure pending with Mike Cohen, LLC awaiting state, two IP lawyers referred by Heather Meeker, June 9 Berkeley Library talk locked.
 
 ---
 
@@ -72,19 +71,17 @@ registered invariant:**
    (`uv build && uv run pytest tests/test_packaging_artifacts.py`) — the dev
    `uvx --from <path>` launcher builds differently than the published wheel, which
    is how the C2 wheel bug hid until release.
-4. For a deep pass (pre-release / pre-JOSS / any storage or schema write-path
-   change), run the saved multi-agent review — `Workflow({name: "status-review"})`.
+4. For a deep pass (pre-release / before tagging / any storage or schema
+   write-path change), run the saved multi-agent review — `Workflow({name: "status-review"})`.
    It *mints* findings you then convert into guards; it is not the recurring
    safety net (that's tiers 1–2: `/code-review`, the invariant guard, CI).
 
 ## Project Rules
 
 - `.claude/rules/python-quality.md` — Code style, type checking, linting
-- `.claude/rules/manuscript.md` — Literature audit rubric and paper conventions (activates for `manuscript/**/*`)
 
 ## Skills
 
-- `/lit-audit` — Code papers against the TRACE literature audit rubric
 - `/trace-session` — Start a new TRACE session with standard boilerplate
 
 ## TRACE Protocol
