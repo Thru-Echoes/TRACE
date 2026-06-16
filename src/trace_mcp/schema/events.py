@@ -8,9 +8,9 @@ import warnings
 from datetime import UTC, datetime
 from typing import Any, Literal, Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import Field, model_validator
 
-from trace_mcp.schema.session import Actor
+from trace_mcp.schema.session import Actor, TraceModel
 
 # Canonical enum value-sets (single source of truth; server.py imports these
 # for the MCP tool signatures so the protocol edge can never drift from the
@@ -25,7 +25,7 @@ AnnotationCategory = Literal[
 ContributionAttribution = Literal["human", "ai", "collaborative"]
 
 
-class EventContext(BaseModel):
+class EventContext(TraceModel):
     """Shared context attached to any event."""
 
     conversation_turn: int | None = None
@@ -34,7 +34,7 @@ class EventContext(BaseModel):
     related_event_ids: list[str] = Field(default_factory=list)
 
 
-class ToolCallData(BaseModel):
+class ToolCallData(TraceModel):
     """Records a tool or service invocation (MCP, external non-MCP, or host-internal)."""
 
     server: str
@@ -52,7 +52,7 @@ class ToolCallData(BaseModel):
     parent_event_id: str | None = None
 
 
-class DecisionData(BaseModel):
+class DecisionData(TraceModel):
     """Records a decision with full attribution and resolution status."""
 
     description: str
@@ -79,7 +79,7 @@ class DecisionData(BaseModel):
         return self
 
 
-class AnnotationData(BaseModel):
+class AnnotationData(TraceModel):
     """Free-form observations, learnings, gotchas, corrections, todos."""
 
     category: AnnotationCategory
@@ -89,7 +89,7 @@ class AnnotationData(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
-class ContributionData(BaseModel):
+class ContributionData(TraceModel):
     """Records a contribution with direction-vs-execution attribution.
 
     Captures who had the idea (direction) vs who did the work (execution),
@@ -104,7 +104,7 @@ class ContributionData(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
-class StateChangeData(BaseModel):
+class StateChangeData(TraceModel):
     """Records a change in environment, configuration, or tools."""
 
     description: str
@@ -114,7 +114,7 @@ class StateChangeData(BaseModel):
     reason: str | None = None
 
 
-class TraceEvent(BaseModel):
+class TraceEvent(TraceModel):
     """A single audit event. The core unit of TRACE."""
 
     id: str = ""

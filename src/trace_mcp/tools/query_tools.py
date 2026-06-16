@@ -2,13 +2,19 @@
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
+
 import trace_mcp
 from trace_mcp.schema import Session
 from trace_mcp.storage.base import TraceStorage
+
+logger = logging.getLogger(__name__)
 
 # v0.4.2 Phase 3: HARD payload caps. Unbounded query results are the primary
 # context-bloat surface compounding the API-400 crash. These ceilings bind even
@@ -242,11 +248,21 @@ async def project_summary(
     session_summaries = await storage.list_sessions(project=project, limit=scan_cap)
     scan_truncated = len(session_summaries) >= scan_cap
     sessions: list[Session] = []
+    skipped_sessions: list[str] = []
     for s in session_summaries:
         try:
             sessions.append(await storage.get_session(s["id"]))
         except FileNotFoundError:
             continue
+        except (ValidationError, json.JSONDecodeError) as exc:
+            # PR D #3: a schema-invalid / corrupt record must not abort the
+            # whole aggregate. Skip it, LOG it (so the omission isn't silent),
+            # and report it so paper-ready stats stay honest, not silently
+            # wrong. (JSON-corrupt files are already pre-filtered by
+            # list_sessions, so in practice this catches schema-invalid
+            # valid-JSON records.)
+            logger.warning("project_summary(%s): skipping unreadable session %s: %s", project, s["id"], exc)
+            skipped_sessions.append(s["id"])
 
     total_events = 0
     events_by_type: dict[str, int] = {}
@@ -323,6 +339,7 @@ async def project_summary(
     return {
         "project": project,
         "session_count": len(sessions),
+        "skipped_sessions": skipped_sessions,
         "scan_truncated": scan_truncated,
         "total_events": total_events,
         "events_by_type": events_by_type,
@@ -380,12 +397,16 @@ async def health_check(
 
     # Load sessions (bounded: read at most scan_cap most-recent files).
     sessions: list[Session] = []
+    skipped_sessions: list[str] = []
     scan_truncated = False
     if session_id:
         try:
             sessions.append(await storage.get_session(session_id))
         except FileNotFoundError:
             pass
+        except (ValidationError, json.JSONDecodeError) as exc:
+            logger.warning("health_check: skipping unreadable session %s: %s", session_id, exc)
+            skipped_sessions.append(session_id)
     else:
         summaries = await storage.list_sessions(project=project, limit=scan_cap)
         scan_truncated = len(summaries) >= scan_cap
@@ -394,6 +415,11 @@ async def health_check(
                 sessions.append(await storage.get_session(s["id"]))
             except FileNotFoundError:
                 continue
+            except (ValidationError, json.JSONDecodeError) as exc:
+                # PR D #3: skip-and-report (and log) a schema-invalid/corrupt
+                # record rather than aborting the health probe entirely.
+                logger.warning("health_check: skipping unreadable session %s: %s", s["id"], exc)
+                skipped_sessions.append(s["id"])
 
     # Tally events
     total = 0
@@ -416,6 +442,7 @@ async def health_check(
         },
         "session_count": len(sessions),
         "sessions_scanned": len(sessions),
+        "skipped_sessions": skipped_sessions,
         "scan_truncated": scan_truncated,
         "project_filter": project,
         "session_filter": session_id,
