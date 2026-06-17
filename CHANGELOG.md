@@ -7,6 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Integrity hardening (PR D)
+
+- **The per-session lock now fails closed.** On lock-acquisition timeout,
+  `JsonFileStorage.lock` previously logged to stderr and proceeded **unlocked**,
+  silently reopening the lost-update / duplicate-event-id window the lock exists
+  to close. It now raises `TimeoutError` (surfaced to the MCP caller as a
+  structured error) — a missed lock is visible, never silent. Stale-lock theft
+  is keyed on **holder PID liveness** (single-host) with a `<pid>:<time_ns>`
+  token re-verified before unlink, so a live long-running holder's lock is never
+  stolen and a crashed holder's lock is reclaimed at once. **Behavior change:**
+  session writes can now surface a lock-timeout error rather than degrading to an
+  unsynchronized write.
+- **`append_event` refuses to mint a duplicate event id** instead of silently
+  aliasing `revises_event_id` / `parent_event_id` / `corrects_event_ids`
+  references when the on-disk record is already in an aliased state.
+- **One schema-invalid session file no longer bricks the read aggregates.**
+  `trace_project_summary` and `trace_health_check` now catch per-session
+  `ValidationError` / `JSONDecodeError`, log and skip the bad record, and return
+  the skipped ids in a new **`skipped_sessions`** list — instead of aborting the
+  whole aggregate on one bad file. **Behavior change:** both tools' return dicts
+  gain a `skipped_sessions: list[str]` key.
+- **Forward-compatible schema (no silent field-stripping).** Schema models now
+  preserve unknown fields (`extra="allow"` via a shared `TraceModel` base), so an
+  older server that loads a newer-schema session and rewrites it no longer
+  durably deletes fields it did not recognize; `get_session` logs a version-skew
+  warning. `Environment` intentionally stays closed (legacy-field drop). The
+  generated JSON Schema now carries `additionalProperties: true` on those models.
+- **Consolidated the three session write paths** (`append_event`, `end_session`,
+  `resolve_decision`) onto a single `locked_disk_session` helper (the deferred
+  PR #10 consolidation) so "write under the fail-closed lock against disk truth"
+  is one implementation. Registered as **INV-1** in the new `docs/INVARIANTS.md`.
+
 ### Fixed
 
 - **Wheels built from the sdist were missing 7 runtime files** (`py.typed` and

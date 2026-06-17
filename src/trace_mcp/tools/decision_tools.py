@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import os
-from contextlib import nullcontext
 from datetime import UTC, datetime
 from typing import get_args
 
 from trace_mcp.schema import Actor, DecisionData, DecisionDisposition, Session, TraceEvent
 from trace_mcp.storage.base import TraceStorage
+from trace_mcp.storage.locked import locked_disk_session
 from trace_mcp.tools.session_tools import append_event
 
 # Terminal dispositions a proposed decision may transition to. Derived from
@@ -92,16 +92,11 @@ async def resolve_decision(
     # append/resolve persisted since the caller loaded its Session is neither
     # clobbered nor judged from stale state (e.g. is_multi_actor on a copy
     # that is missing a concurrently-appended actor).
-    lock_factory = getattr(storage, "lock", None)
-    lock_cm = lock_factory(session.id) if lock_factory is not None else nullcontext()
-    async with lock_cm:
-        # Write back the disk-loaded object (not the caller's in-memory copy)
-        # so a stale in-memory status/metadata can't clobber disk state —
-        # e.g. resurrect a session completed by another process (H1).
-        try:
-            write_session = await storage.get_session(session.id)
-        except FileNotFoundError:
-            write_session = session  # not yet persisted; in-memory is authoritative
+    # The helper yields the disk-loaded object (not the caller's in-memory copy)
+    # so a stale in-memory status/metadata can't clobber disk state — e.g.
+    # resurrect a session completed by another process (H1) — and acquires the
+    # fail-closed per-session lock (INV-1).
+    async with locked_disk_session(storage, session.id, fallback=session) as write_session:
         target = next(
             (e for e in write_session.events if e.id == event_id and e.type == "decision"),
             None,
