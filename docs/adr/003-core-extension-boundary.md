@@ -7,15 +7,15 @@
 TRACE's identity is **decision provenance**. The `trace-learn` extension
 (cross-session knowledge: recall, dedup, decay, and the planned Tier-3
 RL-style feedback loop + cross-project knowledge) is valuable and likely
-popular, but it is *not* the core thesis. Round-1/2/3 of the 2026-05-18
-quality review found this boundary was asserted only in a single
+popular, but it is *not* the core thesis. A multi-round quality review
+found this boundary was asserted only in a single
 under-scoped CONTRIBUTING line and — worse — was **violated in `main`**:
 `tools/query_tools.py` hard-imported `trace_mcp.extensions.learn`
 unguarded, so deleting the extension broke the core tool
-`trace_project_summary` (finding G2). The user set an explicit governance
-constraint (TRACE session `trace_20260518_5dd958`, decision **`evt_002`**)
-that adaptive learning must remain a strict optional extension with no
-scope creep into core.
+`trace_project_summary`. The user set an explicit governance
+constraint — the core/extension boundary decision — that adaptive
+learning must remain a strict optional extension with no scope creep
+into core.
 
 ## Decision
 

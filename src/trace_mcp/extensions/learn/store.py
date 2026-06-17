@@ -46,7 +46,7 @@ _warned_no_filelock = False
 def project_lock(project: str, directory: str | None = None) -> Iterator[None]:
     """Per-project cross-process lock around a load→mutate→save span.
 
-    P9(b) / Round-3 amendment A-R3-2. The shared knowledge store is
+    The shared knowledge store is
     read-modify-write; without a lock, two TRACE sessions mutating the
     SAME project concurrently silently lose one update (last-writer-wins).
     The lock is keyed per-project (not whole-directory) so unrelated
@@ -315,7 +315,7 @@ def save_embeddings_cache(store: KnowledgeStore, directory: str | None = None) -
             matrix[i] = lrn.embedding
 
     path = _embeddings_cache_path(store.project, directory)
-    # P9(c) / Round-3 A-R3-8: atomic write — a crash or a concurrent reader
+    # Atomic write — a crash or a concurrent reader
     # must never observe a torn .npy sidecar. Mirrors the temp + os.replace
     # atomic pattern used for the JSON store. Same-directory temp guarantees
     # os.replace is an atomic rename on the same filesystem.

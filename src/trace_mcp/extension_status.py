@@ -7,7 +7,8 @@ Claude Code) at session start and recorded in the session JSON.
 
 Lives in core (not under ``extensions/``) and probes the OPTIONAL
 trace-learn extension defensively via guarded imports — this keeps the
-core/extension boundary intact (governance: TRACE decision evt_002) and
+core/extension boundary intact (the optional extension must never be a
+hard dependency of core; see docs/adr/003-core-extension-boundary.md) and
 makes the probe fail-safe: a status check must never break session start.
 """
 

@@ -66,7 +66,7 @@ def _is_explicit_absence(s: str | None) -> bool:
 
 
 # v0.4.1: phrase list for orphan-discovery hint detector (spec §3.7 + §8.1).
-# Tightened in the v0.4.1 remediation (P4 / A8): dropped the over-broad
+# Tightened in the v0.4.1 remediation: dropped the over-broad
 # "turned out" (false-positive on routine prose like "turned out cleaner").
 # The remaining phrases are technical-discovery markers that strongly
 # suggest a load-bearing finding that should have been its own
@@ -97,8 +97,9 @@ class AttributionAudit(BaseModel):
     unlinked_correction_count: int = 0
     warnings: list[str] = Field(default_factory=list)
 
-    # v0.4.1: extended audit fields surfacing the silent-warning failures
-    # from the waggle audit. Default 0 keeps the model backward-compatible.
+    # v0.4.1: extended audit fields surfacing silent-warning failures (warnings
+    # that were computed but never reported). Default 0 keeps the model
+    # backward-compatible.
     missing_snippet_contribution_count: int = 0
     missing_snippet_correction_count: int = 0
     explicit_absence_snippet_count: int = 0
@@ -223,7 +224,8 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
 
     v0.4.1: extended with snippet coverage counts, structural attribution
     warning, orphan-discovery hint, and dispatch-visibility hint. All new
-    metrics surface the silent-warning failures the waggle audit identified.
+    metrics surface silent-warning failures (warnings computed but never
+    reported) that a production-session audit identified.
     """
     from datetime import timedelta
 
@@ -276,7 +278,7 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
                 description_preview=desc,
             ))
 
-            # v0.4.1 L5.3: count contributions missing conversation_snippet.
+            # v0.4.1: count contributions missing conversation_snippet.
             # explicit_absence markers count separately so honest absences
             # (no user message during autonomous stretch) aren't penalized.
             snip = e.context.conversation_snippet
@@ -285,7 +287,7 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
             elif _is_explicit_absence(snip):
                 explicit_absence_snippet += 1
 
-            # v0.4.1 L5.5: orphan-discovery hint. If this contribution's
+            # v0.4.1: orphan-discovery hint. If this contribution's
             # description contains a discovery phrase but no
             # discovery/correction/gotcha annotation exists within 30 min
             # before this contribution, the discovery was likely logged
@@ -315,7 +317,7 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
             elif d.disposition == "revised":
                 revised.append(e)
 
-            # FM1/FM9: Track unresolved and (ai-only) self-resolved decisions
+            # Track unresolved and (ai-only) self-resolved decisions
             if d.disposition == "proposed":
                 unresolved_ids.append(e.id)
             elif d.resolved_by:
@@ -323,15 +325,17 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
                 if d.proposed_by.type == d.resolved_by.type == "ai":
                     self_resolved_ids.append(e.id)
 
-                # v0.4.1 L5.4 + Round-3 A1 / evt_016: STRUCTURAL
+                # v0.4.1 multi-actor refinement (see
+                # docs/adr/002-v041-protocol-additions.md): STRUCTURAL
                 # attribution-warning detector. Same-instance self-resolution
                 # (type AND id), gated to MULTI-ACTOR sessions (≥2 actor
-                # types). Catches the evt_025 pattern (human-proposes plan,
-                # human-accepts) in a real multi-actor workflow, while not
-                # false-firing on single-actor sessions (solo human, ai→ai
-                # solo, system→system) — the false positive A1 named with
-                # production data. ai→ai is still surfaced separately and
-                # unconditionally via self_resolved_ids above.
+                # types). Catches the pattern where one actor both proposes a
+                # plan and accepts it (e.g. human-proposes, human-accepts) in a
+                # real multi-actor workflow, while not false-firing on
+                # single-actor sessions (solo human, ai→ai solo, system→system)
+                # — the false positive the gating addresses. ai→ai is still
+                # surfaced separately and unconditionally via self_resolved_ids
+                # above.
                 if (
                     d.proposed_by.type == d.resolved_by.type
                     and d.proposed_by.id == d.resolved_by.id
@@ -341,11 +345,11 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
 
         elif e.type == "annotation" and e.annotation and e.annotation.category == "correction":
             corrections.append(e)
-            # FM17: Correction without corrects_event_ids
+            # Correction without corrects_event_ids
             if not e.annotation.corrects_event_ids:
                 unlinked_correction_count += 1
 
-            # v0.4.1 L5.3: count corrections missing conversation_snippet.
+            # v0.4.1: count corrections missing conversation_snippet.
             snip = e.context.conversation_snippet
             if snip is None:
                 missing_snippet_correction += 1
@@ -381,10 +385,10 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
             f"{unlinked_correction_count} correction(s) lack corrects_event_ids — "
             "link them for full provenance."
         )
-    # P4 / A8: orphan-discovery is surfaced ONLY as the low-severity
+    # Orphan-discovery is surfaced ONLY as the low-severity
     # `orphan_discovery_hint_count` (rendered separately). It is deliberately
     # NOT pushed into `audit_warnings` — duplicating a heuristic signal at
-    # warning severity over-weighted it (Round-1/2/3 finding).
+    # warning severity over-weighted it.
     if missing_snippet_contribution or missing_snippet_correction:
         parts3: list[str] = []
         if missing_snippet_contribution:
@@ -396,8 +400,8 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
             "Set to the user message or use '<autonomous-stretch>' to mark explicit absence."
         )
 
-    # v0.4.1 L5.6: dispatch-visibility hint (advisory only, no counter).
-    # Raised threshold per Round 3 amendment A3 — production sessions
+    # v0.4.1: dispatch-visibility hint (advisory only, no counter).
+    # Threshold raised by a later refinement — production sessions
     # routinely have 0 tool_call events, so a low threshold would generate
     # permanent noise. Guard against missing environment for legacy sessions.
     env = session.metadata.environment
@@ -573,7 +577,8 @@ async def start_session(
 
     path = storage._session_path(session.id) if hasattr(storage, "_session_path") else "disk"  # type: ignore[attr-defined]
     # Core-level, fail-safe probe of the OPTIONAL trace-learn extension
-    # (keeps the core/extension boundary intact — governance evt_002).
+    # (keeps the core/extension boundary intact — see
+    # docs/adr/003-core-extension-boundary.md).
     from trace_mcp.extension_status import get_extension_status
 
     return (
@@ -699,7 +704,7 @@ def _check_referential_integrity(
     # v0.4.1: parent_event_id on tool_call must point to a real event in the
     # session (the controller-side event that motivated the dispatch). Without
     # this check, PROV-LD's wasInformedBy edges could silently point at
-    # nonexistent events — Verifier C correctly flagged this gap.
+    # nonexistent events.
     if event.tool_call and event.tool_call.parent_event_id:
         ids_to_check.append((event.tool_call.parent_event_id, "parent_event_id"))
 
@@ -732,7 +737,8 @@ async def append_event(
     without a ``lock`` degrade to a no-op context (no behaviour change).
 
     Raises ValueError if the session is already completed (immutability guard)
-    or if event references point to nonexistent events (FM13/FM16/FM17).
+    or if event references point to nonexistent events (referential-integrity
+    check).
     """
     # Fast-path guard on the in-memory view.
     if session.status == "completed":
@@ -772,7 +778,7 @@ async def append_event(
                 f"file rather than appending."
             )
 
-        # FM13/FM16/FM17: validate referential integrity against the merged state.
+        # Validate referential integrity against the merged state.
         ref_errors = _check_referential_integrity(session, event)
         if ref_errors:
             raise ValueError(

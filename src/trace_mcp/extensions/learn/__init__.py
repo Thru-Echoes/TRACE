@@ -100,10 +100,10 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         tags: list[str] | None,
         limit: int,
     ) -> list[dict]:
-        # P9(b) / A-R3-2: lock the full load→embed→save RMW span. This is
+        # Lock the full load→embed→save read-modify-write span. This is
         # the highest-frequency knowledge-store mutator (core auto-recall);
         # leaving it unlocked allowed a concurrent locked add to be
-        # clobbered (lost-update — caught by the final-gate reviewers).
+        # clobbered (a lost update).
         with store.project_lock(project):
             ks = store.load_store(project)
             if not ks.learnings:
@@ -124,7 +124,7 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             return results
 
     async def _extract_hook(project: str, session_id: str) -> list[str]:
-        with store.project_lock(project):  # P9(b) / A-R3-2
+        with store.project_lock(project):  # lock the full read-modify-write span
             ks = store.load_store(project)
             sess = await storage.get_session(session_id)
             new_ids = await extraction.extract_from_session_auto(ks, sess, _config)
@@ -154,7 +154,7 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         When threshold is None, uses the backend's default (BM25: 0.15, LLM: 0.2).
         """
         try:
-            # P9(b) / A-R3-2: lock the full span (recall may backfill
+            # Lock the full span (recall may backfill
             # embeddings and save — a read-modify-write).
             with store.project_lock(project):
                 ks = store.load_store(project)
@@ -210,9 +210,9 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                 return json.dumps({
                     "error": f"Invalid category '{category}'. Must be one of: {_VALID_CATEGORIES}",
                 })
-            # P9(b) / Round-3 A-R3-2: lock the full load→mutate→save span
-            # so concurrent multi-session adds to the same project don't
-            # lose updates (last-writer-wins on the shared store).
+            # Lock the full load->mutate->save span so concurrent
+            # multi-session adds to the same project don't lose updates
+            # (last-writer-wins on the shared store).
             with store.project_lock(project):
                 ks = store.load_store(project)
                 if _config.dedup_enabled:
@@ -284,7 +284,7 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         Use this when a learning is outdated, wrong, or no longer relevant.
         """
         try:
-            with store.project_lock(project):  # P9(b) / A-R3-2
+            with store.project_lock(project):  # lock the full read-modify-write span
                 ks = store.load_store(project)
                 removed = store.remove_learning(ks, learning_id)
                 if not removed:
@@ -312,7 +312,7 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         Otherwise, extracts from all sessions for the project.
         """
         try:
-            # P9(b) / A-R3-2: lock the full multi-session extract→embed→save.
+            # Lock the full multi-session extract→embed→save span.
             with store.project_lock(project):
                 ks = store.load_store(project)
                 all_new_ids: list[str] = []

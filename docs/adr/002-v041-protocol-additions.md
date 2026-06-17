@@ -2,7 +2,7 @@
 
 **Status:** Accepted
 **Date:** 2026-05-14
-**Context:** Quality audit of session `trace_20260513_446733` (waggle project) surfaced five issues in TRACE's audit fidelity. Fix plan (`audit_2026-05-13_waggle_session/trace_v1_FINAL_fix_plan.md`) proposed ~65 items across 11 layers. This ADR documents the v0.4.1 release decisions; deferred items are tracked for later releases.
+**Context:** A quality audit of a production TRACE session surfaced five issues in TRACE's audit fidelity; the remediation plan proposed ~65 items across 11 layers. This ADR documents the v0.4.1 release decisions; deferred items are tracked for later releases.
 
 ---
 
@@ -27,17 +27,17 @@ The protocol stays in the 0.4.x family. Pre-v0.4.1 session files load unchanged 
 
 The v0.3 spec at §3.6 line 220 says "the actor who proposes a decision MUST NOT be the same instance that resolves it, when the workflow involves multiple actors." But the field semantics for `proposed_by` were never precise enough: when a human asks a question, an AI proposes a course of action, and the human accepts ("proceed"), is the proposer the human (who initiated the conversation) or the AI (who authored the proposal content)?
 
-The waggle audit's `evt_025` made this concrete: TRACE logged `proposed_by=human` even though the AI's words populated the entire `description` field. Three rounds of independent verification all concluded this was the dominant attribution failure mode.
+A real multi-actor session made this concrete: TRACE logged `proposed_by=human` even though the AI's words populated the entire `description` field. Independent verification concluded this was the dominant attribution failure mode.
 
-**Decision:** `proposed_by` MUST identify the actor who authored the CONTENT of the proposal (whose words populate `description`), regardless of who spoke last. A 4-row disambiguation table was added to spec §3.6 covering the canonical patterns. The rule is enforced at log time (FM1/FM25) AND at session-end (`attribution_warning_count` in `AttributionAudit`).
+**Decision:** `proposed_by` MUST identify the actor who authored the CONTENT of the proposal (whose words populate `description`), regardless of who spoke last. A 4-row disambiguation table was added to spec §3.6 covering the canonical patterns. The rule is enforced at proposal-resolution time AND at session-end (`attribution_warning_count` in `AttributionAudit`).
 
-**Amended 2026-05-18 (Round-3 A1 / decision `evt_016`):** the original v0.4.1 implementation generalized FM1 to *all* same-instance pairs unconditionally, which false-fired on legitimate single-actor sessions (solo human, `system→system`) — the exact false positive the waggle audit identified with production data. The generalized **non-`ai`** same-instance check now fires only when the session involves **≥2 distinct actor *types*** (union of `metadata.participants` and event actors; mirrored in `Session.is_multi_actor()` and the `decision-audit.sh` hook). The pre-existing v0.3 **`ai→ai`** self-resolution warning remains **unconditional** (AI must not resolve its own proposal regardless of actor count). Spec §3.6 ("when the workflow involves multiple actors") was already correct; only the implementation and this record were brought into line with it.
+**Amended 2026-05-18:** the original v0.4.1 implementation generalized the same-instance self-resolution check to *all* same-instance pairs unconditionally, which false-fired on legitimate single-actor sessions (solo human, `system→system`) — the exact false positive identified with production data. The generalized **non-`ai`** same-instance check now fires only when the session involves **≥2 distinct actor *types*** (union of `metadata.participants` and event actors; mirrored in `Session.is_multi_actor()` and the `decision-audit.sh` hook). The pre-existing v0.3 **`ai→ai`** self-resolution warning remains **unconditional** (AI must not resolve its own proposal regardless of actor count). Spec §3.6 ("when the workflow involves multiple actors") was already correct; only the implementation and this record were brought into line with it.
 
 **Considered and rejected:** adding a new field like `proposal_authored_by` separate from `proposed_by`. This would just shift the bug to a new location.
 
 ### D2: URI-form `corrects_event_ids` rather than new event types
 
-The audit's `evt_003` had `corrects_event_ids: []` because the corrected entity (a subagent's false claim) was not a TRACE event. The existing field semantics required event-ID references and `_check_referential_integrity` would reject anything else.
+A real correction had `corrects_event_ids: []` because the corrected entity (a subagent's false claim) was not a TRACE event. The existing field semantics required event-ID references and `_check_referential_integrity` would reject anything else.
 
 **Decision:** widen `corrects_event_ids` to accept URI-form references prefix-discriminated by `[a-z][a-z0-9-]+:`. Define `external:<uri>` as the normative universal fallback; `jsonl:`, `subagent:`, `tool-result:` as non-normative implementer examples. Carve out URI-form entries in `_check_referential_integrity` so they bypass in-session existence checking.
 
@@ -87,7 +87,7 @@ The audit's Issue 5 (42 uncaptured Agent dispatches) could be partially closed b
 
 ### D8: Three-round verification gates the release
 
-The fix plan was developed over multiple rounds of independent subagent verification. Each round identified gaps the previous round missed — Round 1 produced 10 findings, Round 2 produced 13 additional corrections, Round 3 produced 10 more amendments, and a Final Verifier round identified 7 more spec/test/installer fixes.
+The fix plan was developed over multiple rounds of independent verification, plus a final verifier pass. Each round identified gaps the previous round missed — corrections, amendments, and additional spec/test/installer fixes accumulated across the rounds, with each pass narrowing the remaining gap.
 
 **Decision:** establish three rounds of independent verification as the gate for the release. Document deferred items explicitly (in CHANGELOG, in HTML checklist, in this ADR). The discipline of "match implementation to CHANGELOG before push" is itself a release-quality contract that follows from the protocol's own "Never fabricate" rule.
 
@@ -99,7 +99,7 @@ The fix plan was developed over multiple rounds of independent subagent verifica
 
 **Adapter assets updated:**
 - `CLAUDE_BLOCK.md` (the block `trace-mcp-init` installs into consumer projects) now documents Proposer Identity Rule, URI-form references, discovery category, snippet absence markers, and subagent dispatch logging.
-- `decision-audit.sh` hook script generalizes the `ai`-only self-resolution check to non-`ai` same-instance pairs **in multi-actor sessions** (Round-3 A1 / `evt_016`; mirrors the server-side `Session.is_multi_actor()` guard — single-actor sessions are exempt), and surfaces the new audit fields (missing snippets, attribution warnings).
+- `decision-audit.sh` hook script generalizes the `ai`-only self-resolution check to non-`ai` same-instance pairs **in multi-actor sessions** (mirrors the server-side `Session.is_multi_actor()` guard — single-actor sessions are exempt), and surfaces the new audit fields (missing snippets, attribution warnings).
 
 **Delivered in this batch (originally listed as deferred):**
 - Schema file rename `schemas/trace-v0.3.json` → `schemas/trace-v0.4.json` with the `$id` cascade applied to `scripts/generate_schema.py`, `scripts/validate_session.py`, README, CONTRIBUTING, spec, and conformance tests. The PROV namespace URI and `Session.context` URL remain at v0.3 per D6.
@@ -111,8 +111,6 @@ The fix plan was developed over multiple rounds of independent subagent verifica
 
 ## References
 
-- Source audit: `audit_2026-05-13_waggle_session/trace_audit_findings.md`
-- Remediation plan: `audit_2026-05-13_waggle_session/trace_v1_FINAL_fix_plan.md`
-- Round 3 amendments: `audit_2026-05-13_waggle_session/trace_v1_round3_amendments.md`
+- These decisions derive from an attribution audit of a production TRACE session and its multi-round remediation plan.
 - Spec changes: `docs/specification.md` (sections 3.4.1, 3.5, 3.6, 3.7, 3.7.1, 4.4, 5.2, 6, 8.1, 8.2, Appendix B)
 - W3C PROV-O qualified influence pattern: https://www.w3.org/TR/prov-o/#qualifiedInfluence
