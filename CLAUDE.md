@@ -59,7 +59,7 @@ Correctness invariants are registered in [`docs/INVARIANTS.md`](docs/INVARIANTS.
 `tests/test_invariants.py` runs as a dedicated CI step and **fails when a new
 write path** (any `storage.update_session` caller) appears that is not registered
 and routed through `locked_disk_session`. This is the durable defense against the
-review's root finding — *an invariant enforced in one place but not uniformly.*
+recurring defect pattern — *an invariant enforced in one place but not uniformly.*
 
 **Before merging a change that touches a write/read path, packaging, or a
 registered invariant:**
@@ -69,8 +69,8 @@ registered invariant:**
    register it in `docs/INVARIANTS.md` + `INV1_REGISTERED_WRITERS`.
 3. For a release/packaging change, build and verify the *real* artifact
    (`uv build && uv run pytest tests/test_packaging_artifacts.py`) — the dev
-   `uvx --from <path>` launcher builds differently than the published wheel, which
-   is how the C2 wheel bug hid until release.
+   `uvx --from <path>` launcher builds differently than the published wheel, so a
+   missing-file packaging bug can stay hidden until release.
 4. For a deep pass (pre-release / before tagging / any storage or schema
    write-path change), run the saved multi-agent review — `Workflow({name: "status-review"})`.
    It *mints* findings you then convert into guards; it is not the recurring

@@ -44,7 +44,8 @@ jobs:
       - name: Build & verify distribution
         # Shared with ci.yml's `package` job — build + packaging-completeness
         # guards + leak guard + twine, in one place so PR-time and release-time
-        # verification can never diverge (the divergence that hid the C2 bug).
+        # verification cannot diverge (a divergence can let the wheel ship
+        # missing required runtime files).
         uses: ./.github/actions/build-and-verify-dist
 
       - name: Upload artifacts

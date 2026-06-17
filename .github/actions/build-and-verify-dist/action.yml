@@ -4,8 +4,9 @@ description: >
   packaging-completeness tests (py.typed + adapter assets present, tree↔wheel
   parity, clean-venv install), a private-file leak guard, and twine metadata
   check. Shared by ci.yml (every PR — so the release-only build path can never
-  again diverge from what PRs exercise, the gap that hid the C2 wheel bug) and
-  release.yml (before publish). Assumes uv is installed and deps are synced.
+  diverge from what PRs exercise, which is how a wheel can ship missing required
+  runtime files unnoticed) and release.yml (before publish). Assumes uv is
+  installed and deps are synced.
 
 runs:
   using: composite

@@ -1,12 +1,11 @@
 """Invariant enumeration guard — mechanically enforces docs/INVARIANTS.md.
 
-The 2026-06-10 review's root finding was that every serious defect had the same
-shape: *an invariant enforced in one place but not uniformly*. The durable fix
-for that defect CLASS is to name each invariant, enumerate its sites once, and
-fail CI the moment a NEW site violates it — so the gap can't silently reappear
-between expensive adversarial reviews. This generalizes the already-CI'd
-``tests/test_v041_core_extension_boundary.py`` (which guards the core/extension
-boundary the same way).
+Serious data-integrity defects in this codebase share one shape: *an invariant
+enforced in one place but not uniformly*. The durable fix for that defect CLASS
+is to name each invariant, enumerate its sites once, and fail CI the moment a
+NEW site violates it — so the gap cannot silently reappear between manual
+audits. This generalizes ``tests/test_v041_core_extension_boundary.py`` (already
+in CI), which guards the core/extension boundary the same way.
 
 These are static (AST) structural assertions over ``src/trace_mcp``; they pass
 on correct code and fail loudly when someone adds an unguarded write path or
