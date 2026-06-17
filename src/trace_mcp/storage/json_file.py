@@ -144,7 +144,7 @@ class JsonFileStorage(TraceStorage):
         pydantic). A lock older than ``steal_after`` is treated as stale (holder
         crashed) and stolen.
 
-        **Fail-closed (PR D):** if the lock cannot be acquired within
+        **Fail closed:** if the lock cannot be acquired within
         ``timeout`` we ``raise TimeoutError`` rather than proceed unlocked. An
         audit store must never silently degrade to an unsynchronized write —
         that reopens the lost-update / duplicate-evt_id window the lock exists

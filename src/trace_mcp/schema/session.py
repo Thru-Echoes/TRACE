@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 class TraceModel(BaseModel):
     """Base for TRACE schema models that PRESERVE unknown fields.
 
-    PR D #4 (forward-compatibility / schema-version gate): Pydantic v2's default
+    Forward-compatibility: Pydantic v2's default
     ``extra='ignore'`` silently DROPS unknown fields, so an older server that
     loads a newer-schema session and rewrites it durably DELETES every field it
     did not recognize — the documented upgrade path's silent-data-loss mode.
