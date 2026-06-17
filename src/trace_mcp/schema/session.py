@@ -8,10 +8,37 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from trace_mcp.schema.events import TraceEvent
+
+
+class TraceModel(BaseModel):
+    """Base for TRACE schema models that PRESERVE unknown fields.
+
+    PR D #4 (forward-compatibility / schema-version gate): Pydantic v2's default
+    ``extra='ignore'`` silently DROPS unknown fields, so an older server that
+    loads a newer-schema session and rewrites it durably DELETES every field it
+    did not recognize — the documented upgrade path's silent-data-loss mode.
+    ``extra='allow'`` round-trips unknown fields through ``model_dump`` so a
+    version-skewed read+write is non-destructive.
+
+    Tradeoff (accepted): preservation is unconditional — a typo'd optional-field
+    key survives as a ghost extra (the real field keeps its default) and any
+    unknown key in a session file is retained through ``model_dump`` and the
+    ``format="json"`` export. That is acceptable for a forward-compatible audit
+    record; it is NOT a guarantee the extras are meaningful. (PROV-LD export is
+    unaffected — it projects only known fields.)
+
+    ``Environment`` is intentionally NOT a ``TraceModel``: it relies on
+    ``extra='ignore'`` to drop the legacy ``environment.trace_version`` field
+    (the v0.4.1 single-source-of-truth decision). It is therefore a closed
+    forward-compat dead zone — future/extension environment data MUST go in
+    ``Environment.custom`` (a real field), not as ad-hoc extra keys.
+    """
+
+    model_config = ConfigDict(extra="allow")
 
 
 SCHEMA_VERSION = "0.4.1"
@@ -31,7 +58,7 @@ changes — never for a packaging/patch release. The spec namespace URL in
 ActorType = Literal["human", "ai", "system"]
 
 
-class Actor(BaseModel):
+class Actor(TraceModel):
     """Who performed an action."""
 
     type: ActorType
@@ -56,7 +83,7 @@ class Environment(BaseModel):
     custom: dict[str, Any] = Field(default_factory=dict)
 
 
-class SessionMetadata(BaseModel):
+class SessionMetadata(TraceModel):
     """Descriptive metadata for a session."""
 
     project: str
@@ -69,7 +96,7 @@ class SessionMetadata(BaseModel):
     custom: dict[str, Any] = Field(default_factory=dict)
 
 
-class Session(BaseModel):
+class Session(TraceModel):
     """Top-level audit session. One session = one TRACE JSON file."""
 
     context: str = "https://trace-protocol.org/v0.3"
