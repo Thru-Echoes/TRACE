@@ -46,7 +46,7 @@ async def log_tool_call(
     """
     warnings: list[str] = []
 
-    # FM22: Block logging TRACE's own tool calls
+    # Block logging TRACE's own tool calls
     server_lower = server.lower()
     tool_lower = tool_name.lower()
     if "trace" in server_lower or tool_lower.startswith("trace_"):
@@ -55,7 +55,7 @@ async def log_tool_call(
             "This event was logged but should be avoided."
         )
 
-    # FM23: Hint about exploratory tool calls
+    # Hint about exploratory tool calls
     # v0.4.1: scoped to host="mcp" only. Host-internal tools have their own
     # exploratory names (e.g., Claude Code's Read/Grep/Bash) and don't share
     # the MCP-side convention.
@@ -112,7 +112,7 @@ async def log_annotation(
     effective_corrects = corrects_event_ids or []
     effective_related = related_event_ids or []
 
-    # FM17: Correction without any anchor.
+    # Correction without any anchor.
     # v0.4.1: relaxed — only fires when BOTH corrects_event_ids AND
     # conversation_snippet are empty. A correction needs SOME anchor
     # (event ID, URI-form ref, or quoted snippet) per spec §5.2.
@@ -124,10 +124,11 @@ async def log_annotation(
             "(c) a conversation_snippet quoting the corrected statement. See spec §3.7.1."
         )
 
-    # FM17 co-occurrence (v0.4.1, new): when a correction has empty
+    # Co-occurrence check (v0.4.1, new): when a correction has empty
     # corrects_event_ids but non-empty related_event_ids, the related_event_ids
     # is likely being used as a workaround for the correction relationship.
-    # This is the evt_003 anti-pattern surfaced by the waggle audit.
+    # This is the anti-pattern of a correction with no corrects_event_ids and
+    # no anchor, where related_event_ids stands in for the correction link.
     if (
         category == "correction"
         and not effective_corrects
@@ -140,7 +141,7 @@ async def log_annotation(
             "the correction relationship. See spec §3.7.1."
         )
 
-    # FM5: Correction without conversation_snippet (v0.4.1 sharpened).
+    # Correction without conversation_snippet (v0.4.1 sharpened).
     if category == "correction" and conversation_snippet is None:
         warnings.append(
             "Correction logged without conversation_snippet. Set to the relevant "
@@ -149,7 +150,7 @@ async def log_annotation(
             "protocol violation per spec §3.4.1."
         )
 
-    # FM26: Gotcha with corrects_event_ids suggests reclassification
+    # Gotcha with corrects_event_ids suggests reclassification
     if category == "gotcha" and effective_corrects:
         warnings.append(
             "Gotcha logged with corrects_event_ids — consider whether this "
@@ -196,7 +197,7 @@ async def log_contribution(
     warnings: list[str] = []
     effective_decision_ids = related_decision_ids or []
 
-    # FM5: Missing conversation_snippet (v0.4.1 sharpened).
+    # Missing conversation_snippet (v0.4.1 sharpened).
     if conversation_snippet is None:
         warnings.append(
             "Contribution logged without conversation_snippet. Set to the relevant "
@@ -205,7 +206,7 @@ async def log_contribution(
             "protocol violation per spec §3.4.1."
         )
 
-    # FM3 (partial): No related_decision_ids.
+    # No related_decision_ids.
     # v0.4.1: demoted to fire only when the session actually has decisions.
     # If the session has zero decisions, "consider linking" is noise that
     # trains controllers to ignore the whole warning block.

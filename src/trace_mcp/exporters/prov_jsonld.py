@@ -7,8 +7,8 @@ PROV-O triples.
 
 History: v0.4.x originally emitted W3C *PROV-JSON* (a different
 serialization) under a JSON-LD ``@context`` — a conformant JSON-LD
-parser extracted **zero** triples from it. P5 / Round-3 A-R3-7 replaced
-that with this conformant node-object form (verified by an rdflib
+parser extracted **zero** triples from it; this was replaced with
+this conformant node-object form (verified by an rdflib
 round-trip test). Semantics are unchanged: the v0.4.1 correction split
 (event-ID target → ``prov:wasInvalidatedBy``; URI-form target →
 ``prov:qualifiedInfluence`` → a ``prov:Influence`` node bearing

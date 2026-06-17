@@ -176,10 +176,11 @@ def _compute_knowledge_metrics(project: str) -> dict[str, Any]:
     Returns total learnings, category breakdown, most-surfaced learnings,
     never-surfaced count, and average recall count.
 
-    Core/extension boundary (governance: TRACE decision evt_002): the
-    trace-learn extension is OPTIONAL. When it is absent, this fails open
-    with the zero sentinel so the core tool `trace_project_summary` stays
-    functional — `import` must never break a core tool.
+    Core/extension boundary (see docs/adr/003-core-extension-boundary.md):
+    the optional trace-learn extension must never be a hard dependency of a
+    core tool. When it is absent, this fails open with the zero sentinel so
+    the core tool `trace_project_summary` stays functional — `import` must
+    never break a core tool.
     """
     try:
         from trace_mcp.extensions.learn.store import load_store
@@ -389,8 +390,8 @@ async def health_check(
 
     # Knowledge dir is reported for diagnostics only. Compute it from the env
     # WITHOUT importing the trace-learn extension — core must not depend on the
-    # extension (HARD CONSTRAINT #1 / governance evt_002). This mirrors the
-    # extension's own default resolution.
+    # extension (HARD CONSTRAINT #1; see docs/adr/003-core-extension-boundary.md).
+    # This mirrors the extension's own default resolution.
     knowledge_dir = str(Path(os.environ.get("TRACE_KNOWLEDGE_DIR", "~/.trace/knowledge")).expanduser())
     knowledge_dir_exists = Path(knowledge_dir).is_dir()
 
