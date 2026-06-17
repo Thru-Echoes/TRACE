@@ -1,0 +1,39 @@
+name: Build & verify distribution
+description: >
+  Build the sdist + wheel and verify them the way a PyPI install would see them:
+  packaging-completeness tests (py.typed + adapter assets present, tree↔wheel
+  parity, clean-venv install), a private-file leak guard, and twine metadata
+  check. Shared by ci.yml (every PR — so the release-only build path can never
+  diverge from what PRs exercise, which is how a wheel can ship missing required
+  runtime files unnoticed) and release.yml (before publish). Assumes uv is
+  installed and deps are synced.
+
+runs:
+  using: composite
+  steps:
+    - name: Build sdist + wheel
+      shell: bash
+      run: uv build
+
+    - name: Packaging completeness guards (presence + tree↔wheel parity + clean-venv install)
+      shell: bash
+      run: uv run pytest tests/test_packaging_artifacts.py -q -p no:cov
+
+    - name: Leak guard — no private / cruft files in artifacts
+      shell: bash
+      run: |
+        set -euo pipefail
+        if tar tzf dist/*.tar.gz | grep -Eiq 'notes/|-handoff-|meeting-takeaways| 2\.(py|md|json)$'; then
+          echo "::error::Private notes / handoff dump / macOS duplicate leaked into the sdist"
+          tar tzf dist/*.tar.gz | grep -Ei 'notes/|-handoff-|meeting-takeaways| 2\.(py|md|json)$'
+          exit 1
+        fi
+        if uv run python -m zipfile -l dist/*.whl | grep -Eiq ' 2\.py'; then
+          echo "::error::macOS duplicate shipped in the wheel"
+          exit 1
+        fi
+        echo "Artifacts clean."
+
+    - name: Check metadata (twine)
+      shell: bash
+      run: uvx twine check dist/*

@@ -45,6 +45,9 @@ jobs:
       - name: Core/extension boundary invariant (governance ADR 003)
         run: uv run pytest tests/test_v041_core_extension_boundary.py -q -p no:cov
 
+      - name: Invariant registry guard (docs/INVARIANTS.md)
+        run: uv run pytest tests/test_invariants.py -q -p no:cov
+
       - name: Tests (with coverage)
         # COVERAGE_PROCESS_START points the spawned MCP server (test_e2e_server.py
         # runs `python -m trace_mcp.server` as a subprocess) at the coverage config
@@ -72,3 +75,27 @@ jobs:
           files: coverage.xml
           fail_ci_if_error: false
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  package:
+    # Build and verify the REAL sdist/wheel on every PR — not only at release.
+    # A wheel can ship missing required runtime files (e.g. py.typed + adapter
+    # assets) when the build path runs only on tag and never in PR CI. Shares
+    # the exact composite action release.yml uses, so the two cannot diverge.
+    name: Build & verify distribution
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+
+      - name: Sync dependencies
+        run: uv sync --all-extras
+
+      - name: Build & verify distribution
+        uses: ./.github/actions/build-and-verify-dist
