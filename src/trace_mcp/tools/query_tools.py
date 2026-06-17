@@ -255,12 +255,11 @@ async def project_summary(
         except FileNotFoundError:
             continue
         except (ValidationError, json.JSONDecodeError) as exc:
-            # PR D #3: a schema-invalid / corrupt record must not abort the
-            # whole aggregate. Skip it, LOG it (so the omission isn't silent),
-            # and report it so paper-ready stats stay honest, not silently
-            # wrong. (JSON-corrupt files are already pre-filtered by
-            # list_sessions, so in practice this catches schema-invalid
-            # valid-JSON records.)
+            # A schema-invalid / corrupt record must not abort the whole
+            # aggregate. Skip it, LOG it (so the omission isn't silent), and
+            # report it so the aggregate stats stay honest, not silently wrong.
+            # (JSON-corrupt files are already pre-filtered by list_sessions, so
+            # in practice this catches schema-invalid valid-JSON records.)
             logger.warning("project_summary(%s): skipping unreadable session %s: %s", project, s["id"], exc)
             skipped_sessions.append(s["id"])
 
@@ -416,8 +415,8 @@ async def health_check(
             except FileNotFoundError:
                 continue
             except (ValidationError, json.JSONDecodeError) as exc:
-                # PR D #3: skip-and-report (and log) a schema-invalid/corrupt
-                # record rather than aborting the health probe entirely.
+                # Skip-and-report (and log) a schema-invalid/corrupt record
+                # rather than aborting the health probe entirely.
                 logger.warning("health_check: skipping unreadable session %s: %s", s["id"], exc)
                 skipped_sessions.append(s["id"])
 
