@@ -6,8 +6,9 @@
 #
 # Detection logic generalized per spec §3.6 Proposer Identity Rule —
 # self-resolution check now fires on ANY same-instance pair (type AND
-# id match), not just ai→ai. Catches the evt_025 pattern (human→human
-# self-resolution in multi-actor session).
+# id match), not just ai→ai. This catches same-instance self-resolution
+# between non-ai actors (e.g. human→human in a multi-actor session), not
+# only the ai→ai case.
 
 SESSIONS_DIR="${TRACE_SESSIONS_DIR:-$HOME/.trace/sessions}"
 
@@ -35,12 +36,13 @@ except Exception:
 
 events = data.get("events", [])
 
-# Round-3 A1 / decision evt_016: multi-actor guard, mirroring server-side
-# Session.is_multi_actor(). Union of declared participants and observed
-# event actor *types*; the generalized (non-ai) same-instance warning only
-# fires when the session has >=2 distinct actor types. A single-actor
-# session (solo human, system->system) legitimately self-resolves and must
-# NOT be flagged (the false positive the audit named with production data).
+# Multi-actor guard, mirroring server-side Session.is_multi_actor()
+# (see docs/adr/002-v041-protocol-additions.md). Union of declared
+# participants and observed event actor *types*; the generalized (non-ai)
+# same-instance warning only fires when the session has >=2 distinct actor
+# types. A single-actor session (solo human, system->system) legitimately
+# self-resolves and must NOT be flagged — gating on multi-actor avoids that
+# false positive.
 _meta = data.get("metadata") or {}
 _actor_types = {
     (p or {}).get("type")
@@ -84,7 +86,7 @@ for e in events:
             if pb.get("type") == rb.get("type") == "ai":
                 ai_self_resolved += 1
             # v0.4.1 generalized: same (type, id) pair, gated to
-            # multi-actor sessions per Round-3 A1 / decision evt_016.
+            # multi-actor sessions (see docs/adr/002-v041-protocol-additions.md).
             if multi_actor and pb.get("type") == rb.get("type") and pb.get("id") == rb.get("id"):
                 same_instance_self_resolved += 1
 
@@ -93,7 +95,7 @@ for e in events:
             orphan_correction += 1
         # Missing snippet on a correction is a spec §3.4.1 MUST violation.
         # v0.4.1 amendment: also count whitespace-only / empty snippet as
-        # missing (closes the silent-bypass path Verifier C identified).
+        # missing — a blank snippet would otherwise silently pass this check.
         if snip is None or (not is_absence(snip) and not snip.strip()):
             missing_snippet_correction += 1
 

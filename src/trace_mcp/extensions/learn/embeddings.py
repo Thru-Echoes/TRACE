@@ -60,7 +60,7 @@ class EmbeddingProvider(Protocol):
     @property
     def dimensions(self) -> int:
         """Embedding vector dimensionality. Read-only so providers may
-        compute it lazily (P9(a)) without violating Protocol invariance;
+        compute it lazily without violating Protocol invariance;
         a concrete ``int`` attribute also satisfies this."""
         ...
 
@@ -107,15 +107,15 @@ class Model2VecEmbeddingProvider:
         if not _HAS_MODEL2VEC:
             raise RuntimeError("model2vec package is required for local embeddings")
         self.model_name = model_name
-        # P9(a): the StaticModel is loaded LAZILY on first embedding use, not
+        # The StaticModel is loaded LAZILY on first embedding use, not
         # at construction. The provider is built in the extension's
         # register() at server startup; eager loading meant every concurrent
         # session held a resident model (large idle RAM) and paid a
-        # cold-start latency (the FM7 E2E-flake root cause).
+        # cold-start latency (a root cause of E2E test flakiness).
         self._model: Any = None
 
     def _get_model(self) -> Any:
-        """Load and cache the StaticModel on first use (P9(a) lazy load)."""
+        """Load and cache the StaticModel on first use (lazy load)."""
         if self._model is None:
             from model2vec import StaticModel
 
