@@ -41,25 +41,12 @@ jobs:
       - name: Tests
         run: uv run pytest -q -k "not uvx and not Uvx"
 
-      - name: Build sdist + wheel
-        run: uv build
-
-      - name: Leak guard — no private/cruft files in artifacts
-        run: |
-          set -euo pipefail
-          if tar tzf dist/*.tar.gz | grep -Eiq 'notes/|-handoff-|meeting-takeaways| 2\.(py|md|json)$'; then
-            echo "::error::Private notes / handoff dump / macOS duplicate leaked into the sdist"
-            tar tzf dist/*.tar.gz | grep -Ei 'notes/|-handoff-|meeting-takeaways| 2\.(py|md|json)$'
-            exit 1
-          fi
-          if python -m zipfile -l dist/*.whl | grep -Eiq ' 2\.py'; then
-            echo "::error::macOS duplicate shipped in the wheel"
-            exit 1
-          fi
-          echo "Artifacts clean."
-
-      - name: Check metadata (twine)
-        run: uvx twine check dist/*
+      - name: Build & verify distribution
+        # Shared with ci.yml's `package` job — build + packaging-completeness
+        # guards + leak guard + twine, in one place so PR-time and release-time
+        # verification cannot diverge (a divergence can let the wheel ship
+        # missing required runtime files).
+        uses: ./.github/actions/build-and-verify-dist
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4

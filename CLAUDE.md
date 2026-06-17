@@ -4,7 +4,6 @@
 > **Formal specification**: [docs/specification.md](docs/specification.md)
 > **Version**: 0.4.2 (package) · protocol/schema v0.4.1
 > **TRACE project name**: "trace-mcp"
-> **Product / IP / talk-prep status (2026-05-05):** [`notes/2026-05-05-meeting-takeaways.md`](notes/2026-05-05-meeting-takeaways.md) — software-disclosure pending with Mike Cohen, LLC awaiting state, two IP lawyers referred by Heather Meeker, June 9 Berkeley Library talk locked.
 
 ---
 
@@ -12,11 +11,13 @@
 
 ```bash
 uv pip install -e ".[dev]"          # Install with dev dependencies
-uv run pytest                       # Run full test suite (880+ tests)
+uv run pytest                       # Run full test suite (950+ tests)
+uv run pytest tests/test_invariants.py       # Invariant-registry guard (docs/INVARIANTS.md) — fast
 uv run pytest -k llm                # Run real LLM integration tests
 uv run ruff check src/              # Lint
 uv run pyright src/                 # Type check
 python scripts/generate_schema.py   # Regenerate JSON Schema from Pydantic models
+uv build && uv run pytest tests/test_packaging_artifacts.py   # Verify the shipped wheel/sdist before tagging
 ```
 
 ### Key Patterns
@@ -28,6 +29,10 @@ python scripts/generate_schema.py   # Regenerate JSON Schema from Pydantic model
 - **FastMCP** `@mcp.tool()` needs parentheses
 - `asyncio_mode = "auto"` in pytest config for async tests
 - **Atomic writes** (temp file + `os.replace`) for all JSON writes — no `fcntl` dependency (cross-platform)
+- **Session writes go through `storage.locked.locked_disk_session`** — the single fail-closed, disk-truth read-modify-write path (INV-1, `docs/INVARIANTS.md`). Never hand-roll a lock block; never let a write proceed on a lock timeout.
+- **Fail closed on integrity primitives**: the per-session lock raises `TimeoutError` rather than writing unlocked; stale-lock theft is gated on holder-PID liveness. A missed lock must be *visible*, not silent.
+- **Read aggregates skip-and-report**: `project_summary`/`health_check` catch per-session `ValidationError`/`JSONDecodeError` and surface a `skipped_sessions` list rather than aborting the whole aggregate.
+- **Schema models preserve unknown fields** (`extra="allow"` via the `TraceModel` base) for forward-compat; `Environment` is the one closed exception (legacy `trace_version` drop).
 - `server.py` imports `__version__` from `trace_mcp` for startup log
 - **Line length**: 120 (ruff configured)
 
@@ -37,7 +42,7 @@ python scripts/generate_schema.py   # Regenerate JSON Schema from Pydantic model
 src/trace_mcp/
     server.py              # MCP server entry point (FastMCP) + extension loader
     scratchpad.py           # Session-end scratchpad generator
-    hooks.py               # Hook registry for extension ↔ core integration
+    extension_hooks.py     # Hook registry for extension ↔ core integration
     schema/                # Pydantic v2 models (Session, TraceEvent, etc.)
     storage/               # Abstract interface + JSON file backend
     tools/                 # MCP tool implementations (session, logging, decision, query, export)
@@ -47,14 +52,36 @@ src/trace_mcp/
 Extensions auto-discovered via `pkgutil.iter_modules` in `extensions/`. Each extension
 provides a `register(mcp, storage)` function.
 
+## Invariants & Pre-merge
+
+Correctness invariants are registered in [`docs/INVARIANTS.md`](docs/INVARIANTS.md)
+— one row per invariant with its exhaustive site-set and enforcing test.
+`tests/test_invariants.py` runs as a dedicated CI step and **fails when a new
+write path** (any `storage.update_session` caller) appears that is not registered
+and routed through `locked_disk_session`. This is the durable defense against the
+recurring defect pattern — *an invariant enforced in one place but not uniformly.*
+
+**Before merging a change that touches a write/read path, packaging, or a
+registered invariant:**
+
+1. Run the invariant guard — `uv run pytest tests/test_invariants.py`.
+2. If you add a session-write path, route it through `locked_disk_session` and
+   register it in `docs/INVARIANTS.md` + `INV1_REGISTERED_WRITERS`.
+3. For a release/packaging change, build and verify the *real* artifact
+   (`uv build && uv run pytest tests/test_packaging_artifacts.py`) — the dev
+   `uvx --from <path>` launcher builds differently than the published wheel, so a
+   missing-file packaging bug can stay hidden until release.
+4. For a deep pass (pre-release / before tagging / any storage or schema
+   write-path change), run the saved multi-agent review — `Workflow({name: "status-review"})`.
+   It *mints* findings you then convert into guards; it is not the recurring
+   safety net (that's tiers 1–2: `/code-review`, the invariant guard, CI).
+
 ## Project Rules
 
 - `.claude/rules/python-quality.md` — Code style, type checking, linting
-- `.claude/rules/manuscript.md` — Literature audit rubric and paper conventions (activates for `manuscript/**/*`)
 
 ## Skills
 
-- `/lit-audit` — Code papers against the TRACE literature audit rubric
 - `/trace-session` — Start a new TRACE session with standard boilerplate
 
 ## TRACE Protocol
