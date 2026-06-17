@@ -6,14 +6,14 @@ exists to protect. Each invariant lists its exact statement, the **exhaustive
 set of sites** where it must hold, the mechanism that enforces it, and the test
 that pins it.
 
-**Why this file exists.** The 2026-06-10 multi-agent review found that every
-serious defect had the same shape: *an invariant enforced in one place but not
+**Why this file exists.** Every serious data-integrity defect found in this
+codebase has had the same shape: *an invariant enforced in one place but not
 uniformly* (immutability on append/end but not resolve; validation at
 construction but bypassed on assignment; locking on the happy path but silently
 degrading on timeout). The durable fix for that defect *class* is to name each
 invariant, enumerate its sites once, and add a guard that fails when a new
-unguarded site appears. `tests/test_invariants.py` (added in the
-process-scaffolding work) mechanically checks the site-sets below.
+unguarded site appears. `tests/test_invariants.py` mechanically checks the
+site-sets below.
 
 > Status legend: **ENFORCED** = guard + test in place · **PARTIAL** = holds in
 > code but not yet mechanically guarded · **OPEN** = known gap, not yet fixed.
@@ -74,7 +74,7 @@ the parameter as a `Literal`.
 **Site:** `src/trace_mcp/tools/decision_tools.py :: resolve_decision`
 (`VALID_RESOLUTIONS` guard + `model_validate` round-trip).
 
-**Tests.** `tests/test_decision_integrity.py` (C1 brick scenario, Literal sweep).
+**Tests.** `tests/test_decision_integrity.py` (disposition-brick scenario, Literal sweep).
 
 ---
 
@@ -89,7 +89,7 @@ core query layer and in the adapter hooks. Today they disagree: core
 **Sites:** `src/trace_mcp/storage/json_file.py` (`list_sessions`,
 `session_brief`); `src/trace_mcp/adapters/claude_code/assets/hooks/*.sh`.
 
-**Status.** OPEN — verified still present on `main` (2026-06-16 review). The fix
+**Status.** OPEN — still present on `main`. The fix
 (make core exact, or an explicit `exact=` flag defaulting to exact) is tracked
 as a follow-up; `tests/test_invariants.py` should fail until the two layers
 share one predicate.

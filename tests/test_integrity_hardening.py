@@ -1,7 +1,6 @@
-"""PR D — integrity-hardening cluster regression tests.
+"""Regression tests for the session write/read data-integrity properties.
 
-Covers the four still-open core-integrity findings re-verified against main on
-2026-06-16 (post PRs #10/#11/#12), per the accepted decision evt_002:
+Cover four properties of the session storage paths:
 
   #1  The per-session lock must FAIL CLOSED on timeout (raise) instead of
       silently yielding unlocked, and the stale-lock steal must verify an
@@ -15,9 +14,9 @@ Covers the four still-open core-integrity findings re-verified against main on
   #4  Loading a future-schema-version session must not silently strip and
       durably delete unknown fields on the next rewrite.
 
-The final section covers the PR-D adversarial-review hardening round (lock
-holder-liveness steal, true timeout ceiling, extra='allow' at event/nested
-level, version-skew negative cases, the under-lock end_session guard).
+The final section covers additional hardening: lock holder-liveness steal, a
+true timeout ceiling, extra='allow' at the event/nested level, version-skew
+negative cases, and the under-lock end_session guard.
 
 These are TDD regression tests: each was written RED first.
 """
@@ -218,7 +217,7 @@ async def test_get_session_warns_on_future_schema_version(storage, tmp_path, cap
     assert any("0.9.9" in r.message or "version" in r.message.lower() for r in caplog.records)
 
 
-# ── adversarial-review hardening (PR D round 2) ──────────────────────────
+# ── additional hardening ────────────────────────────────────────────────
 
 
 def _dead_pid() -> int:
