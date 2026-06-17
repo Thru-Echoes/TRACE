@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Integrity hardening (PR D)
+### Integrity hardening
 
 - **The per-session lock now fails closed.** On lock-acquisition timeout,
   `JsonFileStorage.lock` previously logged to stderr and proceeded **unlocked**,
@@ -35,9 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   warning. `Environment` intentionally stays closed (legacy-field drop). The
   generated JSON Schema now carries `additionalProperties: true` on those models.
 - **Consolidated the three session write paths** (`append_event`, `end_session`,
-  `resolve_decision`) onto a single `locked_disk_session` helper (the deferred
-  PR #10 consolidation) so "write under the fail-closed lock against disk truth"
-  is one implementation. Registered as **INV-1** in the new `docs/INVARIANTS.md`.
+  `resolve_decision`) onto a single `locked_disk_session` helper — the lock +
+  disk-reload + immutability sequence was previously hand-copied across all three
+  — so "write under the fail-closed lock against disk truth" is one
+  implementation. Registered as **INV-1** in the new `docs/INVARIANTS.md`.
 
 ### Fixed
 

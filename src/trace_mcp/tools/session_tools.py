@@ -757,10 +757,10 @@ async def append_event(
             event.id = session.next_event_id()
         event.session_id = session.id
 
-        # PR D #2: refuse to mint/accept an id that already exists in the
-        # reloaded on-disk session. A positional next_event_id() can only
-        # collide if the record is already aliased (e.g. after a pre-fix
-        # unlocked write left two events sharing an id); writing another event
+        # Refuse to mint/accept an id that already exists in the reloaded
+        # on-disk session. A positional next_event_id() can only collide if the
+        # record is already aliased (e.g. an earlier unlocked write left two
+        # events sharing an id); writing another event
         # under that id would silently alias revises_event_id / parent_event_id
         # / corrects_event_ids references. Fail loudly instead of corrupting.
         if any(e.id == event.id for e in session.events):

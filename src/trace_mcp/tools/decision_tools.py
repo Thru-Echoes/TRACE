@@ -15,7 +15,7 @@ from trace_mcp.tools.session_tools import append_event
 # the schema's canonical Literal (minus the initial state) so the two can
 # never drift. Validated here — not only via the Literal in the MCP
 # signature — so direct library callers can never write an invalid
-# disposition that bricks the session file on the next load (C1).
+# disposition that bricks the session file on the next load.
 VALID_RESOLUTIONS = tuple(v for v in get_args(DecisionDisposition) if v != "proposed")
 
 
@@ -65,7 +65,7 @@ async def resolve_decision(
 ) -> str:
     """Resolve a previously proposed decision.
 
-    Integrity guarantees (C1/H1/H2):
+    Integrity guarantees:
     - *disposition* must be one of ``VALID_RESOLUTIONS`` — rejected up front,
       and the updated decision is re-validated through Pydantic before any
       write, so an invalid value can never reach disk.
@@ -94,8 +94,8 @@ async def resolve_decision(
     # that is missing a concurrently-appended actor).
     # The helper yields the disk-loaded object (not the caller's in-memory copy)
     # so a stale in-memory status/metadata can't clobber disk state — e.g.
-    # resurrect a session completed by another process (H1) — and acquires the
-    # fail-closed per-session lock (INV-1).
+    # resurrect a session completed by another process — and acquires the
+    # fail-closed per-session lock (INV-1, docs/INVARIANTS.md).
     async with locked_disk_session(storage, session.id, fallback=session) as write_session:
         target = next(
             (e for e in write_session.events if e.id == event_id and e.type == "decision"),
