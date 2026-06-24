@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Diagnostics
+
+- **Offline self-cost report (`python -m trace_mcp.selfcost`).** A standalone,
+  read-only analyzer that estimates TRACE's own token footprint without adding
+  any MCP tool (so running it does not enlarge the tool-schema surface it
+  measures) and without touching any session record. It reports the tool-schema
+  surface under cold-write/warm-read prompt-caching regimes — so the
+  always-loaded cost is presented as a write-once/cache-read amount, not
+  mis-stated as a full per-turn tax — a per-session estimate of the tokens spent
+  authoring `trace_*` calls (scoped to `host="mcp"` events, since
+  `host="internal"/"external"` calls are logged by reference and not sizeable
+  from the server side), and a trace-learn reuse signal carrying a data-quality
+  flag (`recall_count` tracks surfacing, not use, so it is never converted to
+  "tokens saved"). Every figure is a labeled `chars/4` estimate, and the report
+  points at the host's OpenTelemetry `claude_code.token.usage` metric for the
+  authoritative measured number. The carbon/token telemetry direction is
+  recorded in [docs/adr/004-telemetry-sidecar.md](docs/adr/004-telemetry-sidecar.md):
+  carbon and self-cost are one optional, estimate-provenanced sidecar concern,
+  never core.
+
 ### Integrity hardening
 
 - **The per-session lock now fails closed.** On lock-acquisition timeout,
