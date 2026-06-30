@@ -32,11 +32,15 @@ jobs:
       - name: Sync dependencies
         run: uv sync --all-extras
 
+      # Full-tree static gates, identical to ci.yml and CONTRIBUTING.
       - name: Lint (ruff)
-        run: uv run ruff check src/
+        run: uv run ruff check .
+
+      - name: Format check (ruff)
+        run: uv run ruff format --check .
 
       - name: Type check (pyright)
-        run: uv run pyright src/
+        run: uv run pyright
 
       - name: Tests
         run: uv run pytest -q -k "not uvx and not Uvx"

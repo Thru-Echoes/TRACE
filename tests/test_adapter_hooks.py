@@ -193,9 +193,7 @@ class TestPromptReminder:
         project_dir, sessions, runtime = self._setup(tmp_path)
         _make_session(sessions, session_id=f"trace_{_today()}_aaaaaa", project="my-proj", status="active")
 
-        result = _run_hook(
-            PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime
-        )
+        result = _run_hook(PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime)
         assert result.returncode == 0
         assert result.stdout.strip() == ""
 
@@ -203,9 +201,7 @@ class TestPromptReminder:
         project_dir, sessions, runtime = self._setup(tmp_path)
         # Default MIN_TURNS=3 → turns 1 and 2 should be silent
         for _ in range(2):
-            result = _run_hook(
-                PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime
-            )
+            result = _run_hook(PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime)
             assert result.stdout.strip() == "", f"unexpected nudge: {result.stdout!r}"
 
     def test_nudges_on_third_turn_without_session(self, tmp_path: Path) -> None:
@@ -213,9 +209,7 @@ class TestPromptReminder:
         for _ in range(2):
             _run_hook(PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime)
 
-        result = _run_hook(
-            PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime
-        )
+        result = _run_hook(PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime)
         assert "TRACE:" in result.stdout
         assert "my-proj" in result.stdout
 
@@ -226,9 +220,7 @@ class TestPromptReminder:
             _run_hook(PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime)
 
         # 4th turn within cooldown should be silent (cooldown default 300s)
-        result = _run_hook(
-            PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime
-        )
+        result = _run_hook(PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime)
         assert result.stdout.strip() == ""
 
     def test_re_nudges_after_cooldown_expires(self, tmp_path: Path) -> None:

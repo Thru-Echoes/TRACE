@@ -223,10 +223,12 @@ class TestE2EWithBM25:
 
     async def test_idempotent_extraction_across_persist(self, tmp_path):
         """Extract → save → load → extract again → no duplicates."""
-        session = _session([
-            _annotation("evt_001", "learning", "Important insight"),
-            _annotation("evt_002", "gotcha", "Surprising behavior"),
-        ])
+        session = _session(
+            [
+                _annotation("evt_001", "learning", "Important insight"),
+                _annotation("evt_002", "gotcha", "Surprising behavior"),
+            ]
+        )
 
         # First extraction
         ks = KnowledgeStore(project="test")
@@ -247,11 +249,19 @@ class TestE2EWithBM25:
             session_id="sess_A",
         )
         session_b = _session(
-            [_annotation("evt_001", "gotcha", "ffmpeg audio device indices are unstable on macOS", tags=["ffmpeg", "macos"])],
+            [
+                _annotation(
+                    "evt_001", "gotcha", "ffmpeg audio device indices are unstable on macOS", tags=["ffmpeg", "macos"]
+                )
+            ],
             session_id="sess_B",
         )
         session_c = _session(
-            [_annotation("evt_001", "learning", "Log decisions before implementing, not after", tags=["trace", "logging"])],
+            [
+                _annotation(
+                    "evt_001", "learning", "Log decisions before implementing, not after", tags=["trace", "logging"]
+                )
+            ],
             session_id="sess_C",
         )
 
@@ -307,9 +317,7 @@ class TestE2EWithBM25:
 
         loaded = load_store("test", directory=str(tmp_path))
         assert len(loaded.learnings) == 1
-        results = await recall_learnings(
-            loaded.learnings, "info", threshold=0.0, backend=BM25Backend()
-        )
+        results = await recall_learnings(loaded.learnings, "info", threshold=0.0, backend=BM25Backend())
         ids = [r["learning"]["id"] for r in results]
         assert "lrn_001" not in ids
         assert "lrn_002" in ids
@@ -422,9 +430,7 @@ class TestE2EBackendFallback:
         with patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", True):
             with patch("trace_mcp.extensions.learn.matching.AsyncOpenAI") as MockClient:
                 mock_client = AsyncMock()
-                mock_client.chat.completions.create = AsyncMock(
-                    side_effect=Exception("API down")
-                )
+                mock_client.chat.completions.create = AsyncMock(side_effect=Exception("API down"))
                 MockClient.return_value = mock_client
 
                 from trace_mcp.extensions.learn.matching import LLMBackend
@@ -539,15 +545,17 @@ class TestE2ECorrectionChains:
 
     async def test_correction_chain_persists(self, tmp_path):
         """corrects_event_ids from annotations survive extract → persist → load."""
-        session = _session([
-            _annotation(
-                "evt_005",
-                "correction",
-                "Human caught: AI used wrong conda env 3 times",
-                tags=["conda", "correction"],
-                corrects_event_ids=["evt_001", "evt_002", "evt_003"],
-            ),
-        ])
+        session = _session(
+            [
+                _annotation(
+                    "evt_005",
+                    "correction",
+                    "Human caught: AI used wrong conda env 3 times",
+                    tags=["conda", "correction"],
+                    corrects_event_ids=["evt_001", "evt_002", "evt_003"],
+                ),
+            ]
+        )
 
         ks = KnowledgeStore(project="test")
         extract_from_session(ks, session)

@@ -78,7 +78,11 @@ async def _create_session(
     tags: list[str] | None = None,
 ) -> tuple[str, Session]:
     await session_tools.start_session(
-        storage, active, project=project, description=description, tags=tags,
+        storage,
+        active,
+        project=project,
+        description=description,
+        tags=tags,
     )
     session_id = list(active.keys())[-1]
     return session_id, active[session_id]
@@ -144,30 +148,43 @@ class TestSessionImmutability:
     """Sessions must be immutable once completed. No double-ending, no post-end logging."""
 
     async def test_double_end_returns_error(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Ending an already-completed session returns an error, not silent overwrite."""
         session_id, _ = await _create_session(storage, active)
         result1 = await session_tools.end_session(
-            storage, active, session_id=session_id, summary="done",
+            storage,
+            active,
+            session_id=session_id,
+            summary="done",
         )
         assert "Session ended" in result1
 
         # Second end attempt must fail
         result2 = await session_tools.end_session(
-            storage, active, session_id=session_id, summary="different",
+            storage,
+            active,
+            session_id=session_id,
+            summary="different",
         )
         assert "Error" in result2
         assert "already ended" in result2
         assert "immutable" in result2
 
     async def test_double_end_preserves_original_timestamp(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """The original ended timestamp must not be overwritten."""
         session_id, _ = await _create_session(storage, active)
         await session_tools.end_session(
-            storage, active, session_id=session_id, summary="first",
+            storage,
+            active,
+            session_id=session_id,
+            summary="first",
         )
 
         # Load and record original timestamp
@@ -176,7 +193,10 @@ class TestSessionImmutability:
 
         # Try to end again
         await session_tools.end_session(
-            storage, active, session_id=session_id, summary="second",
+            storage,
+            active,
+            session_id=session_id,
+            summary="second",
         )
 
         # Verify timestamp unchanged
@@ -185,35 +205,51 @@ class TestSessionImmutability:
         assert reloaded.summary == "first"  # original summary preserved
 
     async def test_double_end_preserves_original_summary(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """The original summary must not be overwritten by a second end call."""
         session_id, session = await _create_session(storage, active)
 
         # Log a real event so the session has content
         await logging_tools.log_annotation(
-            storage, session, category="observation", content="test observation",
+            storage,
+            session,
+            category="observation",
+            content="test observation",
         )
 
         await session_tools.end_session(
-            storage, active, session_id=session_id, summary="Original summary",
+            storage,
+            active,
+            session_id=session_id,
+            summary="Original summary",
         )
 
         # Attempt to end again with different summary
         await session_tools.end_session(
-            storage, active, session_id=session_id, summary="Altered summary",
+            storage,
+            active,
+            session_id=session_id,
+            summary="Altered summary",
         )
 
         reloaded = await storage.get_session(session_id)
         assert reloaded.summary == "Original summary"
 
     async def test_append_event_to_completed_session_raises(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Logging to a completed session must raise ValueError."""
-        session_id, session = await _create_session(storage, active)
+        session_id, _session = await _create_session(storage, active)
         await session_tools.end_session(
-            storage, active, session_id=session_id, summary="done",
+            storage,
+            active,
+            session_id=session_id,
+            summary="done",
         )
 
         # Re-load the completed session
@@ -228,15 +264,23 @@ class TestSessionImmutability:
             await session_tools.append_event(storage, completed, event)
 
     async def test_post_completion_event_not_persisted(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Events attempted after completion must not appear in the stored session."""
         session_id, session = await _create_session(storage, active)
         await logging_tools.log_annotation(
-            storage, session, category="observation", content="pre-end event",
+            storage,
+            session,
+            category="observation",
+            content="pre-end event",
         )
         await session_tools.end_session(
-            storage, active, session_id=session_id, summary="done",
+            storage,
+            active,
+            session_id=session_id,
+            summary="done",
         )
 
         completed = await storage.get_session(session_id)
@@ -245,7 +289,10 @@ class TestSessionImmutability:
         # Attempt post-end logging
         with pytest.raises(ValueError):
             await logging_tools.log_annotation(
-                storage, completed, category="observation", content="post-end",
+                storage,
+                completed,
+                category="observation",
+                content="post-end",
             )
 
         # Verify event count unchanged on disk
@@ -253,45 +300,65 @@ class TestSessionImmutability:
         assert len(reloaded.events) == 1
 
     async def test_all_logging_tools_reject_completed_session(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Every logging function must reject completed sessions."""
-        session_id, session = await _create_session(storage, active)
+        session_id, _session = await _create_session(storage, active)
         await session_tools.end_session(
-            storage, active, session_id=session_id, summary="done",
+            storage,
+            active,
+            session_id=session_id,
+            summary="done",
         )
         completed = await storage.get_session(session_id)
 
         # log_annotation
         with pytest.raises(ValueError, match="Cannot append"):
             await logging_tools.log_annotation(
-                storage, completed, category="learning", content="test",
+                storage,
+                completed,
+                category="learning",
+                content="test",
             )
 
         # log_contribution
         with pytest.raises(ValueError, match="Cannot append"):
             await logging_tools.log_contribution(
-                storage, completed, description="test",
-                direction="ai", execution="ai",
+                storage,
+                completed,
+                description="test",
+                direction="ai",
+                execution="ai",
             )
 
         # log_tool_call
         with pytest.raises(ValueError, match="Cannot append"):
             await logging_tools.log_tool_call(
-                storage, completed, server="test", tool_name="test", input={},
+                storage,
+                completed,
+                server="test",
+                tool_name="test",
+                input={},
             )
 
         # log_state_change
         with pytest.raises(ValueError, match="Cannot append"):
             await logging_tools.log_state_change(
-                storage, completed, description="test",
+                storage,
+                completed,
+                description="test",
             )
 
         # propose_decision
         with pytest.raises(ValueError, match="Cannot append"):
             await decision_tools.propose_decision(
-                storage, completed, description="test",
-                proposed_by_type="ai", proposed_by_id="claude",
+                storage,
+                completed,
+                description="test",
+                proposed_by_type="ai",
+                proposed_by_id="claude",
             )
 
 
@@ -299,73 +366,97 @@ class TestReferentialIntegrityEnforcement:
     """Invalid event references must be rejected, not just warned about."""
 
     async def test_invalid_corrects_event_ids_raises(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """corrects_event_ids pointing to nonexistent events must raise ValueError."""
-        session_id, session = await _create_session(storage, active)
+        _session_id, session = await _create_session(storage, active)
         with pytest.raises(ValueError, match="Dangling reference.*corrects_event_ids"):
             await logging_tools.log_annotation(
-                storage, session,
-                category="correction", content="fix",
+                storage,
+                session,
+                category="correction",
+                content="fix",
                 corrects_event_ids=["evt_phantom"],
                 conversation_snippet="that was wrong",
             )
 
     async def test_invalid_retries_event_id_raises(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """retries_event_id pointing to nonexistent event must raise ValueError."""
-        session_id, session = await _create_session(storage, active)
+        _session_id, session = await _create_session(storage, active)
         with pytest.raises(ValueError, match="Dangling reference.*retries_event_id"):
             await logging_tools.log_tool_call(
-                storage, session,
-                server="test", tool_name="test", input={},
+                storage,
+                session,
+                server="test",
+                tool_name="test",
+                input={},
                 retries_event_id="evt_nonexistent",
             )
 
     async def test_invalid_revises_event_id_raises(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """revises_event_id pointing to nonexistent event must raise ValueError."""
-        session_id, session = await _create_session(storage, active)
+        _session_id, session = await _create_session(storage, active)
         with pytest.raises(ValueError, match="Dangling reference.*revises_event_id"):
             await decision_tools.propose_decision(
-                storage, session,
+                storage,
+                session,
                 description="revised decision",
-                proposed_by_type="ai", proposed_by_id="claude",
+                proposed_by_type="ai",
+                proposed_by_id="claude",
                 revises_event_id="evt_ghost",
             )
 
     async def test_invalid_related_decision_ids_raises(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """related_decision_ids pointing to nonexistent events must raise ValueError."""
-        session_id, session = await _create_session(storage, active)
+        _session_id, session = await _create_session(storage, active)
         with pytest.raises(ValueError, match="Dangling reference.*related_decision_ids"):
             await logging_tools.log_contribution(
-                storage, session,
-                description="test contribution", direction="ai", execution="ai",
+                storage,
+                session,
+                description="test contribution",
+                direction="ai",
+                execution="ai",
                 related_decision_ids=["evt_missing"],
                 conversation_snippet="do the thing",
             )
 
     async def test_valid_references_accepted(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Valid references to existing events must be accepted without error."""
-        session_id, session = await _create_session(storage, active)
+        _session_id, session = await _create_session(storage, active)
 
         # Create events to reference
         dec_id = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Use method A",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
         )
 
         # Valid correction referencing the decision
         ann_id = await logging_tools.log_annotation(
-            storage, session,
-            category="correction", content="Actually use method B",
+            storage,
+            session,
+            category="correction",
+            content="Actually use method B",
             corrects_event_ids=[dec_id],
             conversation_snippet="no, use method B instead",
         )
@@ -373,16 +464,20 @@ class TestReferentialIntegrityEnforcement:
 
         # Valid contribution referencing the decision
         contrib_id = await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="Implemented method B",
-            direction="human", execution="ai",
+            direction="human",
+            execution="ai",
             related_decision_ids=[dec_id],
             conversation_snippet="implement method B",
         )
         assert contrib_id.startswith("evt_")
 
     async def test_event_not_persisted_on_invalid_reference(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Failed reference validation must not leave the event in the session."""
         session_id, session = await _create_session(storage, active)
@@ -390,8 +485,10 @@ class TestReferentialIntegrityEnforcement:
 
         with pytest.raises(ValueError):
             await logging_tools.log_annotation(
-                storage, session,
-                category="correction", content="fix",
+                storage,
+                session,
+                category="correction",
+                content="fix",
                 corrects_event_ids=["evt_bad"],
             )
 
@@ -446,7 +543,9 @@ class TestScratchpadGeneration:
         # Add events like the real narrative-analysis session
         session.events = [
             TraceEvent(
-                id="evt_001", session_id=session.id, type="decision",
+                id="evt_001",
+                session_id=session.id,
+                type="decision",
                 actor=Actor(type="ai", id="claude"),
                 decision=DecisionData(
                     description="Use Euclidean silhouette for post-UMAP evaluation",
@@ -461,7 +560,9 @@ class TestScratchpadGeneration:
                 ),
             ),
             TraceEvent(
-                id="evt_002", session_id=session.id, type="decision",
+                id="evt_002",
+                session_id=session.id,
+                type="decision",
                 actor=Actor(type="ai", id="claude"),
                 decision=DecisionData(
                     description="Deprioritize 10-K filing parsing",
@@ -471,7 +572,9 @@ class TestScratchpadGeneration:
                 ),
             ),
             TraceEvent(
-                id="evt_003", session_id=session.id, type="annotation",
+                id="evt_003",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="ai", id="claude"),
                 annotation=AnnotationData(
                     category="gotcha",
@@ -480,7 +583,9 @@ class TestScratchpadGeneration:
                 ),
             ),
             TraceEvent(
-                id="evt_004", session_id=session.id, type="contribution",
+                id="evt_004",
+                session_id=session.id,
+                type="contribution",
                 actor=Actor(type="ai", id="claude"),
                 contribution=ContributionData(
                     description="15 Pydantic models for sustainability reports",
@@ -494,7 +599,9 @@ class TestScratchpadGeneration:
                 ),
             ),
             TraceEvent(
-                id="evt_005", session_id=session.id, type="annotation",
+                id="evt_005",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="ai", id="claude"),
                 annotation=AnnotationData(
                     category="learning",
@@ -541,9 +648,7 @@ class TestScratchpadGeneration:
         # No crash on empty events
         assert "### Summary" not in section  # no summary set
 
-    def test_scratchpad_write_creates_file(
-        self, scratchpad_dir: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_scratchpad_write_creates_file(self, scratchpad_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """write_scratchpad creates SCRATCHPAD.md with header and content.
 
         monkeypatch (not set/pop) so the suite-wide TRACE_SCRATCHPAD_DIR
@@ -565,9 +670,7 @@ class TestScratchpadGeneration:
         assert "narrative-analysis" in content
         assert "Test session" in content
 
-    def test_scratchpad_replaces_previous_session(
-        self, scratchpad_dir: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_scratchpad_replaces_previous_session(self, scratchpad_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         """write_scratchpad keeps only the most recent session."""
         monkeypatch.setenv("TRACE_SCRATCHPAD_DIR", str(scratchpad_dir))
         # First session
@@ -595,7 +698,9 @@ class TestScratchpadGeneration:
         session = _make_meeting_recorder_session()
         session.events = [
             TraceEvent(
-                id="evt_001", session_id=session.id, type="annotation",
+                id="evt_001",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="ai", id="claude"),
                 annotation=AnnotationData(
                     category="todo",
@@ -615,14 +720,19 @@ class TestScratchpadGeneration:
         session = _make_green_narrative_session()
         session.events = [
             TraceEvent(
-                id="evt_001", session_id=session.id, type="annotation",
+                id="evt_001",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="ai", id="claude"),
                 annotation=AnnotationData(
-                    category="observation", content="Using base conda env",
+                    category="observation",
+                    content="Using base conda env",
                 ),
             ),
             TraceEvent(
-                id="evt_002", session_id=session.id, type="annotation",
+                id="evt_002",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="human", id="researcher"),
                 annotation=AnnotationData(
                     category="correction",
@@ -649,24 +759,30 @@ class TestGreenNarrativePatterns:
     """Validate TRACE behavior with patterns from real narrative-analysis sessions."""
 
     async def test_comprehensive_session_workflow(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Full narrative-analysis workflow: decisions, contributions, learnings.
 
         Modeled on trace_20260320_ba3fa7 (20 events).
         """
         sid, session = await _create_session(
-            storage, active, project="narrative-analysis",
+            storage,
+            active,
+            project="narrative-analysis",
             description="Deep review of consensus UMAP methodology",
             tags=["consensus-umap", "review"],
         )
 
         # Decision 1: Keep Procrustes as baseline (proactive)
         d1 = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Keep Procrustes alignment as comparison baseline",
             rationale="Standard approach, widely published",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
             suggestion_type="proactive",
             conversation_snippet="should we keep the procrustes alignment?",
         )
@@ -674,24 +790,30 @@ class TestGreenNarrativePatterns:
 
         # Decision 2: Investigate cosine vs euclidean (requested by human)
         d2 = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Investigate cosine vs euclidean for post-UMAP evaluation",
-            proposed_by_type="human", proposed_by_id="researcher",
+            proposed_by_type="human",
+            proposed_by_id="researcher",
             suggestion_type="requested",
             conversation_snippet="we need to settle the cosine vs euclidean question",
         )
 
         # Resolve d2 as accepted
         await decision_tools.resolve_decision(
-            storage, session,
-            event_id=d2, disposition="accepted",
-            resolved_by_type="human", resolved_by_id="researcher",
+            storage,
+            session,
+            event_id=d2,
+            disposition="accepted",
+            resolved_by_type="human",
+            resolved_by_id="researcher",
             revision_note="Definitively resolved: Euclidean is correct for post-UMAP",
         )
 
         # Learning annotation
         await logging_tools.log_annotation(
-            storage, session,
+            storage,
+            session,
             category="learning",
             content="Euclidean distance is appropriate for post-UMAP evaluation",
             tags=["methodology", "distance-metric"],
@@ -699,9 +821,11 @@ class TestGreenNarrativePatterns:
 
         # Contribution with all required fields
         await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="15 Pydantic models for sustainability reports",
-            direction="human", execution="ai",
+            direction="human",
+            execution="ai",
             artifact="src/models/corporate.py",
             related_decision_ids=[d1],
             conversation_snippet="create comprehensive data models for all domains",
@@ -709,7 +833,9 @@ class TestGreenNarrativePatterns:
 
         # End session
         result = await session_tools.end_session(
-            storage, active, session_id=sid,
+            storage,
+            active,
+            session_id=sid,
             summary="Deep review session with 5 events",
         )
         assert "Session ended" in result
@@ -717,7 +843,9 @@ class TestGreenNarrativePatterns:
         assert "Decisions (2)" in result
 
     async def test_conversation_snippet_presence_loudly_verified(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Verify conversation_snippet is properly stored and retrievable.
 
@@ -725,22 +853,27 @@ class TestGreenNarrativePatterns:
         This test FAILS LOUDLY if snippets are lost.
         """
         sid, session = await _create_session(
-            storage, active, project="narrative-analysis",
+            storage,
+            active,
+            project="narrative-analysis",
         )
 
         snippet_text = "what metric should we use for evaluating clusters?"
 
         # Log contribution WITH snippet
         await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="Created evaluation pipeline",
-            direction="human", execution="ai",
+            direction="human",
+            execution="ai",
             conversation_snippet=snippet_text,
         )
 
         # Log annotation WITH snippet
         await logging_tools.log_annotation(
-            storage, session,
+            storage,
+            session,
             category="correction",
             content="Wrong metric used",
             corrects_event_ids=["evt_001"],
@@ -760,27 +893,34 @@ class TestGreenNarrativePatterns:
         assert reloaded.events[0].context.conversation_snippet == snippet_text
 
     async def test_conversation_snippet_missing_produces_warning(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Missing conversation_snippet on contributions/corrections must warn.
 
         Based on trace_20260316_2e6a9e where 7/7 events had no snippet.
         """
-        sid, session = await _create_session(
-            storage, active, project="narrative-analysis",
+        _sid, session = await _create_session(
+            storage,
+            active,
+            project="narrative-analysis",
         )
 
         # Contribution without snippet should warn
         result = await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="Updated CLAUDE.md",
-            direction="ai", execution="ai",
+            direction="ai",
+            execution="ai",
         )
         assert "conversation_snippet" in result
 
         # Correction without snippet should warn
         result = await logging_tools.log_annotation(
-            storage, session,
+            storage,
+            session,
             category="correction",
             content="Wrong extension listed",
             conversation_snippet=None,  # explicitly missing
@@ -788,7 +928,9 @@ class TestGreenNarrativePatterns:
         assert "conversation_snippet" in result
 
     async def test_correction_micro_session_pattern(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Correction micro-sessions (like trace_20260320_3a4123) work correctly.
 
@@ -797,7 +939,9 @@ class TestGreenNarrativePatterns:
         in THIS session — this is intentional for cross-session corrections).
         """
         sid, session = await _create_session(
-            storage, active, project="narrative-analysis",
+            storage,
+            active,
+            project="narrative-analysis",
             description="Micro-session: correct missing conversation_snippets",
             tags=["correction", "trace-discipline"],
         )
@@ -807,15 +951,13 @@ class TestGreenNarrativePatterns:
         # rejected by referential integrity. This tests that cross-session
         # corrections need a different approach (annotation without corrects_event_ids,
         # or using content to describe what was corrected).
-        snippet = (
-            "i noticed that all of the trace logs have a warning saying "
-            "that no conversation_snippet was recorded"
-        )
+        snippet = "i noticed that all of the trace logs have a warning saying that no conversation_snippet was recorded"
 
         # Log correction WITHOUT corrects_event_ids (cross-session reference
         # documented in content instead)
         result = await logging_tools.log_annotation(
-            storage, session,
+            storage,
+            session,
             category="correction",
             content="evt_001 in trace_20260319_e4cf1e: missing conversation_snippet. "
             "User said: 'create the Pydantic models for all data domains'",
@@ -824,7 +966,9 @@ class TestGreenNarrativePatterns:
         assert result.startswith("evt_")
 
         await session_tools.end_session(
-            storage, active, session_id=sid,
+            storage,
+            active,
+            session_id=sid,
             summary="Correction micro-session: 1 cross-session correction logged",
         )
 
@@ -833,54 +977,78 @@ class TestWhenAlgorithmsMeetArtistsPatterns:
     """Validate patterns from computational-art sessions."""
 
     async def test_session_with_mixed_dispositions(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Test a session with accepted, revised, and rejected decisions."""
         sid, session = await _create_session(
-            storage, active, project="computational-art",
+            storage,
+            active,
+            project="computational-art",
             description="Review manuscript structure",
         )
 
         # Accepted decision
         d1 = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Use hypothesis-driven narrative structure",
-            proposed_by_type="human", proposed_by_id="researcher",
+            proposed_by_type="human",
+            proposed_by_id="researcher",
             suggestion_type="requested",
         )
         await decision_tools.resolve_decision(
-            storage, session, event_id=d1, disposition="accepted",
-            resolved_by_type="human", resolved_by_id="researcher",
+            storage,
+            session,
+            event_id=d1,
+            disposition="accepted",
+            resolved_by_type="human",
+            resolved_by_id="researcher",
         )
 
         # Revised decision
         d2 = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Submit to ACM C&C 2026",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
             suggestion_type="proactive",
         )
         await decision_tools.resolve_decision(
-            storage, session, event_id=d2, disposition="revised",
-            resolved_by_type="human", resolved_by_id="researcher",
+            storage,
+            session,
+            event_id=d2,
+            disposition="revised",
+            resolved_by_type="human",
+            resolved_by_id="researcher",
             revision_note="Submit methods paper to methods venue instead",
         )
 
         # Rejected decision
         d3 = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Include all 6 available figures in main paper",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
             suggestion_type="proactive",
         )
         await decision_tools.resolve_decision(
-            storage, session, event_id=d3, disposition="rejected",
-            resolved_by_type="human", resolved_by_id="researcher",
+            storage,
+            session,
+            event_id=d3,
+            disposition="rejected",
+            resolved_by_type="human",
+            resolved_by_id="researcher",
             revision_note="Too many figures; select top 3 only",
         )
 
         result = await session_tools.end_session(
-            storage, active, session_id=sid,
+            storage,
+            active,
+            session_id=sid,
             summary="Manuscript review with mixed decision outcomes",
         )
         assert "Decisions (3)" in result
@@ -894,11 +1062,14 @@ class TestMeetingRecorderPatterns:
     """Validate patterns specific to meeting-recorder."""
 
     async def test_transcription_pipeline_session(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Full transcription pipeline workflow."""
         sid, session = await _create_session(
-            storage, active,
+            storage,
+            active,
             project="meeting-recorder",
             description="Recording esg-group meeting 2026-04-02",
             tags=["meeting", "esg-group", "transcription"],
@@ -906,20 +1077,27 @@ class TestMeetingRecorderPatterns:
 
         # Decision: recording strategy
         d1 = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Use Loopback multi-output for app audio + mic",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
             suggestion_type="proactive",
             conversation_snippet="how should we set up recording?",
         )
         await decision_tools.resolve_decision(
-            storage, session, event_id=d1, disposition="accepted",
-            resolved_by_type="human", resolved_by_id="researcher",
+            storage,
+            session,
+            event_id=d1,
+            disposition="accepted",
+            resolved_by_type="human",
+            resolved_by_id="researcher",
         )
 
         # Tool call: Whisper transcription
         await logging_tools.log_tool_call(
-            storage, session,
+            storage,
+            session,
             server="openai",
             tool_name="audio.transcriptions.create",
             input={"model": "whisper-1", "file": "esg_group_20260402.wav"},
@@ -930,7 +1108,8 @@ class TestMeetingRecorderPatterns:
 
         # Gotcha: device instability
         await logging_tools.log_annotation(
-            storage, session,
+            storage,
+            session,
             category="gotcha",
             content="ffmpeg device indices shift when Bluetooth devices connect/disconnect",
             tags=["ffmpeg", "macos", "audio-device"],
@@ -938,16 +1117,20 @@ class TestMeetingRecorderPatterns:
 
         # Contribution: transcript file
         await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="Transcribed esg-group meeting: 24 segments, 4 speakers",
-            direction="human", execution="ai",
+            direction="human",
+            execution="ai",
             artifact="recordings/esg-group/esg-group_20260402.json",
             related_decision_ids=[d1],
             conversation_snippet="transcribe the meeting recording",
         )
 
         result = await session_tools.end_session(
-            storage, active, session_id=sid,
+            storage,
+            active,
+            session_id=sid,
             summary="Recorded and transcribed esg-group meeting",
         )
         assert "Session ended" in result
@@ -958,17 +1141,22 @@ class TestEmbeddingsPipelinePatterns:
     """Validate patterns from embeddings-pipeline project sessions."""
 
     async def test_projection_head_workflow(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """embeddings-pipeline session: projection head pipeline updates."""
         sid, session = await _create_session(
-            storage, active, project="embeddings-pipeline",
+            storage,
+            active,
+            project="embeddings-pipeline",
             description="Projection head pipeline updates and training",
         )
 
         # State change: conda env switch
         await logging_tools.log_state_change(
-            storage, session,
+            storage,
+            session,
             description="Switched conda environment",
             field="conda_env",
             old_value="nlp_py3_12",
@@ -978,7 +1166,8 @@ class TestEmbeddingsPipelinePatterns:
 
         # Gotcha: env mismatch
         await logging_tools.log_annotation(
-            storage, session,
+            storage,
+            session,
             category="gotcha",
             content="nlp_py3_12 env lacks sentence-transformers needed for projection head",
             tags=["conda", "environment"],
@@ -986,15 +1175,19 @@ class TestEmbeddingsPipelinePatterns:
 
         # Contribution with retroactive note
         await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="Updated projection head training script",
-            direction="collaborative", execution="ai",
+            direction="collaborative",
+            execution="ai",
             artifact="hye_in/projection/train.py",
             conversation_snippet="update the training script",
         )
 
         result = await session_tools.end_session(
-            storage, active, session_id=sid,
+            storage,
+            active,
+            session_id=sid,
             summary="Projection head pipeline updated",
         )
         assert "3 events" in result
@@ -1010,35 +1203,41 @@ class TestConversationSnippetCompleteness:
     """Ensure conversation_snippet is properly handled across all event types."""
 
     async def test_snippet_roundtrip_contribution(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """conversation_snippet on contributions must survive write→read roundtrip."""
         sid, session = await _create_session(storage, active)
         snippet = "create comprehensive data models for all narrative-analysis domains"
 
         await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="15 Pydantic models",
-            direction="human", execution="ai",
+            direction="human",
+            execution="ai",
             conversation_snippet=snippet,
         )
 
         reloaded = await storage.get_session(sid)
         evt = reloaded.events[0]
         assert evt.context.conversation_snippet == snippet, (
-            f"SNIPPET LOST! Expected: {snippet!r}, "
-            f"Got: {evt.context.conversation_snippet!r}"
+            f"SNIPPET LOST! Expected: {snippet!r}, Got: {evt.context.conversation_snippet!r}"
         )
 
     async def test_snippet_roundtrip_annotation(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """conversation_snippet on annotations must survive write→read roundtrip."""
         sid, session = await _create_session(storage, active)
         snippet = "that's wrong, use ml-dev conda env"
 
         await logging_tools.log_annotation(
-            storage, session,
+            storage,
+            session,
             category="observation",
             content="Wrong env used",
             conversation_snippet=snippet,
@@ -1049,16 +1248,20 @@ class TestConversationSnippetCompleteness:
         assert evt.context.conversation_snippet == snippet
 
     async def test_snippet_roundtrip_decision(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """conversation_snippet on decisions must survive write→read roundtrip."""
         sid, session = await _create_session(storage, active)
         snippet = "should we use cosine or euclidean for post-UMAP?"
 
         await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Use Euclidean for post-UMAP",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
             conversation_snippet=snippet,
         )
 
@@ -1067,22 +1270,30 @@ class TestConversationSnippetCompleteness:
         assert evt.context.conversation_snippet == snippet
 
     async def test_snippet_preserved_through_decision_resolution(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """conversation_snippet must survive decision resolution updates."""
         sid, session = await _create_session(storage, active)
         snippet = "should we keep the procrustes alignment?"
 
         dec_id = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Keep Procrustes as baseline",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
             conversation_snippet=snippet,
         )
 
         await decision_tools.resolve_decision(
-            storage, session, event_id=dec_id, disposition="accepted",
-            resolved_by_type="human", resolved_by_id="researcher",
+            storage,
+            session,
+            event_id=dec_id,
+            disposition="accepted",
+            resolved_by_type="human",
+            resolved_by_id="researcher",
         )
 
         reloaded = await storage.get_session(sid)
@@ -1102,46 +1313,63 @@ class TestAttributionAuditAccuracy:
     """Attribution audit at session end must accurately reflect all events."""
 
     async def test_audit_counts_all_event_types(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Audit must correctly count decisions, contributions, corrections."""
         sid, session = await _create_session(storage, active)
 
         # 2 decisions (1 accepted, 1 proposed)
         d1 = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Decision 1",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
         )
         await decision_tools.resolve_decision(
-            storage, session, event_id=d1, disposition="accepted",
-            resolved_by_type="human", resolved_by_id="researcher",
+            storage,
+            session,
+            event_id=d1,
+            disposition="accepted",
+            resolved_by_type="human",
+            resolved_by_id="researcher",
         )
         await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Decision 2 (unresolved)",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
         )
 
         # 1 correction
         await logging_tools.log_annotation(
-            storage, session,
-            category="correction", content="Fix",
+            storage,
+            session,
+            category="correction",
+            content="Fix",
             corrects_event_ids=[d1],
             conversation_snippet="that was wrong",
         )
 
         # 1 contribution
         await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="Built the thing",
-            direction="human", execution="ai",
+            direction="human",
+            execution="ai",
             related_decision_ids=[d1],
             conversation_snippet="build it",
         )
 
         result = await session_tools.end_session(
-            storage, active, session_id=sid, summary="test",
+            storage,
+            active,
+            session_id=sid,
+            summary="test",
         )
 
         assert "Contributions (1)" in result
@@ -1151,29 +1379,40 @@ class TestAttributionAuditAccuracy:
         assert "Human interventions: 1" in result  # 1 correction
 
     async def test_audit_detects_ai_self_resolution(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Audit must flag decisions where AI resolved its own proposal."""
         sid, session = await _create_session(storage, active)
 
         d1 = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="AI proposes and resolves",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
         )
 
         # monkeypatch (not set/pop): a bare os.environ.pop() would delete any
         # pre-existing value instead of restoring it.
         monkeypatch.setenv("TRACE_SUPPRESS_SELF_RESOLVE_WARNING", "true")
         await decision_tools.resolve_decision(
-            storage, session, event_id=d1, disposition="accepted",
-            resolved_by_type="ai", resolved_by_id="claude",
+            storage,
+            session,
+            event_id=d1,
+            disposition="accepted",
+            resolved_by_type="ai",
+            resolved_by_id="claude",
         )
         monkeypatch.delenv("TRACE_SUPPRESS_SELF_RESOLVE_WARNING")
 
         result = await session_tools.end_session(
-            storage, active, session_id=sid, summary="test",
+            storage,
+            active,
+            session_id=sid,
+            summary="test",
         )
         assert "AI self-resolutions: 1" in result
 
@@ -1187,26 +1426,34 @@ class TestDecisionChainIntegrity:
     """Decision chains must maintain valid links."""
 
     async def test_valid_revision_chain(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """A chain of decisions linked via revises_event_id must be walkable."""
         sid, session = await _create_session(storage, active)
 
         d1 = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Original approach: use method A",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
         )
         d2 = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Revised: use method B instead",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
             revises_event_id=d1,
         )
         d3 = await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Final: use method C",
-            proposed_by_type="human", proposed_by_id="researcher",
+            proposed_by_type="human",
+            proposed_by_id="researcher",
             revises_event_id=d2,
         )
 
@@ -1223,16 +1470,20 @@ class TestDecisionChainIntegrity:
         assert dec1.revises_event_id is None
 
     async def test_revision_chain_rejects_invalid_parent(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """revises_event_id pointing to nonexistent event must be rejected."""
-        sid, session = await _create_session(storage, active)
+        _sid, session = await _create_session(storage, active)
 
         with pytest.raises(ValueError, match="Dangling reference.*revises_event_id"):
             await decision_tools.propose_decision(
-                storage, session,
+                storage,
+                session,
                 description="Revises phantom",
-                proposed_by_type="ai", proposed_by_id="claude",
+                proposed_by_type="ai",
+                proposed_by_id="claude",
                 revises_event_id="evt_phantom",
             )
 
@@ -1246,21 +1497,28 @@ class TestToolCallRetryChains:
     """Tool call retry chains must maintain valid references."""
 
     async def test_valid_retry_chain(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Retry chain: tc1 (error) → tc2 (retries tc1, success)."""
         sid, session = await _create_session(storage, active)
 
         tc1 = await logging_tools.log_tool_call(
-            storage, session,
-            server="openai", tool_name="whisper",
+            storage,
+            session,
+            server="openai",
+            tool_name="whisper",
             input={"file": "meeting.wav"},
-            status="error", error_message="File too large",
+            status="error",
+            error_message="File too large",
         )
 
         tc2 = await logging_tools.log_tool_call(
-            storage, session,
-            server="openai", tool_name="whisper",
+            storage,
+            session,
+            server="openai",
+            tool_name="whisper",
             input={"file": "meeting_chunk1.wav"},
             status="success",
             retries_event_id=tc1,
@@ -1272,15 +1530,20 @@ class TestToolCallRetryChains:
         assert retry_evt.tool_call.retries_event_id == tc1
 
     async def test_retry_rejects_invalid_parent(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """retries_event_id pointing to nonexistent event must be rejected."""
-        sid, session = await _create_session(storage, active)
+        _sid, session = await _create_session(storage, active)
 
         with pytest.raises(ValueError, match="Dangling reference.*retries_event_id"):
             await logging_tools.log_tool_call(
-                storage, session,
-                server="test", tool_name="test", input={},
+                storage,
+                session,
+                server="test",
+                tool_name="test",
+                input={},
                 retries_event_id="evt_nonexistent",
             )
 
@@ -1320,14 +1583,12 @@ class TestRealSessionDataIntegrity:
         if session is None:
             return
 
-        events_with_snippets = [
-            e for e in session.events if e.context.conversation_snippet
-        ]
+        events_with_snippets = [e for e in session.events if e.context.conversation_snippet]
         events_needing_snippets = [
-            e for e in session.events
+            e
+            for e in session.events
             if e.type in ("decision", "contribution")
-            or (e.type == "annotation" and e.annotation
-                and e.annotation.category == "correction")
+            or (e.type == "annotation" and e.annotation and e.annotation.category == "correction")
         ]
 
         # This session should have good snippet coverage
@@ -1351,13 +1612,11 @@ class TestRealSessionDataIntegrity:
 
         for evt in session.events:
             assert evt.type == "annotation", (
-                f"Event {evt.id} is type '{evt.type}', expected 'annotation' "
-                f"in a pure correction micro-session"
+                f"Event {evt.id} is type '{evt.type}', expected 'annotation' in a pure correction micro-session"
             )
             assert evt.annotation is not None
             assert evt.annotation.category == "correction", (
-                f"Event {evt.id} has category '{evt.annotation.category}', "
-                f"expected 'correction'"
+                f"Event {evt.id} has category '{evt.annotation.category}', expected 'correction'"
             )
 
     def test_green_narrative_2e6a9e_has_gotcha(self) -> None:
@@ -1367,9 +1626,7 @@ class TestRealSessionDataIntegrity:
             return
 
         gotchas = [
-            e for e in session.events
-            if e.type == "annotation" and e.annotation
-            and e.annotation.category == "gotcha"
+            e for e in session.events if e.type == "annotation" and e.annotation and e.annotation.category == "gotcha"
         ]
         assert len(gotchas) > 0, (
             "Session trace_20260316_2e6a9e should have at least one gotcha "
@@ -1390,9 +1647,7 @@ class TestRealSessionDataIntegrity:
 
             if ended is not None and status == "active":
                 pytest.fail(
-                    f"STATUS MISMATCH in {path.name}: "
-                    f"ended={ended} but status='active'. "
-                    f"Session should be 'completed'."
+                    f"STATUS MISMATCH in {path.name}: ended={ended} but status='active'. Session should be 'completed'."
                 )
 
 
@@ -1431,8 +1686,7 @@ class TestCrossProjectConsistency:
         if missing_summaries:
             pytest.fail(
                 f"MISSING SUMMARIES on {len(missing_summaries)} completed sessions: "
-                f"{', '.join(missing_summaries[:10])}"
-                + ("..." if len(missing_summaries) > 10 else "")
+                f"{', '.join(missing_summaries[:10])}" + ("..." if len(missing_summaries) > 10 else "")
             )
 
     def test_project_naming_consistency(self) -> None:

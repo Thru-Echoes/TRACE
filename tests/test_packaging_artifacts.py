@@ -49,9 +49,7 @@ def get_expected_asset_relpaths() -> list[str]:
     the guard. A floor of 6 known assets (settings template, CLAUDE block,
     4 hook scripts) protects against the tree itself going missing.
     """
-    assets = sorted(
-        str(p.relative_to(TRACE_ROOT / "src")) for p in ASSETS_DIR.rglob("*") if p.is_file()
-    )
+    assets = sorted(str(p.relative_to(TRACE_ROOT / "src")) for p in ASSETS_DIR.rglob("*") if p.is_file())
     assert len(assets) >= 6, (
         f"Expected at least the 6 known adapter assets under {ASSETS_DIR}, found {len(assets)}: {assets}"
     )
@@ -113,9 +111,7 @@ class TestWheelContainsRequiredFiles:
         installs zero hooks silently, then crashes in _merge_settings."""
         members = get_wheel_members(built_dist["wheel"])
         missing = [a for a in get_expected_asset_relpaths() if a not in members]
-        assert not missing, (
-            f"Adapter assets missing from the wheel (trace-mcp-init is dead on arrival): {missing}"
-        )
+        assert not missing, f"Adapter assets missing from the wheel (trace-mcp-init is dead on arrival): {missing}"
 
     def test_wheel_contains_packaged_schema(self, built_dist: dict[str, Path]) -> None:
         """`trace-mcp validate` loads the schema as package data; a wheel
@@ -150,9 +146,7 @@ class TestWheelContainsRequiredFiles:
 
         members = get_wheel_members(built_dist["wheel"])
         tree_files = sorted(
-            line.removeprefix("src/")
-            for line in ls.stdout.splitlines()
-            if line and not line.endswith(".py")
+            line.removeprefix("src/") for line in ls.stdout.splitlines() if line and not line.endswith(".py")
         )
         assert tree_files, "Expected tracked non-Python package files under src/trace_mcp"
         missing = [f for f in tree_files if f not in members]
@@ -167,9 +161,7 @@ class TestWheelInstallE2E:
     script — the original C2 reproduction path ('crashes on any installed
     package'). Network + ~seconds of venv setup; uv's cache keeps it fast."""
 
-    def test_trace_mcp_validate_works_from_wheel_install(
-        self, built_dist: dict[str, Path], tmp_path: Path
-    ) -> None:
+    def test_trace_mcp_validate_works_from_wheel_install(self, built_dist: dict[str, Path], tmp_path: Path) -> None:
         venv_dir = tmp_path / "venv"
         subprocess.run(["uv", "venv", str(venv_dir)], check=True, capture_output=True, timeout=120)
         python = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
@@ -234,8 +226,7 @@ class TestNoPersonalDataInSdist:
                 if needle.encode("utf-8") in content:
                     offenders.append(member.name)
         assert not offenders, (
-            f"Personal home-directory paths found inside sdist file contents "
-            f"(sanitize before shipping): {offenders}"
+            f"Personal home-directory paths found inside sdist file contents (sanitize before shipping): {offenders}"
         )
 
 
@@ -258,6 +249,15 @@ class TestSdistContainsRequiredFiles:
         (gitignore-style patterns otherwise match at any depth); make sure the
         anchored syntax still ships them at the sdist root."""
         members = get_sdist_members(built_dist["sdist"])
-        expected = ["README.md", "LICENSE", "NOTICE", "SECURITY.md", "CONTRIBUTING.md", "CHANGELOG.md", "server.json", "pyproject.toml"]
+        expected = [
+            "README.md",
+            "LICENSE",
+            "NOTICE",
+            "SECURITY.md",
+            "CONTRIBUTING.md",
+            "CHANGELOG.md",
+            "server.json",
+            "pyproject.toml",
+        ]
         missing = [f for f in expected if f not in members]
         assert not missing, f"Anchored top-level metadata missing from the sdist: {missing}"

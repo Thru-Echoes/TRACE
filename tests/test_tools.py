@@ -623,12 +623,21 @@ class TestHealthCheck:
         session = active[session_id]
 
         await logging_tools.log_tool_call(
-            storage, session, server="test", tool_name="foo", input={"a": 1},
-            actor_type="ai", actor_id="claude",
+            storage,
+            session,
+            server="test",
+            tool_name="foo",
+            input={"a": 1},
+            actor_type="ai",
+            actor_id="claude",
         )
         await logging_tools.log_annotation(
-            storage, session, category="learning", content="something interesting",
-            actor_type="human", actor_id="researcher",
+            storage,
+            session,
+            category="learning",
+            content="something interesting",
+            actor_type="human",
+            actor_id="researcher",
         )
         await session_tools.end_session(storage, active, session_id=session_id)
 
@@ -647,8 +656,13 @@ class TestHealthCheck:
         sid1 = msg1.split("Session: ")[1].split("\n")[0]
         session1 = active[sid1]
         await logging_tools.log_tool_call(
-            storage, session1, server="s", tool_name="t", input={},
-            actor_type="ai", actor_id="claude",
+            storage,
+            session1,
+            server="s",
+            tool_name="t",
+            input={},
+            actor_type="ai",
+            actor_id="claude",
         )
         await session_tools.end_session(storage, active, session_id=sid1)
 
@@ -656,12 +670,22 @@ class TestHealthCheck:
         sid2 = msg2.split("Session: ")[1].split("\n")[0]
         session2 = active[sid2]
         await logging_tools.log_tool_call(
-            storage, session2, server="s", tool_name="t", input={},
-            actor_type="ai", actor_id="claude",
+            storage,
+            session2,
+            server="s",
+            tool_name="t",
+            input={},
+            actor_type="ai",
+            actor_id="claude",
         )
         await logging_tools.log_tool_call(
-            storage, session2, server="s", tool_name="t2", input={},
-            actor_type="ai", actor_id="claude",
+            storage,
+            session2,
+            server="s",
+            tool_name="t2",
+            input={},
+            actor_type="ai",
+            actor_id="claude",
         )
         await session_tools.end_session(storage, active, session_id=sid2)
 
@@ -677,8 +701,13 @@ class TestHealthCheck:
         sid1 = msg1.split("Session: ")[1].split("\n")[0]
         session1 = active[sid1]
         await logging_tools.log_tool_call(
-            storage, session1, server="s", tool_name="t", input={},
-            actor_type="ai", actor_id="claude",
+            storage,
+            session1,
+            server="s",
+            tool_name="t",
+            input={},
+            actor_type="ai",
+            actor_id="claude",
         )
         await session_tools.end_session(storage, active, session_id=sid1)
 
@@ -686,12 +715,22 @@ class TestHealthCheck:
         sid2 = msg2.split("Session: ")[1].split("\n")[0]
         session2 = active[sid2]
         await logging_tools.log_tool_call(
-            storage, session2, server="s", tool_name="t", input={},
-            actor_type="ai", actor_id="claude",
+            storage,
+            session2,
+            server="s",
+            tool_name="t",
+            input={},
+            actor_type="ai",
+            actor_id="claude",
         )
         await logging_tools.log_tool_call(
-            storage, session2, server="s", tool_name="t2", input={},
-            actor_type="ai", actor_id="claude",
+            storage,
+            session2,
+            server="s",
+            tool_name="t2",
+            input={},
+            actor_type="ai",
+            actor_id="claude",
         )
         await session_tools.end_session(storage, active, session_id=sid2)
 
@@ -739,93 +778,118 @@ class TestErrorCases:
 
 class TestConversationSnippet:
     async def test_contribution_with_snippet(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         await session_tools.start_session(storage, active, project="snippet-test")
         session_id = list(active.keys())[0]
         session = active[session_id]
 
         await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="Wrote analysis code",
-            direction="human", execution="ai",
+            direction="human",
+            execution="ai",
             conversation_snippet="User said: please write the analysis code",
         )
         evt = session.events[-1]
         assert evt.context.conversation_snippet == "User said: please write the analysis code"
 
     async def test_annotation_with_snippet(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         await session_tools.start_session(storage, active, project="snippet-test")
         session_id = list(active.keys())[0]
         session = active[session_id]
 
         await logging_tools.log_annotation(
-            storage, session,
-            category="correction", content="Wrong env",
+            storage,
+            session,
+            category="correction",
+            content="Wrong env",
             conversation_snippet="User: that's the wrong environment",
         )
         evt = session.events[-1]
         assert evt.context.conversation_snippet == "User: that's the wrong environment"
 
     async def test_decision_with_snippet(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         await session_tools.start_session(storage, active, project="snippet-test")
         session_id = list(active.keys())[0]
         session = active[session_id]
 
         await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Use BM25",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
             conversation_snippet="Let's try BM25 for matching",
         )
         evt = session.events[-1]
         assert evt.context.conversation_snippet == "Let's try BM25 for matching"
 
     async def test_contribution_without_snippet_backward_compat(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         await session_tools.start_session(storage, active, project="snippet-test")
         session_id = list(active.keys())[0]
         session = active[session_id]
 
         await logging_tools.log_contribution(
-            storage, session,
-            description="Code", direction="ai", execution="ai",
+            storage,
+            session,
+            description="Code",
+            direction="ai",
+            execution="ai",
         )
         evt = session.events[-1]
         assert evt.context.conversation_snippet is None
 
     async def test_search_finds_conversation_snippet(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         await session_tools.start_session(storage, active, project="snippet-test")
         session_id = list(active.keys())[0]
         session = active[session_id]
 
         await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="Analysis code",
-            direction="human", execution="ai",
+            direction="human",
+            execution="ai",
             conversation_snippet="User asked for a correlation analysis",
         )
         results = query_tools.search_events(session, query="correlation analysis")
         assert len(results) >= 1
 
     async def test_snippet_persists_roundtrip(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         await session_tools.start_session(storage, active, project="snippet-test")
         session_id = list(active.keys())[0]
         session = active[session_id]
 
         await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="Code",
-            direction="human", execution="ai",
+            direction="human",
+            execution="ai",
             conversation_snippet="roundtrip test snippet",
         )
         loaded = await storage.get_session(session_id)
@@ -838,22 +902,28 @@ class TestConversationSnippet:
 
 class TestAttributionAudit:
     async def test_audit_contributions(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         await session_tools.start_session(storage, active, project="audit-test")
         session_id = list(active.keys())[0]
         session = active[session_id]
 
         await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="Human-directed code",
-            direction="human", execution="ai",
+            direction="human",
+            execution="ai",
             artifact="src/code.py",
         )
         await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="AI-directed analysis",
-            direction="ai", execution="ai",
+            direction="ai",
+            execution="ai",
             artifact="src/analysis.py",
         )
         result = await session_tools.end_session(storage, active, session_id=session_id)
@@ -863,22 +933,29 @@ class TestAttributionAudit:
         assert "direction=ai" in result
 
     async def test_audit_decisions(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         await session_tools.start_session(storage, active, project="audit-test")
         session_id = list(active.keys())[0]
         session = active[session_id]
 
         await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Use method A",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
             suggestion_type="proactive",
         )
         await decision_tools.resolve_decision(
-            storage, session,
-            event_id="evt_001", disposition="accepted",
-            resolved_by_type="human", resolved_by_id="researcher",
+            storage,
+            session,
+            event_id="evt_001",
+            disposition="accepted",
+            resolved_by_type="human",
+            resolved_by_id="researcher",
         )
         result = await session_tools.end_session(storage, active, session_id=session_id)
         assert "Decisions (1)" in result
@@ -886,7 +963,9 @@ class TestAttributionAudit:
         assert "disposition=accepted" in result
 
     async def test_audit_corrections(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         await session_tools.start_session(storage, active, project="audit-test")
         session_id = list(active.keys())[0]
@@ -894,29 +973,39 @@ class TestAttributionAudit:
 
         # First log events that will be corrected
         await logging_tools.log_annotation(
-            storage, session,
-            category="observation", content="Using env X",
-            actor_type="ai", actor_id="claude",
+            storage,
+            session,
+            category="observation",
+            content="Using env X",
+            actor_type="ai",
+            actor_id="claude",
         )
         await logging_tools.log_annotation(
-            storage, session,
-            category="observation", content="Config is Y",
-            actor_type="ai", actor_id="claude",
+            storage,
+            session,
+            category="observation",
+            content="Config is Y",
+            actor_type="ai",
+            actor_id="claude",
         )
         # Now log a correction referencing the existing events
         await logging_tools.log_annotation(
-            storage, session,
+            storage,
+            session,
             category="correction",
             content="Wrong env used",
             corrects_event_ids=["evt_001", "evt_002"],
-            actor_type="human", actor_id="researcher",
+            actor_type="human",
+            actor_id="researcher",
         )
         result = await session_tools.end_session(storage, active, session_id=session_id)
         assert "Corrections: 1" in result
         assert "evt_001" in result
 
     async def test_audit_human_interventions(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         await session_tools.start_session(storage, active, project="audit-test")
         session_id = list(active.keys())[0]
@@ -924,32 +1013,45 @@ class TestAttributionAudit:
 
         # Correction
         await logging_tools.log_annotation(
-            storage, session,
-            category="correction", content="Fix",
-            actor_type="human", actor_id="researcher",
+            storage,
+            session,
+            category="correction",
+            content="Fix",
+            actor_type="human",
+            actor_id="researcher",
         )
         # Rejected decision
         await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Bad idea",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
         )
         await decision_tools.resolve_decision(
-            storage, session,
-            event_id="evt_002", disposition="rejected",
-            resolved_by_type="human", resolved_by_id="researcher",
+            storage,
+            session,
+            event_id="evt_002",
+            disposition="rejected",
+            resolved_by_type="human",
+            resolved_by_id="researcher",
             revision_note="No",
         )
         # Revised decision
         await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Tweakable idea",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
         )
         await decision_tools.resolve_decision(
-            storage, session,
-            event_id="evt_003", disposition="revised",
-            resolved_by_type="human", resolved_by_id="researcher",
+            storage,
+            session,
+            event_id="evt_003",
+            disposition="revised",
+            resolved_by_type="human",
+            resolved_by_id="researcher",
             revision_note="Use variant",
         )
         result = await session_tools.end_session(storage, active, session_id=session_id)
@@ -959,7 +1061,9 @@ class TestAttributionAudit:
         assert "1 rejection" in result
 
     async def test_audit_empty_session(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         await session_tools.start_session(storage, active, project="audit-test")
         session_id = list(active.keys())[0]
@@ -967,7 +1071,9 @@ class TestAttributionAudit:
         assert "No contributions, decisions, or corrections to review." in result
 
     async def test_audit_mixed_realistic(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Realistic session with 8+ events, full audit verification."""
         await session_tools.start_session(storage, active, project="audit-test")
@@ -976,55 +1082,76 @@ class TestAttributionAudit:
 
         # Tool call
         await logging_tools.log_tool_call(
-            storage, session, server="bash", tool_name="run",
-            input={"cmd": "test"}, status="success",
+            storage,
+            session,
+            server="bash",
+            tool_name="run",
+            input={"cmd": "test"},
+            status="success",
         )
         # Decision proposed + accepted
         await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Use cosine similarity",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
             suggestion_type="proactive",
         )
         await decision_tools.resolve_decision(
-            storage, session,
-            event_id="evt_002", disposition="accepted",
-            resolved_by_type="human", resolved_by_id="researcher",
+            storage,
+            session,
+            event_id="evt_002",
+            disposition="accepted",
+            resolved_by_type="human",
+            resolved_by_id="researcher",
         )
         # Contribution
         await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="Similarity function",
-            direction="human", execution="ai",
+            direction="human",
+            execution="ai",
             artifact="src/sim.py",
         )
         # Annotation
         await logging_tools.log_annotation(
-            storage, session,
-            category="gotcha", content="Unicode issues",
+            storage,
+            session,
+            category="gotcha",
+            content="Unicode issues",
         )
         # Another contribution
         await logging_tools.log_contribution(
-            storage, session,
+            storage,
+            session,
             description="Test suite",
-            direction="ai", execution="ai",
+            direction="ai",
+            execution="ai",
             artifact="tests/test_sim.py",
         )
         # Decision rejected
         await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Use threshold 0.9",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
         )
         await decision_tools.resolve_decision(
-            storage, session,
-            event_id="evt_006", disposition="rejected",
-            resolved_by_type="human", resolved_by_id="researcher",
+            storage,
+            session,
+            event_id="evt_006",
+            disposition="rejected",
+            resolved_by_type="human",
+            resolved_by_id="researcher",
             revision_note="Too high",
         )
         # State change
         await logging_tools.log_state_change(
-            storage, session,
+            storage,
+            session,
             description="Switched model",
         )
 
@@ -1041,7 +1168,9 @@ class TestAttributionAudit:
 
 class TestDecisionChainEdgeCases:
     async def test_circular_chain_terminates(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """A→B→A cycle should terminate without infinite loop."""
         await session_tools.start_session(storage, active, project="chain-test")
@@ -1050,15 +1179,19 @@ class TestDecisionChainEdgeCases:
 
         # Create decision A
         await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Decision A",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
         )
         # Create decision B that revises A
         await decision_tools.propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Decision B",
-            proposed_by_type="ai", proposed_by_id="claude",
+            proposed_by_type="ai",
+            proposed_by_id="claude",
             revises_event_id="evt_001",
         )
         # Manually create cycle: patch A to revise B
@@ -1078,11 +1211,16 @@ class TestCreateSession:
     """Tests for the new create_session function used by auto-session."""
 
     async def test_create_session_returns_session_object(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """create_session returns a Session, not a formatted string."""
         session = await session_tools.create_session(
-            storage, active, project="test-project", description="test",
+            storage,
+            active,
+            project="test-project",
+            description="test",
         )
         assert isinstance(session, Session)
         assert session.metadata.project == "test-project"
@@ -1090,29 +1228,42 @@ class TestCreateSession:
         assert session.id in active
 
     async def test_create_session_persists_to_disk(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         session = await session_tools.create_session(
-            storage, active, project="persist-test",
+            storage,
+            active,
+            project="persist-test",
         )
         # Load from disk independently
         loaded = await storage.get_session(session.id)
         assert loaded.metadata.project == "persist-test"
 
     async def test_create_session_with_tags(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         session = await session_tools.create_session(
-            storage, active, project="tag-test", tags=["auto-session"],
+            storage,
+            active,
+            project="tag-test",
+            tags=["auto-session"],
         )
         assert "auto-session" in session.metadata.tags
 
     async def test_start_session_still_returns_string(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """Existing start_session API is unchanged — returns formatted string."""
         result = await session_tools.start_session(
-            storage, active, project="compat-test",
+            storage,
+            active,
+            project="compat-test",
         )
         assert isinstance(result, str)
         assert "TRACE audit logging is now active" in result
@@ -1123,7 +1274,9 @@ class TestAutoSession:
     """Tests for the server-level auto-session infrastructure."""
 
     async def test_ensure_session_with_explicit_id(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """_ensure_session with explicit session_id returns that session."""
         import trace_mcp.server as srv
@@ -1135,7 +1288,9 @@ class TestAutoSession:
 
         try:
             session = await session_tools.create_session(
-                storage, active, project="explicit-test",
+                storage,
+                active,
+                project="explicit-test",
             )
             result_session, auto_msg = await srv._ensure_session(session.id)
             assert result_session.id == session.id
@@ -1146,7 +1301,9 @@ class TestAutoSession:
             srv._current_session_id = orig_current
 
     async def test_ensure_session_reuses_current(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """_ensure_session with None reuses _current_session_id."""
         import trace_mcp.server as srv
@@ -1157,7 +1314,9 @@ class TestAutoSession:
 
         try:
             session = await session_tools.create_session(
-                storage, active, project="reuse-test",
+                storage,
+                active,
+                project="reuse-test",
             )
             srv._current_session_id = session.id
             result_session, auto_msg = await srv._ensure_session(None)
@@ -1168,7 +1327,9 @@ class TestAutoSession:
             srv._current_session_id = orig_current
 
     async def test_ensure_session_auto_creates(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """_ensure_session auto-creates when no session exists."""
         import trace_mcp.server as srv
@@ -1190,7 +1351,9 @@ class TestAutoSession:
             srv._current_session_id = orig_current
 
     async def test_ensure_session_explicit_not_found_raises(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """_ensure_session with invalid explicit ID raises FileNotFoundError."""
         import trace_mcp.server as srv
@@ -1207,7 +1370,9 @@ class TestAutoSession:
             srv._current_session_id = orig_current
 
     async def test_infer_project_from_recent_session(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """_infer_project falls back to most recent session's project."""
         import trace_mcp.server as srv
@@ -1218,10 +1383,13 @@ class TestAutoSession:
         try:
             # Create a session so there's something to infer from
             await session_tools.create_session(
-                storage, active, project="inferred-project",
+                storage,
+                active,
+                project="inferred-project",
             )
             # Remove env var if set
             import os
+
             old_env = os.environ.pop("TRACE_DEFAULT_PROJECT", None)
             try:
                 project = await srv._infer_project()
@@ -1233,7 +1401,9 @@ class TestAutoSession:
             srv.storage = orig_storage
 
     async def test_infer_project_from_env_var(
-        self, storage: JsonFileStorage, active: dict[str, Session],
+        self,
+        storage: JsonFileStorage,
+        active: dict[str, Session],
     ) -> None:
         """_infer_project prefers TRACE_DEFAULT_PROJECT env var."""
         import os
@@ -1276,9 +1446,7 @@ class TestValidateSession:
             metadata=SessionMetadata(project="test"),
         )
         session_file = tmp_path / "trace_valid_001.json"
-        session_file.write_text(
-            json.dumps(session.model_dump(mode="json"), indent=2, default=str)
-        )
+        session_file.write_text(json.dumps(session.model_dump(mode="json"), indent=2, default=str))
         result = mod.main([str(session_file)])
         assert result == 0
 

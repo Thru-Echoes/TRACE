@@ -125,7 +125,10 @@ async def _create_session(
 ) -> tuple[str, Session]:
     """Create an active test session. Returns (session_id, session)."""
     await start_session(
-        storage, active, project=project, description=description,
+        storage,
+        active,
+        project=project,
+        description=description,
     )
     session_id = list(active.keys())[-1]
     return session_id, active[session_id]
@@ -157,9 +160,7 @@ class TestHooksRegistry:
     async def test_recall_hook_failure_returns_empty(self):
         """Hooks fail open — errors return empty list, not exceptions."""
 
-        async def _bad_hook(
-            project: str, context: str, tags: list[str] | None, limit: int
-        ) -> list[dict]:
+        async def _bad_hook(project: str, context: str, tags: list[str] | None, limit: int) -> list[dict]:
             raise RuntimeError("Simulated failure")
 
         register_recall_hook(_bad_hook)
@@ -234,9 +235,7 @@ class TestFormatFunctions:
 class TestLayer1SessionStart:
     """Tests that session-start + recall surfaces relevant learnings."""
 
-    async def test_start_session_includes_recalled_learnings(
-        self, storage, knowledge_dir
-    ):
+    async def test_start_session_includes_recalled_learnings(self, storage, knowledge_dir):
         """Starting a session about conda surfaces the conda correction."""
         _seed_knowledge(knowledge_dir)
         _register_recall_hook(knowledge_dir)
@@ -245,7 +244,11 @@ class TestLayer1SessionStart:
         description = "Setting up conda environment for ML pipeline"
         tags = ["conda", "ml"]
         result = await start_session(
-            storage, {}, project="test", description=description, tags=tags,
+            storage,
+            {},
+            project="test",
+            description=description,
+            tags=tags,
         )
 
         # Layer 1: recall based on description + tags
@@ -256,9 +259,7 @@ class TestLayer1SessionStart:
         assert "Relevant learnings from past sessions" in result
         assert "conda" in result.lower()
 
-    async def test_start_session_low_relevance_for_unrelated_topic(
-        self, storage, knowledge_dir
-    ):
+    async def test_start_session_low_relevance_for_unrelated_topic(self, storage, knowledge_dir):
         """Starting a session about an unrelated topic returns no high-relevance learnings."""
         _seed_knowledge(knowledge_dir)
         _register_recall_hook(knowledge_dir)
@@ -266,20 +267,26 @@ class TestLayer1SessionStart:
         description = "Writing the abstract for the conference paper"
         tags = ["writing"]
         await start_session(
-            storage, {}, project="test", description=description, tags=tags,
+            storage,
+            {},
+            project="test",
+            description=description,
+            tags=tags,
         )
 
         # Use a stricter threshold — low-score noise should be filtered out
         ks = load_store("test", directory=knowledge_dir)
         results = await recall_learnings(
-            ks.learnings, description, context_tags=tags,
-            threshold=0.3, limit=5, backend=BM25Backend(),
+            ks.learnings,
+            description,
+            context_tags=tags,
+            threshold=0.3,
+            limit=5,
+            backend=BM25Backend(),
         )
         assert len(results) == 0
 
-    async def test_start_session_respects_recall_limit(
-        self, storage, knowledge_dir
-    ):
+    async def test_start_session_respects_recall_limit(self, storage, knowledge_dir):
         """Only top-K learnings are returned."""
         _seed_knowledge(knowledge_dir)
         _register_recall_hook(knowledge_dir)
@@ -288,7 +295,11 @@ class TestLayer1SessionStart:
         description = "conda env ml ffmpeg audio log decisions trace"
         tags = ["conda", "ffmpeg", "trace"]
         await start_session(
-            storage, {}, project="test", description=description, tags=tags,
+            storage,
+            {},
+            project="test",
+            description=description,
+            tags=tags,
         )
 
         recalled = await recall_if_available("test", description, tags, limit=1)
@@ -298,9 +309,7 @@ class TestLayer1SessionStart:
             matches = re.findall(r"\[(?:correction|learning|gotcha|decision)\]", result)
             assert len(matches) <= 1
 
-    async def test_start_session_no_recall_without_description(
-        self, storage, knowledge_dir
-    ):
+    async def test_start_session_no_recall_without_description(self, storage, knowledge_dir):
         """No description means no context to recall against — skip recall."""
         _seed_knowledge(knowledge_dir)
         _register_recall_hook(knowledge_dir)
@@ -314,7 +323,10 @@ class TestLayer1SessionStart:
     async def test_start_session_works_without_hooks(self, storage):
         """Starting a session works normally when no learn extension is loaded."""
         result = await start_session(
-            storage, {}, project="test", description="Some work",
+            storage,
+            {},
+            project="test",
+            description="Some work",
         )
         # No hooks → recall returns empty → no learnings appended
         recalled = await recall_if_available("test", "Some work", None, 5)
@@ -332,9 +344,7 @@ class TestLayer1SessionStart:
 class TestLayer3DecisionRecall:
     """Tests that decision proposal + recall surfaces related learnings."""
 
-    async def test_propose_decision_shows_related_learnings(
-        self, storage, knowledge_dir
-    ):
+    async def test_propose_decision_shows_related_learnings(self, storage, knowledge_dir):
         """Proposing a decision about conda surfaces the conda correction."""
         _seed_knowledge(knowledge_dir)
         _register_recall_hook(knowledge_dir)
@@ -346,7 +356,8 @@ class TestLayer3DecisionRecall:
         tags = ["conda"]
 
         event_id = await propose_decision(
-            storage, session,
+            storage,
+            session,
             description=description,
             proposed_by_type="ai",
             proposed_by_id="ai-assistant",
@@ -356,7 +367,10 @@ class TestLayer3DecisionRecall:
 
         # Layer 3: recall related learnings for this decision
         related = await recall_if_available(
-            session.metadata.project, description, tags, limit=3,
+            session.metadata.project,
+            description,
+            tags,
+            limit=3,
         )
         assert len(related) > 0
         contents = [r["learning"]["content"].lower() for r in related]
@@ -366,15 +380,13 @@ class TestLayer3DecisionRecall:
         warnings = format_decision_warnings(related)
         assert "Related learnings" in warnings
 
-    async def test_propose_decision_low_relevance_for_novel_topic(
-        self, storage, knowledge_dir
-    ):
+    async def test_propose_decision_low_relevance_for_novel_topic(self, storage, knowledge_dir):
         """Decisions about topics with no learnings return no high-relevance warnings."""
         _seed_knowledge(knowledge_dir)
         _register_recall_hook(knowledge_dir)
 
         active: dict[str, Session] = {}
-        _, session = await _create_session(storage, active, description="test session")
+        _, _session = await _create_session(storage, active, description="test session")
 
         # Use a query with zero vocabulary overlap with seeded learnings
         ks = load_store("test", directory=knowledge_dir)
@@ -382,7 +394,9 @@ class TestLayer3DecisionRecall:
             ks.learnings,
             "transformer architecture text classification",
             context_tags=["nlp", "transformer"],
-            threshold=0.3, limit=3, backend=BM25Backend(),
+            threshold=0.3,
+            limit=3,
+            backend=BM25Backend(),
         )
         assert len(results) == 0
 
@@ -392,7 +406,8 @@ class TestLayer3DecisionRecall:
         _, session = await _create_session(storage, active, description="test session")
 
         event_id = await propose_decision(
-            storage, session,
+            storage,
+            session,
             description="Use some method",
             proposed_by_type="ai",
             proposed_by_id="ai-assistant",
@@ -447,7 +462,9 @@ class TestAutoExtract:
         """Extract learnings from a session with real annotations."""
         active: dict[str, Session] = {}
         session_id, session = await _create_session(
-            storage, active, description="test session",
+            storage,
+            active,
+            description="test session",
         )
 
         # Add an observation that will be corrected
@@ -514,7 +531,9 @@ class TestFullE2EAllLayers:
         # ── Session A: create a correction ──
         active_a: dict[str, Session] = {}
         session_a_id, session_a = await _create_session(
-            storage, active_a, description="Debugging pipeline failures",
+            storage,
+            active_a,
+            description="Debugging pipeline failures",
         )
 
         # Add a correction annotation
@@ -545,8 +564,11 @@ class TestFullE2EAllLayers:
         description_b = "Setting up conda environment for new analysis"
         tags_b = ["conda"]
         result_b = await start_session(
-            storage, active_b, project="test",
-            description=description_b, tags=tags_b,
+            storage,
+            active_b,
+            project="test",
+            description=description_b,
+            tags=tags_b,
         )
 
         # Layer 1: recall based on session B's description
@@ -557,22 +579,25 @@ class TestFullE2EAllLayers:
         assert "conda" in result_b.lower()
         assert "ml-dev" in result_b.lower()
 
-    async def test_decision_recall_prevents_known_mistake(
-        self, storage, knowledge_dir
-    ):
+    async def test_decision_recall_prevents_known_mistake(self, storage, knowledge_dir):
         """A learning about ml-dev surfaces when proposing to use base env."""
         _seed_knowledge(knowledge_dir)
         _register_recall_hook(knowledge_dir)
 
         active: dict[str, Session] = {}
-        _, session = await _create_session(
-            storage, active, description="ML analysis",
+        _, _session = await _create_session(
+            storage,
+            active,
+            description="ML analysis",
         )
 
         # Propose using base conda (a known mistake)
         decision_desc = "Use base conda environment for running the ML pipeline"
         related = await recall_if_available(
-            "test", decision_desc, ["conda"], limit=3,
+            "test",
+            decision_desc,
+            ["conda"],
+            limit=3,
         )
 
         # The system should surface the correction about ml-dev

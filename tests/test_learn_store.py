@@ -254,9 +254,7 @@ class TestAddLearningDedup:
     def test_skips_duplicate(self):
         ks = KnowledgeStore(project="test")
         add_learning(ks, content="use ml-dev conda environment")
-        result = add_learning_dedup(
-            ks, content="use ml-dev conda environment", dedup_threshold=0.5
-        )
+        result = add_learning_dedup(ks, content="use ml-dev conda environment", dedup_threshold=0.5)
         assert result.is_duplicate
         assert len(ks.learnings) == 1
 

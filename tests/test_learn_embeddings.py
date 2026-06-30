@@ -97,11 +97,14 @@ class TestCosineSimilarityMatrix:
 
     def test_batch_scoring(self):
         q = [1.0, 0.0, 0.0]
-        matrix = np.array([
-            [1.0, 0.0, 0.0],  # identical
-            [0.0, 1.0, 0.0],  # orthogonal
-            [0.7, 0.7, 0.0],  # 45 degrees
-        ], dtype=np.float32)
+        matrix = np.array(
+            [
+                [1.0, 0.0, 0.0],  # identical
+                [0.0, 1.0, 0.0],  # orthogonal
+                [0.7, 0.7, 0.0],  # 45 degrees
+            ],
+            dtype=np.float32,
+        )
         result = cosine_similarity_matrix(q, matrix)
         assert len(result) == 3
         assert float(result[0]) == pytest.approx(1.0, abs=1e-5)
@@ -322,10 +325,14 @@ class TestEmbeddingBackend:
         backend_no_tags = EmbeddingBackend(provider=provider, tag_weight=0.0)
 
         results_with = await backend_with_tags.score_batch(
-            [CONDA_LEARNING], "environment", context_tags=["conda", "env"],
+            [CONDA_LEARNING],
+            "environment",
+            context_tags=["conda", "env"],
         )
         results_without = await backend_no_tags.score_batch(
-            [CONDA_LEARNING], "environment", context_tags=["conda", "env"],
+            [CONDA_LEARNING],
+            "environment",
+            context_tags=["conda", "env"],
         )
         # Tag weight of 0.5 with perfect tag match should boost score
         score_with = results_with[0][1]
@@ -367,7 +374,9 @@ class TestEmbeddingBackend:
         backend = EmbeddingBackend(provider=provider, tag_weight=0.0)
         # Opposite vector learning
         opposite_lrn = Learning(
-            id="lrn_neg", content="x", embedding=[-1.0, 0.0, 0.0, 0.0],
+            id="lrn_neg",
+            content="x",
+            embedding=[-1.0, 0.0, 0.0, 0.0],
             embedding_model="test-model",
         )
         results = await backend.score_batch([opposite_lrn], "x")
@@ -388,12 +397,18 @@ class TestEmbeddingBackendWithDecay:
             update={"created": datetime.now(UTC) - timedelta(days=60)},
         )
         results = await recall_learnings(
-            [old_learning], "conda environment",
-            backend=backend, decay_config=decay, threshold=0.0,
+            [old_learning],
+            "conda environment",
+            backend=backend,
+            decay_config=decay,
+            threshold=0.0,
         )
         fresh_results = await recall_learnings(
-            [CONDA_LEARNING], "conda environment",
-            backend=backend, decay_config=decay, threshold=0.0,
+            [CONDA_LEARNING],
+            "conda environment",
+            backend=backend,
+            decay_config=decay,
+            threshold=0.0,
         )
         assert results[0]["score"] < fresh_results[0]["score"]
 
@@ -410,7 +425,11 @@ class TestEmbeddingBackendWithDecay:
             },
         )
         results = await recall_learnings(
-            [evergreen], "conda", backend=backend, decay_config=decay, threshold=0.0,
+            [evergreen],
+            "conda",
+            backend=backend,
+            decay_config=decay,
+            threshold=0.0,
         )
         # Score should be at least floor * raw_score (which is high for identical vectors)
         assert results[0]["score"] > 0.5
@@ -424,10 +443,18 @@ class TestEmbeddingBackendWithDecay:
             update={"created": datetime.now(UTC) - timedelta(days=9999)},
         )
         results = await recall_learnings(
-            [old], "conda", backend=backend, decay_config=decay, threshold=0.0,
+            [old],
+            "conda",
+            backend=backend,
+            decay_config=decay,
+            threshold=0.0,
         )
         fresh = await recall_learnings(
-            [CONDA_LEARNING], "conda", backend=backend, decay_config=decay, threshold=0.0,
+            [CONDA_LEARNING],
+            "conda",
+            backend=backend,
+            decay_config=decay,
+            threshold=0.0,
         )
         # With decay disabled, age makes no difference
         assert results[0]["score"] == pytest.approx(fresh[0]["score"], abs=0.01)
@@ -496,16 +523,20 @@ class TestSidecarNpyCache:
 class TestStaleEmbeddingDetection:
     def test_detects_stale_when_model_changes(self):
         lrn = Learning(
-            id="lrn_001", content="test",
-            embedding=[0.1, 0.2], embedding_model="old-model",
+            id="lrn_001",
+            content="test",
+            embedding=[0.1, 0.2],
+            embedding_model="old-model",
         )
         # Stale if learning's model != current model
         assert lrn.embedding_model != "new-model"
 
     def test_no_stale_when_model_matches(self):
         lrn = Learning(
-            id="lrn_001", content="test",
-            embedding=[0.1, 0.2], embedding_model="current-model",
+            id="lrn_001",
+            content="test",
+            embedding=[0.1, 0.2],
+            embedding_model="current-model",
         )
         assert lrn.embedding_model == "current-model"
 
@@ -571,7 +602,8 @@ class TestBackwardCompatibility:
         provider = _mock_provider(CONDA_VEC)
         backend = EmbeddingBackend(provider=provider)
         results = await backend.score_batch(
-            [CONDA_LEARNING, NONEMB_LEARNING], "conda",
+            [CONDA_LEARNING, NONEMB_LEARNING],
+            "conda",
         )
         assert len(results) == 2
 

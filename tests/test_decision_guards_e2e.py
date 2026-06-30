@@ -28,31 +28,46 @@ class TestDecisionGuardsE2E:
                 req_id = 2
 
                 # Start session
-                response = await _call_tool(proc, "trace_start_session", {
-                    "project": "guard-e2e",
-                    "description": "Guard rail E2E test",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_start_session",
+                    {
+                        "project": "guard-e2e",
+                        "description": "Guard rail E2E test",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
                 result_text = response["result"]["content"][0]["text"]
                 session_id = result_text.split("Session: ")[1].split("\n")[0]
 
                 # Propose (AI)
-                response = await _call_tool(proc, "trace_propose_decision", {
-                    "session_id": session_id,
-                    "description": "Use method X",
-                    "proposed_by_type": "ai",
-                    "proposed_by_id": "test-ai",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_propose_decision",
+                    {
+                        "session_id": session_id,
+                        "description": "Use method X",
+                        "proposed_by_type": "ai",
+                        "proposed_by_id": "test-ai",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 # Resolve (AI — self-resolution)
-                response = await _call_tool(proc, "trace_resolve_decision", {
-                    "event_id": "evt_001",
-                    "session_id": session_id,
-                    "disposition": "accepted",
-                    "resolved_by_type": "ai",
-                    "resolved_by_id": "test-ai",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_resolve_decision",
+                    {
+                        "event_id": "evt_001",
+                        "session_id": session_id,
+                        "disposition": "accepted",
+                        "resolved_by_type": "ai",
+                        "resolved_by_id": "test-ai",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
                 result_text = response["result"]["content"][0]["text"]
                 assert "AI resolved its own proposal" in result_text
@@ -68,28 +83,43 @@ class TestDecisionGuardsE2E:
                 await _initialize_server(proc)
                 req_id = 2
 
-                response = await _call_tool(proc, "trace_start_session", {
-                    "project": "guard-e2e",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_start_session",
+                    {
+                        "project": "guard-e2e",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
                 result_text = response["result"]["content"][0]["text"]
                 session_id = result_text.split("Session: ")[1].split("\n")[0]
 
                 # Propose 2 decisions, resolve none
                 for i in range(2):
-                    await _call_tool(proc, "trace_propose_decision", {
-                        "session_id": session_id,
-                        "description": f"Unresolved decision {i}",
-                        "proposed_by_type": "ai",
-                        "proposed_by_id": "test-ai",
-                    }, request_id=req_id)
+                    await _call_tool(
+                        proc,
+                        "trace_propose_decision",
+                        {
+                            "session_id": session_id,
+                            "description": f"Unresolved decision {i}",
+                            "proposed_by_type": "ai",
+                            "proposed_by_id": "test-ai",
+                        },
+                        request_id=req_id,
+                    )
                     req_id += 1
 
                 # End session
-                response = await _call_tool(proc, "trace_end_session", {
-                    "session_id": session_id,
-                    "summary": "test unresolved",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_end_session",
+                    {
+                        "session_id": session_id,
+                        "summary": "test unresolved",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
                 result_text = response["result"]["content"][0]["text"]
                 assert "Unresolved decisions: 2" in result_text
@@ -105,35 +135,55 @@ class TestDecisionGuardsE2E:
                 await _initialize_server(proc)
                 req_id = 2
 
-                response = await _call_tool(proc, "trace_start_session", {
-                    "project": "guard-e2e",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_start_session",
+                    {
+                        "project": "guard-e2e",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
                 result_text = response["result"]["content"][0]["text"]
                 session_id = result_text.split("Session: ")[1].split("\n")[0]
 
                 for i in range(3):
-                    await _call_tool(proc, "trace_propose_decision", {
-                        "session_id": session_id,
-                        "description": f"Self-resolved {i}",
-                        "proposed_by_type": "ai",
-                        "proposed_by_id": "test-ai",
-                    }, request_id=req_id)
+                    await _call_tool(
+                        proc,
+                        "trace_propose_decision",
+                        {
+                            "session_id": session_id,
+                            "description": f"Self-resolved {i}",
+                            "proposed_by_type": "ai",
+                            "proposed_by_id": "test-ai",
+                        },
+                        request_id=req_id,
+                    )
                     req_id += 1
 
-                    await _call_tool(proc, "trace_resolve_decision", {
-                        "event_id": f"evt_{i + 1:03d}",
-                        "session_id": session_id,
-                        "disposition": "accepted",
-                        "resolved_by_type": "ai",
-                        "resolved_by_id": "test-ai",
-                    }, request_id=req_id)
+                    await _call_tool(
+                        proc,
+                        "trace_resolve_decision",
+                        {
+                            "event_id": f"evt_{i + 1:03d}",
+                            "session_id": session_id,
+                            "disposition": "accepted",
+                            "resolved_by_type": "ai",
+                            "resolved_by_id": "test-ai",
+                        },
+                        request_id=req_id,
+                    )
                     req_id += 1
 
-                response = await _call_tool(proc, "trace_end_session", {
-                    "session_id": session_id,
-                    "summary": "self-resolution test",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_end_session",
+                    {
+                        "session_id": session_id,
+                        "summary": "self-resolution test",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
                 result_text = response["result"]["content"][0]["text"]
                 assert "AI self-resolutions: 3" in result_text
@@ -149,35 +199,55 @@ class TestDecisionGuardsE2E:
                 await _initialize_server(proc)
                 req_id = 2
 
-                response = await _call_tool(proc, "trace_start_session", {
-                    "project": "guard-e2e",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_start_session",
+                    {
+                        "project": "guard-e2e",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
                 result_text = response["result"]["content"][0]["text"]
                 session_id = result_text.split("Session: ")[1].split("\n")[0]
 
-                await _call_tool(proc, "trace_propose_decision", {
-                    "session_id": session_id,
-                    "description": "Use cosine distance",
-                    "proposed_by_type": "ai",
-                    "proposed_by_id": "test-ai",
-                    "suggestion_type": "proactive",
-                }, request_id=req_id)
+                await _call_tool(
+                    proc,
+                    "trace_propose_decision",
+                    {
+                        "session_id": session_id,
+                        "description": "Use cosine distance",
+                        "proposed_by_type": "ai",
+                        "proposed_by_id": "test-ai",
+                        "suggestion_type": "proactive",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
-                await _call_tool(proc, "trace_resolve_decision", {
-                    "event_id": "evt_001",
-                    "session_id": session_id,
-                    "disposition": "accepted",
-                    "resolved_by_type": "human",
-                    "resolved_by_id": "researcher",
-                }, request_id=req_id)
+                await _call_tool(
+                    proc,
+                    "trace_resolve_decision",
+                    {
+                        "event_id": "evt_001",
+                        "session_id": session_id,
+                        "disposition": "accepted",
+                        "resolved_by_type": "human",
+                        "resolved_by_id": "researcher",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
-                response = await _call_tool(proc, "trace_end_session", {
-                    "session_id": session_id,
-                    "summary": "clean workflow",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_end_session",
+                    {
+                        "session_id": session_id,
+                        "summary": "clean workflow",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
                 result_text = response["result"]["content"][0]["text"]
                 assert "Unresolved decisions" not in result_text

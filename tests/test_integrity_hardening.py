@@ -40,13 +40,17 @@ from trace_mcp.tools import logging_tools, query_tools, session_tools
 def _write_invalid_session(directory, session_id: str, project: str) -> Path:
     """Write a VALID-JSON but SCHEMA-INVALID session file (bad status enum)."""
     path = Path(str(directory)) / f"{session_id}.json"
-    path.write_text(json.dumps({
-        "id": session_id,
-        "status": "not-a-valid-status",  # invalid enum -> pydantic ValidationError
-        "created": "2026-06-16T00:00:00Z",
-        "metadata": {"project": project},
-        "events": [],
-    }))
+    path.write_text(
+        json.dumps(
+            {
+                "id": session_id,
+                "status": "not-a-valid-status",  # invalid enum -> pydantic ValidationError
+                "created": "2026-06-16T00:00:00Z",
+                "metadata": {"project": project},
+                "events": [],
+            }
+        )
+    )
     return path
 
 
@@ -178,15 +182,19 @@ async def test_future_version_session_preserves_unknown_fields_on_rewrite(storag
     """
     sid = "trace_20260616_futur1"
     path = Path(str(tmp_path)) / f"{sid}.json"
-    path.write_text(json.dumps({
-        "id": sid,
-        "trace_version": "0.9.9",
-        "status": "active",
-        "created": "2026-06-16T00:00:00Z",
-        "metadata": {"project": "p", "future_meta_field": "keep-meta"},
-        "events": [],
-        "future_top_level_field": "keep-top",
-    }))
+    path.write_text(
+        json.dumps(
+            {
+                "id": sid,
+                "trace_version": "0.9.9",
+                "status": "active",
+                "created": "2026-06-16T00:00:00Z",
+                "metadata": {"project": "p", "future_meta_field": "keep-meta"},
+                "events": [],
+                "future_top_level_field": "keep-top",
+            }
+        )
+    )
 
     s = await storage.get_session(sid)
     await storage.update_session(s)  # full-file rewrite
@@ -202,14 +210,18 @@ async def test_get_session_warns_on_future_schema_version(storage, tmp_path, cap
 
     sid = "trace_20260616_futur2"
     path = Path(str(tmp_path)) / f"{sid}.json"
-    path.write_text(json.dumps({
-        "id": sid,
-        "trace_version": "0.9.9",
-        "status": "active",
-        "created": "2026-06-16T00:00:00Z",
-        "metadata": {"project": "p"},
-        "events": [],
-    }))
+    path.write_text(
+        json.dumps(
+            {
+                "id": sid,
+                "trace_version": "0.9.9",
+                "status": "active",
+                "created": "2026-06-16T00:00:00Z",
+                "metadata": {"project": "p"},
+                "events": [],
+            }
+        )
+    )
 
     with caplog.at_level(logging.WARNING):
         await storage.get_session(sid)
@@ -288,22 +300,28 @@ async def test_extra_allow_preserves_unknown_event_and_nested_fields(storage, tm
     level (not just top-level / metadata) through a rewrite."""
     sid = "trace_20260616_xtraev"
     path = Path(str(tmp_path)) / f"{sid}.json"
-    path.write_text(json.dumps({
-        "id": sid,
-        "trace_version": "0.9.9",
-        "status": "active",
-        "created": "2026-06-16T00:00:00Z",
-        "metadata": {"project": "p"},
-        "events": [{
-            "id": "evt_001",
-            "session_id": sid,
-            "type": "annotation",
-            "timestamp": "2026-06-16T00:00:00Z",
-            "actor": {"type": "ai", "id": "claude"},
-            "annotation": {"category": "gotcha", "content": "x", "future_anno_field": "keep-anno"},
-            "future_event_field": "keep-evt",
-        }],
-    }))
+    path.write_text(
+        json.dumps(
+            {
+                "id": sid,
+                "trace_version": "0.9.9",
+                "status": "active",
+                "created": "2026-06-16T00:00:00Z",
+                "metadata": {"project": "p"},
+                "events": [
+                    {
+                        "id": "evt_001",
+                        "session_id": sid,
+                        "type": "annotation",
+                        "timestamp": "2026-06-16T00:00:00Z",
+                        "actor": {"type": "ai", "id": "claude"},
+                        "annotation": {"category": "gotcha", "content": "x", "future_anno_field": "keep-anno"},
+                        "future_event_field": "keep-evt",
+                    }
+                ],
+            }
+        )
+    )
 
     s = await storage.get_session(sid)
     await storage.update_session(s)
@@ -321,14 +339,18 @@ async def test_no_version_skew_warning_for_equal_or_older_version(storage, tmp_p
     for ver in (SCHEMA_VERSION, "0.3.0"):
         sid = f"trace_20260616_v{ver.replace('.', '')}"
         path = Path(str(tmp_path)) / f"{sid}.json"
-        path.write_text(json.dumps({
-            "id": sid,
-            "trace_version": ver,
-            "status": "active",
-            "created": "2026-06-16T00:00:00Z",
-            "metadata": {"project": "p"},
-            "events": [],
-        }))
+        path.write_text(
+            json.dumps(
+                {
+                    "id": sid,
+                    "trace_version": ver,
+                    "status": "active",
+                    "created": "2026-06-16T00:00:00Z",
+                    "metadata": {"project": "p"},
+                    "events": [],
+                }
+            )
+        )
         caplog.clear()
         with caplog.at_level(logging.WARNING):
             await storage.get_session(sid)
@@ -350,9 +372,7 @@ async def test_end_session_refuses_when_disk_already_completed(storage):
     stale.ended = None
     active2 = {session.id: stale}
 
-    result = await session_tools.end_session(
-        storage, active2, session_id=session.id, summary="SECOND"
-    )
+    result = await session_tools.end_session(storage, active2, session_id=session.id, summary="SECOND")
 
     assert "already ended" in result
     disk = await storage.get_session(session.id)
@@ -361,7 +381,10 @@ async def test_end_session_refuses_when_disk_already_completed(storage):
 
 async def test_locked_disk_session_without_lock_method():
     """The helper degrades to a no-op context for a storage backend with no lock."""
+    from typing import cast
+
     from trace_mcp.schema import Session, SessionMetadata
+    from trace_mcp.storage.base import TraceStorage
     from trace_mcp.storage.locked import locked_disk_session
 
     class NoLockStore:
@@ -380,9 +403,9 @@ async def test_locked_disk_session_without_lock_method():
     mem = Session(id="trace_nolock", metadata=SessionMetadata(project="p"))
 
     # Not persisted -> yields the fallback (by identity).
-    async with locked_disk_session(store, "trace_nolock", fallback=mem) as disk:
+    async with locked_disk_session(cast(TraceStorage, store), "trace_nolock", fallback=mem) as disk:
         assert disk is mem
     store._store["trace_nolock"] = mem
     # Persisted -> yields the disk-loaded object.
-    async with locked_disk_session(store, "trace_nolock", fallback=mem) as disk:
+    async with locked_disk_session(cast(TraceStorage, store), "trace_nolock", fallback=mem) as disk:
         assert disk is mem  # same object the stub returns

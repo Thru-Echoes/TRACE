@@ -132,9 +132,9 @@ class TestAnnotationExtraction:
         assert ks.learnings[0].source_event == "evt_001"
 
     def test_extract_correction(self):
-        session = _session([
-            _annotation("evt_001", "correction", "Wrong env — use ml-dev", corrects_event_ids=["evt_000"])
-        ])
+        session = _session(
+            [_annotation("evt_001", "correction", "Wrong env — use ml-dev", corrects_event_ids=["evt_000"])]
+        )
         ks = KnowledgeStore(project="test")
         new_ids = extract_from_session(ks, session)
         assert len(new_ids) == 1
@@ -142,14 +142,16 @@ class TestAnnotationExtraction:
 
     def test_extract_correction_preserves_corrects_event_ids(self):
         """corrects_event_ids from annotation are preserved in the learning."""
-        session = _session([
-            _annotation(
-                "evt_001",
-                "correction",
-                "Fixed wrong env",
-                corrects_event_ids=["evt_010", "evt_011"],
-            )
-        ])
+        session = _session(
+            [
+                _annotation(
+                    "evt_001",
+                    "correction",
+                    "Fixed wrong env",
+                    corrects_event_ids=["evt_010", "evt_011"],
+                )
+            ]
+        )
         ks = KnowledgeStore(project="test")
         extract_from_session(ks, session)
         assert ks.learnings[0].corrects_event_ids == ["evt_010", "evt_011"]
@@ -162,9 +164,7 @@ class TestAnnotationExtraction:
         assert ks.learnings[0].category == "gotcha"
 
     def test_extract_preserves_tags(self):
-        session = _session([
-            _annotation("evt_001", "learning", "test", tags=["conda", "env"])
-        ])
+        session = _session([_annotation("evt_001", "learning", "test", tags=["conda", "env"])])
         ks = KnowledgeStore(project="test")
         extract_from_session(ks, session)
         assert ks.learnings[0].tags == ["conda", "env"]
@@ -196,14 +196,16 @@ class TestDecisionExtraction:
     """Tests for extracting learnings from decision events."""
 
     def test_extract_rejected_decision(self):
-        session = _session([
-            _decision(
-                "evt_001",
-                "Use base conda env",
-                disposition="rejected",
-                revision_note="Always use ml-dev",
-            )
-        ])
+        session = _session(
+            [
+                _decision(
+                    "evt_001",
+                    "Use base conda env",
+                    disposition="rejected",
+                    revision_note="Always use ml-dev",
+                )
+            ]
+        )
         ks = KnowledgeStore(project="test")
         new_ids = extract_from_session(ks, session)
         assert len(new_ids) == 1
@@ -211,23 +213,23 @@ class TestDecisionExtraction:
         assert ks.learnings[0].category == "decision"
 
     def test_extract_revised_decision(self):
-        session = _session([
-            _decision(
-                "evt_001",
-                "Use GPU for training",
-                disposition="revised",
-                revision_note="Use CPU — GPU quota exhausted",
-            )
-        ])
+        session = _session(
+            [
+                _decision(
+                    "evt_001",
+                    "Use GPU for training",
+                    disposition="revised",
+                    revision_note="Use CPU — GPU quota exhausted",
+                )
+            ]
+        )
         ks = KnowledgeStore(project="test")
         new_ids = extract_from_session(ks, session)
         assert len(new_ids) == 1
         assert "CPU" in ks.learnings[0].content
 
     def test_skip_accepted_decision(self):
-        session = _session([
-            _decision("evt_001", "Use pandas", disposition="accepted")
-        ])
+        session = _session([_decision("evt_001", "Use pandas", disposition="accepted")])
         ks = KnowledgeStore(project="test")
         assert extract_from_session(ks, session) == []
 
@@ -238,15 +240,17 @@ class TestDecisionExtraction:
 
     def test_preserves_rationale(self):
         """Decision rationale is included in the extracted learning content."""
-        session = _session([
-            _decision(
-                "evt_001",
-                "Switch to BM25",
-                disposition="rejected",
-                rationale="Jaccard is too simple for semantic matching",
-                revision_note="Use LLM instead",
-            )
-        ])
+        session = _session(
+            [
+                _decision(
+                    "evt_001",
+                    "Switch to BM25",
+                    disposition="rejected",
+                    rationale="Jaccard is too simple for semantic matching",
+                    revision_note="Use LLM instead",
+                )
+            ]
+        )
         ks = KnowledgeStore(project="test")
         extract_from_session(ks, session)
         content = ks.learnings[0].content
@@ -255,16 +259,18 @@ class TestDecisionExtraction:
 
     def test_preserves_suggestion_type_as_tag(self):
         """suggestion_type is added as a tag on the extracted learning."""
-        session = _session([
-            _decision(
-                "evt_001",
-                "Use BM25",
-                disposition="rejected",
-                suggestion_type="proactive",
-                revision_note="Rejected",
-                tags=["matching"],
-            )
-        ])
+        session = _session(
+            [
+                _decision(
+                    "evt_001",
+                    "Use BM25",
+                    disposition="rejected",
+                    suggestion_type="proactive",
+                    revision_note="Rejected",
+                    tags=["matching"],
+                )
+            ]
+        )
         ks = KnowledgeStore(project="test")
         extract_from_session(ks, session)
         assert "proactive" in ks.learnings[0].tags
@@ -278,15 +284,17 @@ class TestContributionExtraction:
     """Tests for extracting learnings from contribution events."""
 
     def test_extract_collaborative_contribution(self):
-        session = _session([
-            _contribution(
-                "evt_001",
-                "Developed hybrid matching approach",
-                direction="collaborative",
-                artifact="matching.py",
-                tags=["matching"],
-            )
-        ])
+        session = _session(
+            [
+                _contribution(
+                    "evt_001",
+                    "Developed hybrid matching approach",
+                    direction="collaborative",
+                    artifact="matching.py",
+                    tags=["matching"],
+                )
+            ]
+        )
         ks = KnowledgeStore(project="test")
         new_ids = extract_from_session(ks, session)
         assert len(new_ids) == 1
@@ -295,16 +303,12 @@ class TestContributionExtraction:
         assert ks.learnings[0].category == "observation"
 
     def test_skip_human_directed_contribution(self):
-        session = _session([
-            _contribution("evt_001", "Wrote the code", direction="human")
-        ])
+        session = _session([_contribution("evt_001", "Wrote the code", direction="human")])
         ks = KnowledgeStore(project="test")
         assert extract_from_session(ks, session) == []
 
     def test_skip_ai_directed_contribution(self):
-        session = _session([
-            _contribution("evt_001", "AI suggested this", direction="ai")
-        ])
+        session = _session([_contribution("evt_001", "AI suggested this", direction="ai")])
         ks = KnowledgeStore(project="test")
         assert extract_from_session(ks, session) == []
 
@@ -314,10 +318,12 @@ class TestContributionExtraction:
 
 class TestIdempotency:
     def test_double_extraction_no_duplicates(self):
-        session = _session([
-            _annotation("evt_001", "learning", "insight A"),
-            _annotation("evt_002", "gotcha", "gotcha B"),
-        ])
+        session = _session(
+            [
+                _annotation("evt_001", "learning", "insight A"),
+                _annotation("evt_002", "gotcha", "gotcha B"),
+            ]
+        )
         ks = KnowledgeStore(project="test")
 
         ids1 = extract_from_session(ks, session)
@@ -351,24 +357,26 @@ class TestIdempotency:
 class TestMultiEventExtraction:
     def test_mixed_events(self):
         """Extract from a session with multiple event types."""
-        session = _session([
-            _annotation("evt_001", "correction", "Wrong env", corrects_event_ids=["evt_000"]),
-            _annotation("evt_002", "learning", "Always activate first"),
-            _annotation("evt_003", "observation", "Pipeline took 45 min"),
-            _decision(
-                "evt_004",
-                "Use GPU",
-                disposition="revised",
-                revision_note="Use CPU instead",
-                tags=["compute"],
-            ),
-            _contribution(
-                "evt_005",
-                "Collaborative analysis approach",
-                direction="collaborative",
-                tags=["analysis"],
-            ),
-        ])
+        session = _session(
+            [
+                _annotation("evt_001", "correction", "Wrong env", corrects_event_ids=["evt_000"]),
+                _annotation("evt_002", "learning", "Always activate first"),
+                _annotation("evt_003", "observation", "Pipeline took 45 min"),
+                _decision(
+                    "evt_004",
+                    "Use GPU",
+                    disposition="revised",
+                    revision_note="Use CPU instead",
+                    tags=["compute"],
+                ),
+                _contribution(
+                    "evt_005",
+                    "Collaborative analysis approach",
+                    direction="collaborative",
+                    tags=["analysis"],
+                ),
+            ]
+        )
         ks = KnowledgeStore(project="test")
         new_ids = extract_from_session(ks, session)
         # correction + learning + revised decision + collaborative contribution = 4
@@ -402,10 +410,12 @@ class TestLLMExtraction:
 
     async def test_llm_extraction_basic(self):
         config = self._make_config()
-        session = _session([
-            _annotation("evt_001", "correction", "Wrong conda env"),
-            _annotation("evt_002", "learning", "Always use ml-dev"),
-        ])
+        session = _session(
+            [
+                _annotation("evt_001", "correction", "Wrong conda env"),
+                _annotation("evt_002", "learning", "Always use ml-dev"),
+            ]
+        )
         ks = KnowledgeStore(project="test")
 
         llm_response = {
@@ -445,17 +455,17 @@ class TestLLMExtraction:
     async def test_llm_extraction_fallback_on_error(self):
         """Permissive mode: when LLM fails, falls back to rule-based extraction."""
         config = self._make_config(strict=False)
-        session = _session([
-            _annotation("evt_001", "learning", "Rule-based fallback content"),
-        ])
+        session = _session(
+            [
+                _annotation("evt_001", "learning", "Rule-based fallback content"),
+            ]
+        )
         ks = KnowledgeStore(project="test")
 
         with patch("trace_mcp.extensions.learn.extraction._HAS_OPENAI", True):
             with patch("trace_mcp.extensions.learn.extraction.AsyncOpenAI") as MockClient:
                 mock_client = AsyncMock()
-                mock_client.chat.completions.create = AsyncMock(
-                    side_effect=Exception("API error")
-                )
+                mock_client.chat.completions.create = AsyncMock(side_effect=Exception("API error"))
                 MockClient.return_value = mock_client
 
                 new_ids = await extract_from_session_llm(ks, session, config)
@@ -469,17 +479,17 @@ class TestLLMExtraction:
         from trace_mcp.extensions.learn.config import LLMFallbackError
 
         config = self._make_config(strict=True)
-        session = _session([
-            _annotation("evt_001", "learning", "Rule-based fallback content"),
-        ])
+        session = _session(
+            [
+                _annotation("evt_001", "learning", "Rule-based fallback content"),
+            ]
+        )
         ks = KnowledgeStore(project="test")
 
         with patch("trace_mcp.extensions.learn.extraction._HAS_OPENAI", True):
             with patch("trace_mcp.extensions.learn.extraction.AsyncOpenAI") as MockClient:
                 mock_client = AsyncMock()
-                mock_client.chat.completions.create = AsyncMock(
-                    side_effect=Exception("API error")
-                )
+                mock_client.chat.completions.create = AsyncMock(side_effect=Exception("API error"))
                 MockClient.return_value = mock_client
 
                 with pytest.raises(LLMFallbackError, match="LLM extraction failed"):
@@ -488,13 +498,17 @@ class TestLLMExtraction:
     async def test_llm_extraction_idempotent(self):
         """LLM extraction skips already-extracted events."""
         config = self._make_config()
-        session = _session([
-            _annotation("evt_001", "learning", "Already extracted"),
-        ])
+        session = _session(
+            [
+                _annotation("evt_001", "learning", "Already extracted"),
+            ]
+        )
         ks = KnowledgeStore(project="test")
         # Pre-add a learning from this event
         ks.learnings.append(
-            Learning(id="lrn_001", content="Already extracted", source_session="test_session_001", source_event="evt_001")
+            Learning(
+                id="lrn_001", content="Already extracted", source_session="test_session_001", source_event="evt_001"
+            )
         )
 
         llm_response = {
@@ -574,10 +588,12 @@ class TestAutoExtraction:
 class TestExtractionEdgeCases:
     def test_extract_corrections_only(self):
         """Session with only correction annotations extracts them all."""
-        session = _session([
-            _annotation("evt_001", "correction", "Fix A", corrects_event_ids=["evt_000"]),
-            _annotation("evt_002", "correction", "Fix B", corrects_event_ids=["evt_000"]),
-        ])
+        session = _session(
+            [
+                _annotation("evt_001", "correction", "Fix A", corrects_event_ids=["evt_000"]),
+                _annotation("evt_002", "correction", "Fix B", corrects_event_ids=["evt_000"]),
+            ]
+        )
         ks = KnowledgeStore(project="test")
         new_ids = extract_from_session(ks, session)
         assert len(new_ids) == 2
@@ -593,16 +609,18 @@ class TestExtractionEdgeCases:
 
     def test_extract_collaborative_contribution(self):
         """Collaborative direction contributions are extracted as observations."""
-        session = _session([
-            _contribution(
-                "evt_001",
-                "Joint brainstorming produced new approach",
-                direction="collaborative",
-                execution="ai",
-                artifact="src/new_approach.py",
-                tags=["collab"],
-            )
-        ])
+        session = _session(
+            [
+                _contribution(
+                    "evt_001",
+                    "Joint brainstorming produced new approach",
+                    direction="collaborative",
+                    execution="ai",
+                    artifact="src/new_approach.py",
+                    tags=["collab"],
+                )
+            ]
+        )
         ks = KnowledgeStore(project="test")
         new_ids = extract_from_session(ks, session)
         assert len(new_ids) == 1
