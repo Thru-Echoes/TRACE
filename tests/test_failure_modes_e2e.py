@@ -28,17 +28,23 @@ from test_e2e_server import (
 
 async def _setup_session(proc, req_id: int = 2, project: str = "fm-test"):
     """Start a session and return (session_id, next_req_id)."""
-    response = await _call_tool(proc, "trace_start_session", {
-        "project": project,
-        "description": f"Failure mode test session ({project})",
-    }, request_id=req_id)
+    response = await _call_tool(
+        proc,
+        "trace_start_session",
+        {
+            "project": project,
+            "description": f"Failure mode test session ({project})",
+        },
+        request_id=req_id,
+    )
     text = response["result"]["content"][0]["text"]
     session_id = text.split("Session: ")[1].split("\n")[0]
     return session_id, req_id + 1
 
 
-async def _propose(proc, session_id, req_id, *, description="Test decision",
-                   proposed_by_type="ai", proposed_by_id="test-ai", **kwargs):
+async def _propose(
+    proc, session_id, req_id, *, description="Test decision", proposed_by_type="ai", proposed_by_id="test-ai", **kwargs
+):
     """Propose a decision and return (result_text, event_id, next_req_id)."""
     args = {
         "session_id": session_id,
@@ -56,9 +62,17 @@ async def _propose(proc, session_id, req_id, *, description="Test decision",
     return text, "evt_001", req_id + 1
 
 
-async def _resolve(proc, session_id, event_id, req_id, *,
-                   disposition="accepted", resolved_by_type="human",
-                   resolved_by_id="researcher", **kwargs):
+async def _resolve(
+    proc,
+    session_id,
+    event_id,
+    req_id,
+    *,
+    disposition="accepted",
+    resolved_by_type="human",
+    resolved_by_id="researcher",
+    **kwargs,
+):
     """Resolve a decision and return (result_text, next_req_id)."""
     args = {
         "event_id": event_id,
@@ -74,15 +88,19 @@ async def _resolve(proc, session_id, event_id, req_id, *,
 
 async def _end_session(proc, session_id, req_id, summary="test"):
     """End session and return (result_text, next_req_id)."""
-    response = await _call_tool(proc, "trace_end_session", {
-        "session_id": session_id,
-        "summary": summary,
-    }, request_id=req_id)
+    response = await _call_tool(
+        proc,
+        "trace_end_session",
+        {
+            "session_id": session_id,
+            "summary": summary,
+        },
+        request_id=req_id,
+    )
     return response["result"]["content"][0]["text"], req_id + 1
 
 
-async def _annotate(proc, session_id, req_id, *, category="learning",
-                    content="Test annotation", **kwargs):
+async def _annotate(proc, session_id, req_id, *, category="learning", content="Test annotation", **kwargs):
     """Log an annotation and return (result_text, next_req_id)."""
     args = {
         "category": category,
@@ -95,8 +113,9 @@ async def _annotate(proc, session_id, req_id, *, category="learning",
     return response["result"]["content"][0]["text"], req_id + 1
 
 
-async def _contribute(proc, session_id, req_id, *, description="Test contribution",
-                      direction="human", execution="ai", **kwargs):
+async def _contribute(
+    proc, session_id, req_id, *, description="Test contribution", direction="human", execution="ai", **kwargs
+):
     """Log a contribution and return (result_text, next_req_id)."""
     args = {
         "session_id": session_id,
@@ -109,8 +128,7 @@ async def _contribute(proc, session_id, req_id, *, description="Test contributio
     return response["result"]["content"][0]["text"], req_id + 1
 
 
-async def _log_tool_call(proc, session_id, req_id, *, server="domain-server",
-                         tool_name="do_work", **kwargs):
+async def _log_tool_call(proc, session_id, req_id, *, server="domain-server", tool_name="do_work", **kwargs):
     """Log a tool call and return (result_text, next_req_id)."""
     args = {
         "session_id": session_id,
@@ -144,8 +162,12 @@ class TestAttributionFailures:
                 sid, rid = await _setup_session(proc)
                 _, eid, rid = await _propose(proc, sid, rid)
                 text, rid = await _resolve(
-                    proc, sid, eid, rid,
-                    resolved_by_type="ai", resolved_by_id="test-ai",
+                    proc,
+                    sid,
+                    eid,
+                    rid,
+                    resolved_by_type="ai",
+                    resolved_by_id="test-ai",
                 )
                 assert "AI resolved its own proposal" in text
             finally:
@@ -174,8 +196,12 @@ class TestAttributionFailures:
                 for _ in range(3):
                     _, eid, rid = await _propose(proc, sid, rid)
                     _, rid = await _resolve(
-                        proc, sid, eid, rid,
-                        resolved_by_type="ai", resolved_by_id="test-ai",
+                        proc,
+                        sid,
+                        eid,
+                        rid,
+                        resolved_by_type="ai",
+                        resolved_by_id="test-ai",
                     )
                 text, rid = await _end_session(proc, sid, rid)
                 assert "AI self-resolutions: 3" in text
@@ -195,9 +221,12 @@ class TestAttributionFailures:
                 sid, rid = await _setup_session(proc)
                 # Direction=ai, execution=human — possibly swapped
                 text, rid = await _contribute(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     description="Built the widget",
-                    direction="ai", execution="human",
+                    direction="ai",
+                    execution="human",
                     conversation_snippet="please build the widget",
                     related_decision_ids=[],
                 )
@@ -233,7 +262,9 @@ class TestAttributionFailures:
                 sid, rid = await _setup_session(proc)
                 _, eid, rid = await _propose(proc, sid, rid)
                 text, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     category="correction",
                     content="Wrong threshold",
                     corrects_event_ids=[eid],
@@ -251,7 +282,9 @@ class TestAttributionFailures:
                 sid, rid = await _setup_session(proc)
                 _, eid, rid = await _propose(proc, sid, rid)
                 text, rid = await _contribute(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     conversation_snippet="user said to build it",
                     related_decision_ids=[eid],
                 )
@@ -271,8 +304,10 @@ class TestAttributionFailures:
                 await _initialize_server(proc)
                 sid, rid = await _setup_session(proc)
                 # Claiming "requested" when it was actually proactive
-                text, eid, rid = await _propose(
-                    proc, sid, rid,
+                text, _eid, rid = await _propose(
+                    proc,
+                    sid,
+                    rid,
                     suggestion_type="requested",
                 )
                 assert "Decision proposed" in text
@@ -295,7 +330,9 @@ class TestAttributionFailures:
                 # Log 8 events in rapid succession (simulating deferred logging)
                 for i in range(8):
                     _, rid = await _annotate(
-                        proc, sid, rid,
+                        proc,
+                        sid,
+                        rid,
                         content=f"Batch annotation {i}",
                     )
                 text, rid = await _end_session(proc, sid, rid)
@@ -318,7 +355,9 @@ class TestAttributionFailures:
                 sid, rid = await _setup_session(proc)
                 # Human logs annotation but actor_type defaults to "ai"
                 text, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     content="Human observation logged with default actor",
                     # actor_type not set — defaults to "ai"
                 )
@@ -341,7 +380,9 @@ class TestAttributionFailures:
                 sid, rid = await _setup_session(proc)
                 _, eid, rid = await _propose(proc, sid, rid)
                 text, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     category="gotcha",
                     content="Method X doesn't actually work here",
                     corrects_event_ids=[eid],
@@ -358,7 +399,9 @@ class TestAttributionFailures:
                 await _initialize_server(proc)
                 sid, rid = await _setup_session(proc)
                 text, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     category="gotcha",
                     content="Surprising API behavior",
                 )
@@ -379,7 +422,9 @@ class TestAttributionFailures:
                 sid, rid = await _setup_session(proc)
                 # One contribution that should have been two separate ones
                 text, rid = await _contribute(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     description="Built features A and B (should be 2 contributions)",
                     direction="collaborative",
                     execution="collaborative",
@@ -413,8 +458,10 @@ class TestCompletenessFailures:
                 await _initialize_server(proc)
                 sid, rid = await _setup_session(proc)
                 # AI only logs a contribution, "forgetting" the decision
-                text, rid = await _contribute(
-                    proc, sid, rid,
+                _text, rid = await _contribute(
+                    proc,
+                    sid,
+                    rid,
                     description="Implemented feature",
                     conversation_snippet="let's use approach X (decision not logged!)",
                 )
@@ -476,7 +523,9 @@ class TestCompletenessFailures:
                 rid = 2
                 # Log event WITHOUT starting a session first → auto-session
                 text, rid = await _annotate(
-                    proc, None, rid,
+                    proc,
+                    None,
+                    rid,
                     content="This happened before any session was started",
                 )
                 # Auto-session warning appears, but no "late start" detection
@@ -500,8 +549,12 @@ class TestCompletenessFailures:
                 sid, rid = await _setup_session(proc)
                 _, eid, rid = await _propose(proc, sid, rid)
                 _, rid = await _resolve(
-                    proc, sid, eid, rid,
-                    resolved_by_type="ai", resolved_by_id="test-ai",
+                    proc,
+                    sid,
+                    eid,
+                    rid,
+                    resolved_by_type="ai",
+                    resolved_by_id="test-ai",
                 )
                 text, rid = await _end_session(proc, sid, rid)
                 # Audit IS emitted...
@@ -523,12 +576,17 @@ class TestCompletenessFailures:
             try:
                 await _initialize_server(proc)
                 sid, rid = await _setup_session(proc)
-                _, eid, rid = await _propose(proc, sid, rid)
+                _, _eid, rid = await _propose(proc, sid, rid)
                 # Simulate: AI "forgets" session_id after compact
                 # It can still load sessions via list_sessions
-                response = await _call_tool(proc, "trace_list_sessions", {
-                    "project": "fm-test",
-                }, request_id=rid)
+                response = await _call_tool(
+                    proc,
+                    "trace_list_sessions",
+                    {
+                        "project": "fm-test",
+                    },
+                    request_id=rid,
+                )
                 rid += 1
                 sessions = json.loads(response["result"]["content"][0]["text"])
                 assert len(sessions) >= 1
@@ -552,8 +610,12 @@ class TestCompletenessFailures:
                 _, eid, rid = await _propose(proc, sid, rid)
                 # Resolve immediately (well under 5s)
                 text, rid = await _resolve(
-                    proc, sid, eid, rid,
-                    resolved_by_type="ai", resolved_by_id="test-ai",
+                    proc,
+                    sid,
+                    eid,
+                    rid,
+                    resolved_by_type="ai",
+                    resolved_by_id="test-ai",
                 )
                 assert "self-resolved" in text.lower() or "AI resolved" in text
             finally:
@@ -585,7 +647,10 @@ class TestCompletenessFailures:
                 sid, rid = await _setup_session(proc)
                 _, eid, rid = await _propose(proc, sid, rid, description="Bad approach")
                 text, rid = await _resolve(
-                    proc, sid, eid, rid,
+                    proc,
+                    sid,
+                    eid,
+                    rid,
                     disposition="rejected",
                     revision_note="This approach is fundamentally wrong",
                 )
@@ -629,7 +694,9 @@ class TestStructuralFailures:
                 sid, rid = await _setup_session(proc)
                 # Should be 3 decisions (X → Y → Z) but logged as one
                 _, eid, rid = await _propose(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     description="Use method Z (after considering X and Y)",
                 )
                 _, rid = await _resolve(proc, sid, eid, rid)
@@ -653,7 +720,9 @@ class TestStructuralFailures:
                 await _initialize_server(proc)
                 sid, rid = await _setup_session(proc)
                 text, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     category="correction",
                     content="Fixed the issue",
                     corrects_event_ids=["evt_999"],
@@ -673,7 +742,9 @@ class TestStructuralFailures:
                 sid, rid = await _setup_session(proc)
                 _, eid, rid = await _propose(proc, sid, rid)
                 text, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     category="correction",
                     content="Fixed threshold",
                     corrects_event_ids=[eid],
@@ -691,7 +762,9 @@ class TestStructuralFailures:
                 await _initialize_server(proc)
                 sid, rid = await _setup_session(proc)
                 text, rid = await _contribute(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     related_decision_ids=["evt_phantom"],
                     conversation_snippet="build it",
                 )
@@ -712,11 +785,15 @@ class TestStructuralFailures:
                 await _initialize_server(proc)
                 sid, rid = await _setup_session(proc)
                 text1, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     content="Important discovery about the data",
                 )
                 text2, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     content="Important discovery about the data",  # exact duplicate
                 )
                 # Both logged, different event IDs
@@ -738,8 +815,10 @@ class TestStructuralFailures:
             try:
                 await _initialize_server(proc)
                 sid, rid = await _setup_session(proc)
-                text, eid, rid = await _propose(
-                    proc, sid, rid,
+                text, _eid, rid = await _propose(
+                    proc,
+                    sid,
+                    rid,
                     description="Revised approach",
                     revises_event_id="evt_wrong",
                 )
@@ -757,11 +836,17 @@ class TestStructuralFailures:
                 sid, rid = await _setup_session(proc)
                 _, eid1, rid = await _propose(proc, sid, rid, description="First approach")
                 _, rid = await _resolve(
-                    proc, sid, eid1, rid,
-                    disposition="rejected", revision_note="Doesn't work",
+                    proc,
+                    sid,
+                    eid1,
+                    rid,
+                    disposition="rejected",
+                    revision_note="Doesn't work",
                 )
-                text, eid2, rid = await _propose(
-                    proc, sid, rid,
+                text, _eid2, rid = await _propose(
+                    proc,
+                    sid,
+                    rid,
                     description="Better approach",
                     revises_event_id=eid1,
                 )
@@ -781,7 +866,9 @@ class TestStructuralFailures:
                 await _initialize_server(proc)
                 sid, rid = await _setup_session(proc)
                 text, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     category="correction",
                     content="The threshold should be 0.5 not 0.3",
                 )
@@ -798,7 +885,9 @@ class TestStructuralFailures:
                 sid, rid = await _setup_session(proc)
                 _, eid, rid = await _propose(proc, sid, rid)
                 text, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     category="correction",
                     content="Threshold should be 0.5",
                     corrects_event_ids=[eid],
@@ -817,7 +906,9 @@ class TestStructuralFailures:
                 sid, rid = await _setup_session(proc)
                 for i in range(3):
                     _, rid = await _annotate(
-                        proc, sid, rid,
+                        proc,
+                        sid,
+                        rid,
                         category="correction",
                         content=f"Orphaned fix {i}",
                     )
@@ -847,19 +938,29 @@ class TestCrossSessionFailures:
                 await _initialize_server(proc)
                 rid = 2
                 # Create sessions with different project names for same work
-                response = await _call_tool(proc, "trace_start_session", {
-                    "project": "demo-project",
-                    "description": "Analysis session",
-                }, request_id=rid)
+                response = await _call_tool(
+                    proc,
+                    "trace_start_session",
+                    {
+                        "project": "demo-project",
+                        "description": "Analysis session",
+                    },
+                    request_id=rid,
+                )
                 rid += 1
                 text1 = response["result"]["content"][0]["text"]
                 sid1 = text1.split("Session: ")[1].split("\n")[0]
                 _, rid = await _end_session(proc, sid1, rid)
 
-                response = await _call_tool(proc, "trace_start_session", {
-                    "project": "Demo-Project",  # different casing!
-                    "description": "Same project, different name",
-                }, request_id=rid)
+                response = await _call_tool(
+                    proc,
+                    "trace_start_session",
+                    {
+                        "project": "Demo-Project",  # different casing!
+                        "description": "Same project, different name",
+                    },
+                    request_id=rid,
+                )
                 rid += 1
                 text2 = response["result"]["content"][0]["text"]
                 # No warning about inconsistent project naming
@@ -914,19 +1015,29 @@ class TestCrossSessionFailures:
                 await _initialize_server(proc)
                 rid = 2
                 # Session 1 — part of same workflow
-                response = await _call_tool(proc, "trace_start_session", {
-                    "project": "fm-test",
-                    "description": "Part 1 of analysis",
-                }, request_id=rid)
+                response = await _call_tool(
+                    proc,
+                    "trace_start_session",
+                    {
+                        "project": "fm-test",
+                        "description": "Part 1 of analysis",
+                    },
+                    request_id=rid,
+                )
                 rid += 1
                 sid1 = response["result"]["content"][0]["text"].split("Session: ")[1].split("\n")[0]
                 _, rid = await _end_session(proc, sid1, rid, summary="Part 1 done")
 
                 # Session 2 — continuation, should be linked
-                response = await _call_tool(proc, "trace_start_session", {
-                    "project": "fm-test",
-                    "description": "Part 2 of analysis (continuation)",
-                }, request_id=rid)
+                response = await _call_tool(
+                    proc,
+                    "trace_start_session",
+                    {
+                        "project": "fm-test",
+                        "description": "Part 2 of analysis (continuation)",
+                    },
+                    request_id=rid,
+                )
                 rid += 1
                 text2 = response["result"]["content"][0]["text"]
                 # No warning about fragmentation
@@ -956,7 +1067,9 @@ class TestProtocolViolations:
                 await _initialize_server(proc)
                 sid, rid = await _setup_session(proc)
                 text, rid = await _log_tool_call(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     server="trace",
                     tool_name="trace_propose_decision",
                     input={"description": "test"},
@@ -974,7 +1087,9 @@ class TestProtocolViolations:
                 await _initialize_server(proc)
                 sid, rid = await _setup_session(proc)
                 text, rid = await _log_tool_call(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     server="mcp-server",
                     tool_name="trace_end_session",
                     input={},
@@ -996,7 +1111,9 @@ class TestProtocolViolations:
                 sid, rid = await _setup_session(proc)
                 for tool in ["Read", "Grep", "Glob", "Bash"]:
                     text, rid = await _log_tool_call(
-                        proc, sid, rid,
+                        proc,
+                        sid,
+                        rid,
                         server="filesystem",
                         tool_name=tool,
                         input={"path": "/tmp/test"},
@@ -1013,7 +1130,9 @@ class TestProtocolViolations:
                 await _initialize_server(proc)
                 sid, rid = await _setup_session(proc)
                 text, rid = await _log_tool_call(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     server="corpus-search",
                     tool_name="search_papers",
                     input={"query": "climate change"},
@@ -1037,7 +1156,9 @@ class TestProtocolViolations:
                 sid, rid = await _setup_session(proc)
                 # Log a completely fabricated tool call
                 text, rid = await _log_tool_call(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     server="analysis-pipeline",
                     tool_name="run_model",
                     input={"model": "gpt-5.4-mini", "data": "fabricated_dataset.csv"},
@@ -1064,7 +1185,9 @@ class TestProtocolViolations:
                 sid, rid = await _setup_session(proc)
                 # AI only logs the successful 4th attempt, hiding 3 failures
                 text, rid = await _log_tool_call(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     server="analysis",
                     tool_name="run_model",
                     input={"attempt": 4},
@@ -1101,11 +1224,15 @@ class TestSystemicFailures:
                 # Log events — timestamps will be in order of logging,
                 # not necessarily in order of occurrence
                 _, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     content="Event B happened first but logged second",
                 )
                 _, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     content="Event A happened second but logged first",
                 )
                 # No timestamp ordering validation
@@ -1129,18 +1256,28 @@ class TestSystemicFailures:
                 rid = 2
                 # Two different projects with same name
                 for desc in ["Climate analysis", "Totally different project"]:
-                    response = await _call_tool(proc, "trace_start_session", {
-                        "project": "shared-name",
-                        "description": desc,
-                    }, request_id=rid)
+                    response = await _call_tool(
+                        proc,
+                        "trace_start_session",
+                        {
+                            "project": "shared-name",
+                            "description": desc,
+                        },
+                        request_id=rid,
+                    )
                     rid += 1
                     text = response["result"]["content"][0]["text"]
                     sid = text.split("Session: ")[1].split("\n")[0]
                     _, rid = await _end_session(proc, sid, rid)
                 # Both accepted under same project name
-                response = await _call_tool(proc, "trace_list_sessions", {
-                    "project": "shared-name",
-                }, request_id=rid)
+                response = await _call_tool(
+                    proc,
+                    "trace_list_sessions",
+                    {
+                        "project": "shared-name",
+                    },
+                    request_id=rid,
+                )
                 rid += 1
                 sessions = json.loads(response["result"]["content"][0]["text"])
                 assert len(sessions) == 2
@@ -1166,23 +1303,24 @@ class TestSystemicFailures:
                     _, rid = await _resolve(proc, sid, eid, rid)
                 for i in range(5):
                     _, rid = await _contribute(
-                        proc, sid, rid,
+                        proc,
+                        sid,
+                        rid,
                         description=f"Contribution {i}",
                         conversation_snippet=f"build feature {i}",
                     )
                 for i in range(5):
                     _, rid = await _log_tool_call(
-                        proc, sid, rid,
+                        proc,
+                        sid,
+                        rid,
                         tool_name=f"analyze_{i}",
                         input={"step": i},
                     )
                 _, rid = await _end_session(proc, sid, rid)
                 elapsed = time.monotonic() - start
                 # Should complete in reasonable time despite guard rails
-                assert elapsed < 15.0, (
-                    f"Session with 30 events + guard rails took {elapsed:.1f}s "
-                    f"(should be <15s)"
-                )
+                assert elapsed < 15.0, f"Session with 30 events + guard rails took {elapsed:.1f}s (should be <15s)"
             finally:
                 await _shutdown_server(proc)
 
@@ -1205,7 +1343,9 @@ class TestFullScenarios:
 
                 # AI proposes, human resolves
                 _, eid1, rid = await _propose(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     description="Use cosine distance for similarity",
                     suggestion_type="proactive",
                 )
@@ -1213,7 +1353,9 @@ class TestFullScenarios:
 
                 # Contribution with all fields
                 _, rid = await _contribute(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     description="Implemented cosine distance",
                     artifact="src/distances.py",
                     related_decision_ids=[eid1],
@@ -1222,7 +1364,9 @@ class TestFullScenarios:
 
                 # Domain tool call
                 _, rid = await _log_tool_call(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     server="analysis",
                     tool_name="compute_similarity",
                     input={"method": "cosine"},
@@ -1230,7 +1374,9 @@ class TestFullScenarios:
 
                 # Learning annotation
                 _, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     content="Cosine distance is invariant to magnitude",
                     tags=["methodology"],
                 )
@@ -1255,25 +1401,35 @@ class TestFullScenarios:
                 # FM1 + FM25: AI self-resolves immediately
                 _, eid1, rid = await _propose(proc, sid, rid, description="Self-resolved A")
                 resolve_text, rid = await _resolve(
-                    proc, sid, eid1, rid,
-                    resolved_by_type="ai", resolved_by_id="test-ai",
+                    proc,
+                    sid,
+                    eid1,
+                    rid,
+                    resolved_by_type="ai",
+                    resolved_by_id="test-ai",
                 )
                 assert "AI resolved its own proposal" in resolve_text
 
                 # FM31: Human rejects
                 _, eid2, rid = await _propose(proc, sid, rid, description="Bad idea")
                 reject_text, rid = await _resolve(
-                    proc, sid, eid2, rid,
-                    disposition="rejected", revision_note="Wrong approach",
+                    proc,
+                    sid,
+                    eid2,
+                    rid,
+                    disposition="rejected",
+                    revision_note="Wrong approach",
                 )
                 assert "correction" in reject_text.lower()
 
                 # FM9: Unresolved decision
-                _, eid3, rid = await _propose(proc, sid, rid, description="Left hanging")
+                _, _eid3, rid = await _propose(proc, sid, rid, description="Left hanging")
 
                 # FM17: Orphaned correction
                 corr_text, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     category="correction",
                     content="Fixed the threshold",
                 )
@@ -1284,7 +1440,9 @@ class TestFullScenarios:
 
                 # FM13: Dangling reference
                 dangle_text, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     category="correction",
                     content="Another fix",
                     corrects_event_ids=["evt_phantom"],
@@ -1294,7 +1452,9 @@ class TestFullScenarios:
 
                 # FM22: Logging TRACE's own call
                 trace_text, rid = await _log_tool_call(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     server="trace",
                     tool_name="trace_start_session",
                     input={"project": "oops"},
@@ -1303,7 +1463,9 @@ class TestFullScenarios:
 
                 # FM23: Logging exploratory call
                 read_text, rid = await _log_tool_call(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     server="filesystem",
                     tool_name="Read",
                     input={"path": "/tmp/file"},
@@ -1312,7 +1474,9 @@ class TestFullScenarios:
 
                 # FM26: Gotcha with corrects_event_ids
                 gotcha_text, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     category="gotcha",
                     content="Actually this was wrong",
                     corrects_event_ids=[eid1],
@@ -1344,14 +1508,19 @@ class TestFullScenarios:
 
                 # Step 1: AI proposes (bad)
                 _, eid1, rid = await _propose(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     description="Use Euclidean distance",
                     suggestion_type="proactive",
                 )
 
                 # Step 2: Human rejects
                 reject_text, rid = await _resolve(
-                    proc, sid, eid1, rid,
+                    proc,
+                    sid,
+                    eid1,
+                    rid,
                     disposition="rejected",
                     revision_note="Euclidean is inappropriate for high-dim text",
                 )
@@ -1359,7 +1528,9 @@ class TestFullScenarios:
 
                 # Step 3: Correction annotation
                 _, rid = await _annotate(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     category="correction",
                     content="Euclidean distance is inappropriate for text embeddings",
                     corrects_event_ids=[eid1],
@@ -1368,7 +1539,9 @@ class TestFullScenarios:
 
                 # Step 4: AI proposes revision
                 _, eid2, rid = await _propose(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     description="Use cosine distance instead",
                     revises_event_id=eid1,
                 )
@@ -1378,7 +1551,9 @@ class TestFullScenarios:
 
                 # Step 6: Contribution
                 _, rid = await _contribute(
-                    proc, sid, rid,
+                    proc,
+                    sid,
+                    rid,
                     description="Implemented cosine distance",
                     artifact="src/distances.py",
                     related_decision_ids=[eid2],

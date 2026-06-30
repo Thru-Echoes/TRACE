@@ -35,7 +35,7 @@ def _mock_provider(vectors: list[list[float]] | None = None, model_name: str = "
 
     async def _embed(texts):
         if vectors:
-            return vectors[:len(texts)]
+            return vectors[: len(texts)]
         # Default: return distinct vectors for each text
         return [[float(i), 0.0, 0.0, 0.0] for i in range(len(texts))]
 
@@ -62,8 +62,10 @@ class TestEmbeddingFullPipeline:
         provider = _mock_provider([ML_VEC])
         backend = EmbeddingBackend(provider=provider)
         results = await recall_learnings(
-            loaded.learnings, "which anaconda environment?",
-            backend=backend, threshold=0.0,
+            loaded.learnings,
+            "which anaconda environment?",
+            backend=backend,
+            threshold=0.0,
         )
         assert len(results) == 1
         assert results[0]["score"] > 0.5
@@ -96,8 +98,10 @@ class TestEmbeddingFullPipeline:
         # BM25 test — "anaconda" has no keyword overlap with "conda"
         bm25 = BM25Backend()
         bm25_results = await recall_learnings(
-            loaded.learnings, "which anaconda environment should I activate",
-            backend=bm25, threshold=0.0,
+            loaded.learnings,
+            "which anaconda environment should I activate",
+            backend=bm25,
+            threshold=0.0,
         )
         bm25_score = bm25_results[0]["score"] if bm25_results else 0.0
 
@@ -105,8 +109,10 @@ class TestEmbeddingFullPipeline:
         provider = _mock_provider([ML_VEC])  # close to CONDA_VEC
         emb_backend = EmbeddingBackend(provider=provider)
         emb_results = await recall_learnings(
-            loaded.learnings, "which anaconda environment should I activate",
-            backend=emb_backend, threshold=0.0,
+            loaded.learnings,
+            "which anaconda environment should I activate",
+            backend=emb_backend,
+            threshold=0.0,
         )
         emb_score = emb_results[0]["score"]
 
@@ -133,8 +139,11 @@ class TestEmbeddingFullPipeline:
         provider = _mock_provider([CONDA_VEC])
         backend = EmbeddingBackend(provider=provider)
         results = await recall_learnings(
-            loaded.learnings, "conda environment",
-            backend=backend, threshold=0.0, limit=3,
+            loaded.learnings,
+            "conda environment",
+            backend=backend,
+            threshold=0.0,
+            limit=3,
         )
         assert results[0]["learning"]["content"] == "Always use conda ml-dev"
 
@@ -160,8 +169,10 @@ class TestBackendFallbackChain:
         backend = EmbeddingBackend(provider=provider)
         learnings = [
             Learning(
-                id="lrn_001", content="conda env",
-                embedding=CONDA_VEC, embedding_model="test",
+                id="lrn_001",
+                content="conda env",
+                embedding=CONDA_VEC,
+                embedding_model="test",
             ),
             Learning(id="lrn_002", content="conda setup"),  # no embedding
         ]
@@ -175,8 +186,10 @@ class TestBackendFallbackChain:
         backend = EmbeddingBackend(provider=provider)
         learnings = [
             Learning(
-                id="lrn_001", content="test",
-                embedding=CONDA_VEC, embedding_model="test",
+                id="lrn_001",
+                content="test",
+                embedding=CONDA_VEC,
+                embedding_model="test",
             ),
         ]
         with pytest.raises(RuntimeError, match="API down"):
@@ -190,8 +203,10 @@ class TestModelChangeIntegration:
     def test_stale_detection(self):
         """Learnings with different embedding_model are stale."""
         lrn = Learning(
-            id="lrn_001", content="test",
-            embedding=[0.1], embedding_model="old-model",
+            id="lrn_001",
+            content="test",
+            embedding=[0.1],
+            embedding_model="old-model",
         )
         assert lrn.embedding_model != "new-model"
         assert lrn.embedding is not None
@@ -199,8 +214,10 @@ class TestModelChangeIntegration:
     async def test_fresh_embeddings_not_stale(self):
         """Learnings with matching embedding_model are fresh."""
         lrn = Learning(
-            id="lrn_001", content="test",
-            embedding=[0.1], embedding_model="current-model",
+            id="lrn_001",
+            content="test",
+            embedding=[0.1],
+            embedding_model="current-model",
         )
         assert lrn.embedding_model == "current-model"
 
@@ -247,8 +264,11 @@ class TestRealDataEmbeddings:
             pytest.skip("real store currently has no actor-related learning to recall")
         bm25 = BM25Backend()
         results = await recall_learnings(
-            ks.learnings, "schema validation rules for actors",
-            backend=bm25, threshold=0.0, limit=5,
+            ks.learnings,
+            "schema validation rules for actors",
+            backend=bm25,
+            threshold=0.0,
+            limit=5,
         )
         assert len(results) > 0
         ids = {r["learning"]["id"] for r in results}
@@ -275,8 +295,11 @@ class TestRealDataEmbeddings:
 
         backend = EmbeddingBackend(provider=provider)
         results = await recall_learnings(
-            ks.learnings, "audio recording problems on mac",
-            backend=backend, threshold=0.0, limit=5,
+            ks.learnings,
+            "audio recording problems on mac",
+            backend=backend,
+            threshold=0.0,
+            limit=5,
         )
         assert len(results) > 0
         expected = self._ids_with_content(ks, "audio") | self._ids_with_content(ks, "ffmpeg")

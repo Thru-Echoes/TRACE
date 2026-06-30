@@ -51,8 +51,7 @@ async def log_tool_call(
     tool_lower = tool_name.lower()
     if "trace" in server_lower or tool_lower.startswith("trace_"):
         warnings.append(
-            "TRACE protocol says to never log TRACE's own tool calls. "
-            "This event was logged but should be avoided."
+            "TRACE protocol says to never log TRACE's own tool calls. This event was logged but should be avoided."
         )
 
     # Hint about exploratory tool calls
@@ -129,11 +128,7 @@ async def log_annotation(
     # is likely being used as a workaround for the correction relationship.
     # This is the anti-pattern of a correction with no corrects_event_ids and
     # no anchor, where related_event_ids stands in for the correction link.
-    if (
-        category == "correction"
-        and not effective_corrects
-        and effective_related
-    ):
+    if category == "correction" and not effective_corrects and effective_related:
         warnings.append(
             "Correction has empty corrects_event_ids but non-empty related_event_ids. "
             "If related_event_ids contains the corrected item's anchor, move it to "

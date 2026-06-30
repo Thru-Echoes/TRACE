@@ -122,9 +122,7 @@ class TestJaccardBackend:
 
     def test_score_learning_with_tags(self):
         score_no_tags = score_learning(CONDA_LEARNING, "conda environment setup")
-        score_with_tags = score_learning(
-            CONDA_LEARNING, "conda environment setup", context_tags=["conda"]
-        )
+        score_with_tags = score_learning(CONDA_LEARNING, "conda environment setup", context_tags=["conda"])
         assert score_with_tags > score_no_tags
 
     async def test_backend_interface(self):
@@ -227,9 +225,7 @@ class TestBM25Backend:
     async def test_tag_boosting(self):
         backend = BM25Backend(tag_weight=0.3)
         results_no_tags = await backend.score_batch(ALL_LEARNINGS, "environment")
-        results_with_tags = await backend.score_batch(
-            ALL_LEARNINGS, "environment", context_tags=["conda"]
-        )
+        results_with_tags = await backend.score_batch(ALL_LEARNINGS, "environment", context_tags=["conda"])
         # Conda learning should score higher with matching tags
         conda_idx = 0  # lrn_001
         score_no_tags = dict(results_no_tags)[conda_idx]
@@ -274,12 +270,14 @@ class TestLLMBackend:
 
         mock_response = MagicMock()
         mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps({
-            "0": 0.95,
-            "1": 0.3,
-            "2": 0.05,
-            "3": 0.7,
-        })
+        mock_response.choices[0].message.content = json.dumps(
+            {
+                "0": 0.95,
+                "1": 0.3,
+                "2": 0.05,
+                "3": 0.7,
+            }
+        )
 
         with patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", True):
             with patch("trace_mcp.extensions.learn.matching.AsyncOpenAI") as MockClient:
@@ -305,9 +303,7 @@ class TestLLMBackend:
         with patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", True):
             with patch("trace_mcp.extensions.learn.matching.AsyncOpenAI") as MockClient:
                 mock_client = AsyncMock()
-                mock_client.chat.completions.create = AsyncMock(
-                    side_effect=Exception("API error")
-                )
+                mock_client.chat.completions.create = AsyncMock(side_effect=Exception("API error"))
                 MockClient.return_value = mock_client
 
                 from trace_mcp.extensions.learn.matching import LLMBackend
@@ -332,9 +328,7 @@ class TestLLMBackend:
         with patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", True):
             with patch("trace_mcp.extensions.learn.matching.AsyncOpenAI") as MockClient:
                 mock_client = AsyncMock()
-                mock_client.chat.completions.create = AsyncMock(
-                    side_effect=Exception("API error")
-                )
+                mock_client.chat.completions.create = AsyncMock(side_effect=Exception("API error"))
                 MockClient.return_value = mock_client
 
                 from trace_mcp.extensions.learn.matching import LLMBackend
@@ -383,7 +377,8 @@ class TestBackendSelection:
     """Test backend auto-selection priority: Embedding > LLM > BM25."""
 
     _NO_EMBEDDING = patch(
-        "trace_mcp.extensions.learn.matching.get_embedding_provider", return_value=None,
+        "trace_mcp.extensions.learn.matching.get_embedding_provider",
+        return_value=None,
     )
 
     def test_bm25_when_no_api_key(self):
@@ -683,9 +678,7 @@ class TestBM25Stemming:
             Learning(id="lrn_002", content="Log decisions before implementing — TRACE discipline"),
         ]
         backend = BM25Backend(tag_weight=0.0)
-        results = await backend.score_batch(
-            learnings, "implementing decisions in the workflow"
-        )
+        results = await backend.score_batch(learnings, "implementing decisions in the workflow")
         scores = dict(results)
         assert scores[1] > scores[0]  # lrn_002 > lrn_001
 
@@ -715,7 +708,10 @@ class TestBackendThresholds:
         """When threshold=None, recall uses the backend's default."""
         backend = BM25Backend()
         results = await recall_learnings(
-            ALL_LEARNINGS, "conda environment", threshold=None, backend=backend,
+            ALL_LEARNINGS,
+            "conda environment",
+            threshold=None,
+            backend=backend,
         )
         for r in results:
             assert r["score"] >= backend.default_threshold
@@ -724,10 +720,16 @@ class TestBackendThresholds:
         """Explicit threshold takes precedence over backend default."""
         backend = BM25Backend()
         results_low = await recall_learnings(
-            ALL_LEARNINGS, "conda environment", threshold=0.01, backend=backend,
+            ALL_LEARNINGS,
+            "conda environment",
+            threshold=0.01,
+            backend=backend,
         )
         results_default = await recall_learnings(
-            ALL_LEARNINGS, "conda environment", threshold=None, backend=backend,
+            ALL_LEARNINGS,
+            "conda environment",
+            threshold=None,
+            backend=backend,
         )
         assert len(results_low) >= len(results_default)
 
@@ -743,7 +745,10 @@ class TestRecallTracking:
         lrn = Learning(id="lrn_001", content="use ml-dev conda environment")
         assert lrn.recall_count == 0
         results = await recall_learnings(
-            [lrn], "conda environment", threshold=0.0, backend=BM25Backend(),
+            [lrn],
+            "conda environment",
+            threshold=0.0,
+            backend=BM25Backend(),
         )
         assert len(results) > 0
         assert lrn.recall_count == 1
@@ -753,7 +758,10 @@ class TestRecallTracking:
         lrn = Learning(id="lrn_001", content="use ml-dev conda environment")
         assert lrn.last_surfaced is None
         await recall_learnings(
-            [lrn], "conda environment", threshold=0.0, backend=BM25Backend(),
+            [lrn],
+            "conda environment",
+            threshold=0.0,
+            backend=BM25Backend(),
         )
         assert lrn.last_surfaced is not None
 
@@ -761,7 +769,10 @@ class TestRecallTracking:
         """Learnings that don't match (below threshold) should not be tracked."""
         lrn = Learning(id="lrn_001", content="best pasta recipe with tomatoes")
         await recall_learnings(
-            [lrn], "conda environment ml-dev", threshold=0.5, backend=BM25Backend(),
+            [lrn],
+            "conda environment ml-dev",
+            threshold=0.5,
+            backend=BM25Backend(),
         )
         assert lrn.recall_count == 0
         assert lrn.last_surfaced is None
@@ -771,7 +782,10 @@ class TestRecallTracking:
         lrn = Learning(id="lrn_001", content="use ml-dev conda environment")
         for _ in range(3):
             await recall_learnings(
-                [lrn], "conda environment", threshold=0.0, backend=BM25Backend(),
+                [lrn],
+                "conda environment",
+                threshold=0.0,
+                backend=BM25Backend(),
             )
         assert lrn.recall_count == 3
 

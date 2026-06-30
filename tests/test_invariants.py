@@ -62,10 +62,7 @@ def _functions_calling(callee: str) -> set[tuple[str, str]]:
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
-                if any(
-                    isinstance(sub, ast.Call) and _call_name(sub) == callee
-                    for sub in ast.walk(node)
-                ):
+                if any(isinstance(sub, ast.Call) and _call_name(sub) == callee for sub in ast.walk(node)):
                     found.add((_rel(path), node.name))
     return found
 
@@ -90,8 +87,7 @@ def test_inv1_registered_writers_use_the_locked_helper() -> None:
     helper_users = _functions_calling("locked_disk_session")
     missing = INV1_REGISTERED_WRITERS - helper_users
     assert not missing, (
-        "INV-1 violation: registered write paths that do NOT route through "
-        f"locked_disk_session: {sorted(missing)}."
+        f"INV-1 violation: registered write paths that do NOT route through locked_disk_session: {sorted(missing)}."
     )
 
 

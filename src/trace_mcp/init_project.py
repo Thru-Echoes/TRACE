@@ -81,8 +81,7 @@ def _pick_adapter(project_dir: Path, explicit: str | None) -> Adapter | None:
     detected = detect_adapter(project_dir)
     if detected is None:
         print(
-            "No host adapter auto-detected. Pass --client="
-            f"{{{','.join(list_adapters())},none}} to pick one explicitly."
+            f"No host adapter auto-detected. Pass --client={{{','.join(list_adapters())},none}} to pick one explicitly."
         )
     return detected
 

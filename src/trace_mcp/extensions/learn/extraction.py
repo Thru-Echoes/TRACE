@@ -29,11 +29,24 @@ logger = logging.getLogger(__name__)
 _EXTRACTABLE_CATEGORIES = {"learning", "correction", "gotcha"}
 
 # Keywords that signal a decision is about prompt strategy (for auto-categorization)
-_PROMPT_KEYWORDS = frozenset({
-    "prompt", "few-shot", "zero-shot", "chain-of-thought", "system prompt",
-    "instruction", "few shot", "zero shot", "chain of thought", "cot",
-    "prompting", "prompt engineering", "prompt template", "in-context",
-})
+_PROMPT_KEYWORDS = frozenset(
+    {
+        "prompt",
+        "few-shot",
+        "zero-shot",
+        "chain-of-thought",
+        "system prompt",
+        "instruction",
+        "few shot",
+        "zero shot",
+        "chain of thought",
+        "cot",
+        "prompting",
+        "prompt engineering",
+        "prompt template",
+        "in-context",
+    }
+)
 
 try:
     from openai import AsyncOpenAI
@@ -48,10 +61,7 @@ except ImportError:
 
 def _already_extracted(store: KnowledgeStore, session_id: str, event_id: str) -> bool:
     """Check if a learning from this session+event already exists."""
-    return any(
-        lrn.source_session == session_id and lrn.source_event == event_id
-        for lrn in store.learnings
-    )
+    return any(lrn.source_session == session_id and lrn.source_event == event_id for lrn in store.learnings)
 
 
 def _add_with_optional_dedup(
@@ -295,8 +305,8 @@ async def extract_from_session_llm(
         '- "tags": 2-5 relevant tags for future retrieval\n'
         '- "source_event": the event ID this learning primarily comes from\n'
         '- "corrects_event_ids": list of event IDs being corrected (for corrections only)\n\n'
-        "Return a JSON object with key \"learnings\" containing an array of objects.\n"
-        "If no new learnings exist, return {\"learnings\": []}."
+        'Return a JSON object with key "learnings" containing an array of objects.\n'
+        'If no new learnings exist, return {"learnings": []}.'
     )
 
     try:
@@ -364,8 +374,7 @@ async def extract_from_session_llm(
                 f"rule-based fallback."
             ) from exc
         logger.warning(
-            "LLM extraction failed (model=%s) — falling back to rule-based. "
-            "Strict mode is OFF.",
+            "LLM extraction failed (model=%s) — falling back to rule-based. Strict mode is OFF.",
             config.llm_extraction_model,
             exc_info=True,
         )
@@ -389,7 +398,5 @@ async def extract_from_session_auto(
     dedup_threshold = config.dedup_threshold if config.dedup_enabled else None
 
     if config.llm_enabled and config.openai_api_key and _HAS_OPENAI:
-        return await extract_from_session_llm(
-            store, session, config, dedup_threshold=dedup_threshold
-        )
+        return await extract_from_session_llm(store, session, config, dedup_threshold=dedup_threshold)
     return extract_from_session(store, session, dedup_threshold=dedup_threshold)

@@ -277,7 +277,10 @@ def _handcrafted_session() -> dict[str, Any]:
                 "session_id": "handcrafted_20260319_aaa111",
                 "type": "annotation",
                 "actor": {"type": "human", "id": "tester-alice"},
-                "annotation": {"category": "observation", "content": "R² improved from 0.72 to 0.81 after fixing imputation."},
+                "annotation": {
+                    "category": "observation",
+                    "content": "R² improved from 0.72 to 0.81 after fixing imputation.",
+                },
                 "context": {},
             },
             {
@@ -386,7 +389,8 @@ async def _trace_generated_session(tmp_path: Path) -> dict[str, Any]:
 
     # Start session
     session = await session_tools.create_session(
-        storage, active,
+        storage,
+        active,
         project="conformance-test",
         experiment_id="exp-conf-002",
         description="TRACE-generated conformance test session.",
@@ -400,87 +404,119 @@ async def _trace_generated_session(tmp_path: Path) -> dict[str, Any]:
 
     # Tool call — success
     await logging_tools.log_tool_call(
-        storage, session,
-        server="search-server", tool_name="search_documents",
+        storage,
+        session,
+        server="search-server",
+        tool_name="search_documents",
         input={"query": "climate change", "limit": 10},
-        output={"results": 42}, duration_ms=1500, status="success",
-        actor_type="ai", actor_id="model-beta",
-        reasoning="Searching for relevant documents.", conversation_turn=1,
+        output={"results": 42},
+        duration_ms=1500,
+        status="success",
+        actor_type="ai",
+        actor_id="model-beta",
+        reasoning="Searching for relevant documents.",
+        conversation_turn=1,
     )
 
     # Tool call — error
     await logging_tools.log_tool_call(
-        storage, session,
-        server="analysis-server", tool_name="run_analysis",
-        input={"method": "regression"}, status="error",
+        storage,
+        session,
+        server="analysis-server",
+        tool_name="run_analysis",
+        input={"method": "regression"},
+        status="error",
         error_message="Connection timeout",
-        actor_type="ai", actor_id="model-beta",
+        actor_type="ai",
+        actor_id="model-beta",
     )
 
     # Tool call — retry
     await logging_tools.log_tool_call(
-        storage, session,
-        server="analysis-server", tool_name="run_analysis",
-        input={"method": "regression"}, status="success", duration_ms=800,
+        storage,
+        session,
+        server="analysis-server",
+        tool_name="run_analysis",
+        input={"method": "regression"},
+        status="success",
+        duration_ms=800,
         retries_event_id="evt_002",
-        actor_type="ai", actor_id="model-beta",
+        actor_type="ai",
+        actor_id="model-beta",
     )
 
     # Decision — propose
     await decision_tools.propose_decision(
-        storage, session,
+        storage,
+        session,
         description="Use random forest with 100 trees",
         rationale="Good balance of accuracy and speed",
-        proposed_by_type="ai", proposed_by_id="model-beta",
+        proposed_by_type="ai",
+        proposed_by_id="model-beta",
         suggestion_type="proactive",
         tags=["methodology", "model-selection"],
     )
 
     # Decision — accept (resolve evt_004 in-place, no new event)
     await decision_tools.resolve_decision(
-        storage, session,
-        event_id="evt_004", disposition="accepted",
-        resolved_by_type="human", resolved_by_id="tester-alice",
+        storage,
+        session,
+        event_id="evt_004",
+        disposition="accepted",
+        resolved_by_type="human",
+        resolved_by_id="tester-alice",
     )
 
     # Decision — propose + revise (chain)
     # propose → evt_005, resolve in-place
     await decision_tools.propose_decision(
-        storage, session,
+        storage,
+        session,
         description="Switch to 200 trees for better accuracy",
         rationale="100 trees underfitting on validation data",
-        proposed_by_type="human", proposed_by_id="tester-alice",
+        proposed_by_type="human",
+        proposed_by_id="tester-alice",
         suggestion_type="requested",
         revises_event_id="evt_004",
     )
     await decision_tools.resolve_decision(
-        storage, session,
-        event_id="evt_005", disposition="revised",
-        resolved_by_type="human", resolved_by_id="tester-alice",
+        storage,
+        session,
+        event_id="evt_005",
+        disposition="revised",
+        resolved_by_type="human",
+        resolved_by_id="tester-alice",
         revision_note="Validation accuracy jumped 3% with 200 trees",
     )
 
     # Decision — propose + reject
     # propose → evt_006, resolve in-place
     await decision_tools.propose_decision(
-        storage, session,
+        storage,
+        session,
         description="Use GPU-accelerated XGBoost instead",
         rationale="Faster training on large datasets",
-        proposed_by_type="ai", proposed_by_id="model-beta",
+        proposed_by_type="ai",
+        proposed_by_id="model-beta",
     )
     await decision_tools.resolve_decision(
-        storage, session,
-        event_id="evt_006", disposition="rejected",
-        resolved_by_type="human", resolved_by_id="tester-alice",
+        storage,
+        session,
+        event_id="evt_006",
+        disposition="rejected",
+        resolved_by_type="human",
+        resolved_by_id="tester-alice",
         revision_note="RF is already fast enough and more interpretable",
     )
 
     # Decision — left in proposed state (unresolved)
     await decision_tools.propose_decision(
-        storage, session,
+        storage,
+        session,
         description="Consider adding cross-validation",
         rationale="Would improve confidence in results",
-        proposed_by_type="ai", proposed_by_id="model-beta",
+        proposed_by_type="ai",
+        proposed_by_id="model-beta",
         suggestion_type="collaborative",
     )
 
@@ -494,54 +530,75 @@ async def _trace_generated_session(tmp_path: Path) -> dict[str, Any]:
         ("other", "Session running on shared cluster node 7."),
     ]:
         await logging_tools.log_annotation(
-            storage, session, category=cat, content=content,
-            actor_type="ai", actor_id="model-beta",
+            storage,
+            session,
+            category=cat,
+            content=content,
+            actor_type="ai",
+            actor_id="model-beta",
         )
 
     # Correction annotation with corrects_event_ids
     await logging_tools.log_annotation(
-        storage, session,
+        storage,
+        session,
         category="correction",
         content="The AI used mean imputation but should have used median.",
         corrects_event_ids=["evt_003"],
         related_event_ids=["evt_007"],
-        actor_type="human", actor_id="tester-alice",
+        actor_type="human",
+        actor_id="tester-alice",
         conversation_snippet="No, use median — the distribution is skewed.",
     )
 
     # State change
     await logging_tools.log_state_change(
-        storage, session,
+        storage,
+        session,
         description="Switched from CPU to GPU compute",
-        field="environment.compute", old_value="cpu", new_value="gpu-a100",
+        field="environment.compute",
+        old_value="cpu",
+        new_value="gpu-a100",
         reason="Training too slow on CPU",
-        actor_type="human", actor_id="tester-alice",
+        actor_type="human",
+        actor_id="tester-alice",
     )
 
     # Contributions — multiple direction×execution combos
     await logging_tools.log_contribution(
-        storage, session,
+        storage,
+        session,
         description="Implemented random forest classifier",
-        direction="human", execution="ai", artifact="src/classifier.py",
+        direction="human",
+        execution="ai",
+        artifact="src/classifier.py",
         related_decision_ids=["evt_005"],
         tags=["implementation"],
-        actor_type="ai", actor_id="model-beta",
+        actor_type="ai",
+        actor_id="model-beta",
         conversation_snippet="Write the classifier using RF with 200 trees.",
     )
     await logging_tools.log_contribution(
-        storage, session,
+        storage,
+        session,
         description="Generated feature importance visualization",
-        direction="ai", execution="ai", artifact="figures/feature_importance.png",
+        direction="ai",
+        execution="ai",
+        artifact="figures/feature_importance.png",
         tags=["visualization"],
-        actor_type="ai", actor_id="model-beta",
+        actor_type="ai",
+        actor_id="model-beta",
     )
     await logging_tools.log_contribution(
-        storage, session,
+        storage,
+        session,
         description="Manually annotated 50 validation examples",
-        direction="collaborative", execution="human",
+        direction="collaborative",
+        execution="human",
         artifact="data/validation_labels.csv",
         tags=["data"],
-        actor_type="human", actor_id="tester-alice",
+        actor_type="human",
+        actor_id="tester-alice",
     )
 
     # End session
@@ -621,10 +678,7 @@ class TestStructuralEquivalence:
         trace = await _trace_generated_session(tmp_path)
 
         for doc_name, doc in [("handcrafted", hand), ("TRACE", trace)]:
-            revisions = [
-                e for e in doc["events"]
-                if e["type"] == "decision" and e["decision"].get("revises_event_id")
-            ]
+            revisions = [e for e in doc["events"] if e["type"] == "decision" and e["decision"].get("revises_event_id")]
             assert len(revisions) >= 1, f"{doc_name} has no decision chain (no revises_event_id)"
 
     async def test_both_have_retry_chain(self, tmp_path: Path) -> None:
@@ -633,10 +687,7 @@ class TestStructuralEquivalence:
         trace = await _trace_generated_session(tmp_path)
 
         for doc_name, doc in [("handcrafted", hand), ("TRACE", trace)]:
-            retries = [
-                e for e in doc["events"]
-                if e["type"] == "tool_call" and e["tool_call"].get("retries_event_id")
-            ]
+            retries = [e for e in doc["events"] if e["type"] == "tool_call" and e["tool_call"].get("retries_event_id")]
             assert len(retries) >= 1, f"{doc_name} has no retry chain"
 
     async def test_both_have_correction_with_links(self, tmp_path: Path) -> None:
@@ -646,7 +697,8 @@ class TestStructuralEquivalence:
 
         for doc_name, doc in [("handcrafted", hand), ("TRACE", trace)]:
             corrections = [
-                e for e in doc["events"]
+                e
+                for e in doc["events"]
                 if e["type"] == "annotation"
                 and e["annotation"]["category"] == "correction"
                 and e["annotation"].get("corrects_event_ids")
@@ -661,7 +713,8 @@ class TestStructuralEquivalence:
         for doc_name, doc in [("handcrafted", hand), ("TRACE", trace)]:
             combos = {
                 (e["contribution"]["direction"], e["contribution"]["execution"])
-                for e in doc["events"] if e["type"] == "contribution"
+                for e in doc["events"]
+                if e["type"] == "contribution"
             }
             assert len(combos) >= 3, f"{doc_name} only has {len(combos)} direction×execution combos"
 
@@ -718,8 +771,19 @@ class TestSpecDataModelCoverage:
     # §3.4 Event
     def test_event_has_required_fields(self) -> None:
         fields = TraceEvent.model_fields
-        for f in ["id", "timestamp", "session_id", "type", "actor", "context",
-                   "tool_call", "decision", "annotation", "state_change", "contribution"]:
+        for f in [
+            "id",
+            "timestamp",
+            "session_id",
+            "type",
+            "actor",
+            "context",
+            "tool_call",
+            "decision",
+            "annotation",
+            "state_change",
+            "contribution",
+        ]:
             assert f in fields, f"TraceEvent missing field: {f}"
 
     def test_event_type_values(self) -> None:
@@ -738,8 +802,19 @@ class TestSpecDataModelCoverage:
     # §3.5 ToolCallData
     def test_tool_call_data_has_fields(self) -> None:
         fields = ToolCallData.model_fields
-        for f in ["server", "method", "name", "input", "output", "output_truncated",
-                   "output_hash", "duration_ms", "status", "error_message", "retries_event_id"]:
+        for f in [
+            "server",
+            "method",
+            "name",
+            "input",
+            "output",
+            "output_truncated",
+            "output_hash",
+            "duration_ms",
+            "status",
+            "error_message",
+            "retries_event_id",
+        ]:
             assert f in fields, f"ToolCallData missing field: {f}"
 
     def test_tool_call_status_values(self) -> None:
@@ -751,31 +826,49 @@ class TestSpecDataModelCoverage:
     # §3.6 DecisionData
     def test_decision_data_has_fields(self) -> None:
         fields = DecisionData.model_fields
-        for f in ["description", "rationale", "proposed_by", "disposition", "resolved_by",
-                   "revision_note", "revises_event_id", "suggestion_type", "tags", "warnings"]:
+        for f in [
+            "description",
+            "rationale",
+            "proposed_by",
+            "disposition",
+            "resolved_by",
+            "revision_note",
+            "revises_event_id",
+            "suggestion_type",
+            "tags",
+            "warnings",
+        ]:
             assert f in fields, f"DecisionData missing field: {f}"
 
     def test_decision_disposition_values(self) -> None:
         dispositions: list[Literal["proposed", "accepted", "revised", "rejected"]] = [
-            "proposed", "accepted", "revised", "rejected",
+            "proposed",
+            "accepted",
+            "revised",
+            "rejected",
         ]
         for d in dispositions:
             if d == "proposed":
                 dec = DecisionData(description="t", proposed_by=Actor(type="ai", id="x"), disposition=d)
             else:
                 import warnings
+
                 with warnings.catch_warnings():
                     warnings.simplefilter("ignore")
                     dec = DecisionData(
-                        description="t", proposed_by=Actor(type="ai", id="x"),
-                        disposition=d, resolved_by=Actor(type="human", id="y"),
+                        description="t",
+                        proposed_by=Actor(type="ai", id="x"),
+                        disposition=d,
+                        resolved_by=Actor(type="human", id="y"),
                         revision_note="note" if d in ("revised", "rejected") else None,
                     )
             assert dec.disposition == d
 
     def test_suggestion_type_values(self) -> None:
         suggestion_types: list[Literal["proactive", "requested", "collaborative"]] = [
-            "proactive", "requested", "collaborative",
+            "proactive",
+            "requested",
+            "collaborative",
         ]
         for st in suggestion_types:
             d = DecisionData(description="t", proposed_by=Actor(type="ai", id="x"), suggestion_type=st)
@@ -838,7 +931,10 @@ class TestSpecValidationRules:
         """Only one data field may be populated."""
         with pytest.raises(ValueError, match="must not have"):
             TraceEvent(
-                id="e", session_id="s", type="tool_call", actor=Actor(type="ai", id="x"),
+                id="e",
+                session_id="s",
+                type="tool_call",
+                actor=Actor(type="ai", id="x"),
                 tool_call=ToolCallData(server="s", name="n", input={}),
                 annotation=AnnotationData(category="observation", content="extra"),
             )
@@ -872,17 +968,29 @@ class TestSpecDecisionProvenance:
 
         # Create a 3-link chain: evt_001 → evt_002 → evt_003
         await decision_tools.propose_decision(
-            storage, session, description="Original", rationale="v1",
-            proposed_by_type="ai", proposed_by_id="ai",
+            storage,
+            session,
+            description="Original",
+            rationale="v1",
+            proposed_by_type="ai",
+            proposed_by_id="ai",
         )
         await decision_tools.propose_decision(
-            storage, session, description="Revision 1", rationale="v2",
-            proposed_by_type="human", proposed_by_id="human",
+            storage,
+            session,
+            description="Revision 1",
+            rationale="v2",
+            proposed_by_type="human",
+            proposed_by_id="human",
             revises_event_id="evt_001",
         )
         await decision_tools.propose_decision(
-            storage, session, description="Revision 2", rationale="v3",
-            proposed_by_type="ai", proposed_by_id="ai",
+            storage,
+            session,
+            description="Revision 2",
+            rationale="v3",
+            proposed_by_type="ai",
+            proposed_by_id="ai",
             revises_event_id="evt_002",
         )
 
@@ -926,10 +1034,7 @@ class TestSpecDecisionProvenance:
         assert intervention_rate > 0
 
         # Direction × Execution matrix
-        combos = {
-            (c["contribution"]["direction"], c["contribution"]["execution"])
-            for c in contributions
-        }
+        combos = {(c["contribution"]["direction"], c["contribution"]["execution"]) for c in contributions}
         assert len(combos) >= 3
 
 
@@ -949,9 +1054,13 @@ class TestSpecProvMapping:
     def test_prov_mapping_covers_spec_concepts(self) -> None:
         """Every concept from spec §6 table has a PROV mapping."""
         required = [
-            "Session", "TraceEvent", "Actor",
-            "ToolCallData.input", "ToolCallData.output",
-            "DecisionData", "DecisionData.revision",
+            "Session",
+            "TraceEvent",
+            "Actor",
+            "ToolCallData.input",
+            "ToolCallData.output",
+            "DecisionData",
+            "DecisionData.revision",
             "AnnotationData",
         ]
         for concept in required:
@@ -1070,11 +1179,13 @@ class TestSpecMCPToolCoverage:
     def test_export_exists(self) -> None:
         """Exporting session documents."""
         from trace_mcp.tools import export_tools
+
         assert callable(export_tools.export_session)
 
     def test_mcp_tool_registration(self) -> None:
         """TRACE registers its tools with FastMCP."""
         from trace_mcp.server import mcp
+
         # FastMCP stores tools; just verify the server object exists
         assert mcp.name == "trace"
 
@@ -1163,7 +1274,7 @@ class TestSpecDocumentCompleteness:
         # The example should be valid JSON
         json_start = spec_text.index("```json", spec_text.index("Appendix A"))
         json_end = spec_text.index("```", json_start + 7)
-        example_json = spec_text[json_start + 7:json_end].strip()
+        example_json = spec_text[json_start + 7 : json_end].strip()
         doc = json.loads(example_json)
         assert doc["id"] == "trace_20260205_a1b2c3"
 
@@ -1171,7 +1282,7 @@ class TestSpecDocumentCompleteness:
         """The example document in the spec MUST validate against the schema."""
         json_start = spec_text.index("```json", spec_text.index("Appendix A"))
         json_end = spec_text.index("```", json_start + 7)
-        example_json = spec_text[json_start + 7:json_end].strip()
+        example_json = spec_text[json_start + 7 : json_end].strip()
         doc = json.loads(example_json)
         jsonschema.validate(doc, schema)
 

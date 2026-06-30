@@ -52,13 +52,9 @@ async def test_project_summary_works_without_learn_extension(
 ) -> None:
     """trace_project_summary is a CORE tool — it must succeed when the
     trace-learn extension is absent (governance evt_002)."""
-    result = await session_tools.start_session(
-        storage, active, project="boundary-test", description="boundary"
-    )
+    result = await session_tools.start_session(storage, active, project="boundary-test", description="boundary")
     session_id = result.split("Session: ")[1].split("\n")[0]
-    await session_tools.end_session(
-        storage, active, session_id=session_id, summary="done"
-    )
+    await session_tools.end_session(storage, active, session_id=session_id, summary="done")
 
     _block_learn_extension(monkeypatch)
 
@@ -87,33 +83,45 @@ async def test_all_core_tools_run_without_learn_extension(
     _block_learn_extension(monkeypatch)
 
     # session lifecycle
-    start = await session_tools.start_session(
-        storage, active, project="boundary", description="full core sweep"
-    )
+    start = await session_tools.start_session(storage, active, project="boundary", description="full core sweep")
     sid = start.split("Session: ")[1].split("\n")[0]
     session = active[sid]
 
     # all four logging tools
-    await logging_tools.log_tool_call(
-        storage, session, server="s", tool_name="t", input={"q": 1}, status="success"
-    )
+    await logging_tools.log_tool_call(storage, session, server="s", tool_name="t", input={"q": 1}, status="success")
     await logging_tools.log_annotation(storage, session, category="gotcha", content="g")
     await logging_tools.log_state_change(
-        storage, session, description="env change", field="python",
-        old_value="3.12", new_value="3.13",
+        storage,
+        session,
+        description="env change",
+        field="python",
+        old_value="3.12",
+        new_value="3.13",
     )
     await logging_tools.log_contribution(
-        storage, session, description="a model", direction="human", execution="ai",
+        storage,
+        session,
+        description="a model",
+        direction="human",
+        execution="ai",
         conversation_snippet="build the model",
     )
 
     # both decision tools
     d_id = await decision_tools.propose_decision(
-        storage, session, description="use X", proposed_by_type="ai", proposed_by_id="claude",
+        storage,
+        session,
+        description="use X",
+        proposed_by_type="ai",
+        proposed_by_id="claude",
     )
     await decision_tools.resolve_decision(
-        storage, session, event_id=d_id, disposition="accepted",
-        resolved_by_type="human", resolved_by_id="researcher",
+        storage,
+        session,
+        event_id=d_id,
+        disposition="accepted",
+        resolved_by_type="human",
+        resolved_by_id="researcher",
     )
 
     # every query tool (sync; operate on the persisted session)

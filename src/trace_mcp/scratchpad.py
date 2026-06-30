@@ -78,10 +78,7 @@ def _build_session_section(session: Session) -> str:
         lines.append(session.summary)
 
     # ── Contributions ────────────────────────────────────────────────
-    contributions = [
-        e for e in session.events
-        if e.type == "contribution" and e.contribution
-    ]
+    contributions = [e for e in session.events if e.type == "contribution" and e.contribution]
     if contributions:
         lines.append("")
         lines.append("### What Was Accomplished")
@@ -90,16 +87,10 @@ def _build_session_section(session: Session) -> str:
             c = e.contribution
             assert c is not None
             artifact = f" (`{c.artifact}`)" if c.artifact else ""
-            lines.append(
-                f"- {c.description}{artifact} "
-                f"— direction={c.direction}, execution={c.execution}"
-            )
+            lines.append(f"- {c.description}{artifact} — direction={c.direction}, execution={c.execution}")
 
     # ── Decisions ────────────────────────────────────────────────────
-    decisions = [
-        e for e in session.events
-        if e.type == "decision" and e.decision
-    ]
+    decisions = [e for e in session.events if e.type == "decision" and e.decision]
     if decisions:
         lines.append("")
         lines.append("### Decisions")
@@ -109,16 +100,10 @@ def _build_session_section(session: Session) -> str:
             assert d is not None
             stype = f", suggestion={d.suggestion_type}" if d.suggestion_type else ""
             note = f" — {d.revision_note}" if d.revision_note else ""
-            lines.append(
-                f"- **[{d.disposition}]** {d.description} "
-                f"(proposed_by={d.proposed_by.type}{stype}){note}"
-            )
+            lines.append(f"- **[{d.disposition}]** {d.description} (proposed_by={d.proposed_by.type}{stype}){note}")
 
     # ── Open items (unresolved decisions) ────────────────────────────
-    unresolved = [
-        e for e in decisions
-        if e.decision and e.decision.disposition == "proposed"
-    ]
+    unresolved = [e for e in decisions if e.decision and e.decision.disposition == "proposed"]
     if unresolved:
         lines.append("")
         lines.append("### Open Items")
@@ -130,9 +115,9 @@ def _build_session_section(session: Session) -> str:
 
     # ── Gotchas & Corrections ────────────────────────────────────────
     gotchas = [
-        e for e in session.events
-        if e.type == "annotation" and e.annotation
-        and e.annotation.category in ("gotcha", "correction")
+        e
+        for e in session.events
+        if e.type == "annotation" and e.annotation and e.annotation.category in ("gotcha", "correction")
     ]
     if gotchas:
         lines.append("")
@@ -147,9 +132,7 @@ def _build_session_section(session: Session) -> str:
 
     # ── Learnings ────────────────────────────────────────────────────
     learnings = [
-        e for e in session.events
-        if e.type == "annotation" and e.annotation
-        and e.annotation.category == "learning"
+        e for e in session.events if e.type == "annotation" and e.annotation and e.annotation.category == "learning"
     ]
     if learnings:
         lines.append("")
@@ -161,11 +144,7 @@ def _build_session_section(session: Session) -> str:
             lines.append(f"- {a.content}")
 
     # ── TODOs ────────────────────────────────────────────────────────
-    todos = [
-        e for e in session.events
-        if e.type == "annotation" and e.annotation
-        and e.annotation.category == "todo"
-    ]
+    todos = [e for e in session.events if e.type == "annotation" and e.annotation and e.annotation.category == "todo"]
     if todos:
         lines.append("")
         lines.append("### TODOs")
@@ -198,9 +177,7 @@ def _build_session_section(session: Session) -> str:
 def _atomic_write(path: Path, content: str) -> None:
     """Write content atomically using temp file + rename."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_path = tempfile.mkstemp(
-        dir=str(path.parent), suffix=".tmp", prefix=".scratchpad_"
-    )
+    fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=".scratchpad_")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(content)

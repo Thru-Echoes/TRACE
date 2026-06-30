@@ -104,9 +104,7 @@ class TestExplicitAbsenceHelper:
 class TestMissingSnippetCounters:
     """v0.4.1 §3.4.1: count contributions and corrections missing snippets."""
 
-    async def test_contribution_without_snippet_is_counted(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_contribution_without_snippet_is_counted(self, storage: JsonFileStorage) -> None:
         session = _make_session("trace_test_contrib_missing")
         await storage.create_session(session)
 
@@ -127,9 +125,7 @@ class TestMissingSnippetCounters:
         assert audit.missing_snippet_contribution_count == 1
         assert audit.missing_snippet_correction_count == 0
 
-    async def test_correction_without_snippet_is_counted(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_correction_without_snippet_is_counted(self, storage: JsonFileStorage) -> None:
         session = _make_session("trace_test_correction_missing")
         await storage.create_session(session)
 
@@ -150,9 +146,7 @@ class TestMissingSnippetCounters:
         assert audit.missing_snippet_correction_count == 1
         assert audit.missing_snippet_contribution_count == 0
 
-    async def test_contribution_with_real_snippet_is_not_counted(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_contribution_with_real_snippet_is_not_counted(self, storage: JsonFileStorage) -> None:
         session = _make_session("trace_test_contrib_with_snippet")
         await storage.create_session(session)
 
@@ -177,9 +171,7 @@ class TestMissingSnippetCounters:
 class TestExplicitAbsenceCounters:
     """v0.4.1: snippets set to explicit absence markers count separately."""
 
-    async def test_autonomous_stretch_marker_is_explicit_absence(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_autonomous_stretch_marker_is_explicit_absence(self, storage: JsonFileStorage) -> None:
         session = _make_session("trace_test_autonomous_marker")
         await storage.create_session(session)
 
@@ -208,9 +200,7 @@ class TestExplicitAbsenceCounters:
 class TestAttributionWarningDetector:
     """v0.4.1 §3.6 Proposer Identity Rule: same-instance self-resolution."""
 
-    async def test_human_same_instance_self_resolution_counts(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_human_same_instance_self_resolution_counts(self, storage: JsonFileStorage) -> None:
         """The evt_025 pattern: human proposes and human accepts.
 
         Pre-v0.4.1 this was invisible. v0.4.1 surfaces it via
@@ -238,9 +228,7 @@ class TestAttributionWarningDetector:
         assert audit.attribution_warning_count == 1
         assert event.id in audit.attribution_warning_ids
 
-    async def test_single_actor_human_self_resolution_no_warning(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_single_actor_human_self_resolution_no_warning(self, storage: JsonFileStorage) -> None:
         """Round-3 A1 / decision evt_016: in a SINGLE-actor session
         ({human} only), human→human same-instance self-resolution must
         NOT increment attribution_warning_count. This is the false
@@ -268,9 +256,7 @@ class TestAttributionWarningDetector:
         assert audit.attribution_warning_count == 0
         assert audit.attribution_warning_ids == []
 
-    async def test_single_actor_ai_self_resolution_asymmetry(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_single_actor_ai_self_resolution_asymmetry(self, storage: JsonFileStorage) -> None:
         """Round-3 GAP-1: single-actor ai→ai self-resolution →
         self_resolution_count==1 (ai-only, ungated, backward-compat) but
         attribution_warning_count==0 (multi-actor-gated)."""
@@ -297,9 +283,7 @@ class TestAttributionWarningDetector:
         assert audit.self_resolution_count == 1
         assert audit.attribution_warning_count == 0
 
-    async def test_different_human_instances_no_warning(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_different_human_instances_no_warning(self, storage: JsonFileStorage) -> None:
         """Two different humans (e.g., reviewer + lead) does NOT trigger."""
         session = _make_session("trace_test_different_humans")
         await storage.create_session(session)
@@ -322,9 +306,7 @@ class TestAttributionWarningDetector:
         audit = _build_attribution_audit(session)
         assert audit.attribution_warning_count == 0
 
-    async def test_ai_self_resolution_counts_in_both_metrics(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_ai_self_resolution_counts_in_both_metrics(self, storage: JsonFileStorage) -> None:
         """ai→ai same-instance increments BOTH self_resolution_count (v0.3 ai-only)
         AND attribution_warning_count (v0.4.1 generalized). Backward compat."""
         session = _make_session("trace_test_ai_self_resolve")
@@ -379,9 +361,7 @@ class TestOrphanDiscoveryHint:
     """v0.4.1 §3.7 + §8.1: contributions describing discoveries without
     a near-in-time discovery/correction/gotcha annotation get flagged."""
 
-    async def test_contribution_with_discovery_phrase_no_anchor_fires(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_contribution_with_discovery_phrase_no_anchor_fires(self, storage: JsonFileStorage) -> None:
         """Plain contribution with 'discovered' in description, no prior annotation."""
         session = _make_session("trace_test_orphan_discovery")
         await storage.create_session(session)
@@ -403,9 +383,7 @@ class TestOrphanDiscoveryHint:
         assert audit.orphan_discovery_hint_count == 1
         assert event.id in audit.orphan_discovery_event_ids
 
-    async def test_orphan_discovery_is_hint_only_not_a_warning(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_orphan_discovery_is_hint_only_not_a_warning(self, storage: JsonFileStorage) -> None:
         """P4 / A8: orphan-discovery is a low-severity HINT
         (orphan_discovery_hint_count). It must NOT also be pushed into the
         higher-severity `warnings` list — that duplicate over-weighted a
@@ -427,14 +405,11 @@ class TestOrphanDiscoveryHint:
 
         audit = _build_attribution_audit(session)
         assert audit.orphan_discovery_hint_count == 1  # still surfaced as a hint
-        assert not any(
-            "discovery-language" in w or "moment of discovery" in w
-            for w in audit.warnings
-        ), f"orphan-discovery must not be a high-severity warning: {audit.warnings!r}"
+        assert not any("discovery-language" in w or "moment of discovery" in w for w in audit.warnings), (
+            f"orphan-discovery must not be a high-severity warning: {audit.warnings!r}"
+        )
 
-    async def test_innocuous_turned_out_phrase_does_not_fire(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_innocuous_turned_out_phrase_does_not_fire(self, storage: JsonFileStorage) -> None:
         """P4 / A8: 'turned out' is too broad ('turned out cleaner' etc.)
         and is dropped from the phrase list to cut false positives."""
         session = _make_session("trace_test_innocuous_phrase")
@@ -455,9 +430,7 @@ class TestOrphanDiscoveryHint:
         audit = _build_attribution_audit(session)
         assert audit.orphan_discovery_hint_count == 0
 
-    async def test_contribution_with_nearby_discovery_annotation_no_fire(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_contribution_with_nearby_discovery_annotation_no_fire(self, storage: JsonFileStorage) -> None:
         """Discovery annotation logged shortly before contribution → no orphan."""
         session = _make_session("trace_test_anchored_discovery")
         await storage.create_session(session)
@@ -493,9 +466,7 @@ class TestOrphanDiscoveryHint:
         # No orphan — there's a discovery anchor within 30min before
         assert audit.orphan_discovery_hint_count == 0
 
-    async def test_contribution_with_no_discovery_phrase_no_fire(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_contribution_with_no_discovery_phrase_no_fire(self, storage: JsonFileStorage) -> None:
         """Routine contribution description doesn't trigger the hint."""
         session = _make_session("trace_test_no_phrase")
         await storage.create_session(session)
@@ -527,9 +498,7 @@ class TestDispatchVisibilityHint:
     high enough to avoid permanent noise.
     """
 
-    async def test_high_contributions_no_tool_calls_claude_code_fires(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_high_contributions_no_tool_calls_claude_code_fires(self, storage: JsonFileStorage) -> None:
         session = _make_session("trace_test_dispatch_hint", with_claude_code_env=True)
         await storage.create_session(session)
 
@@ -634,9 +603,7 @@ class TestDispatchVisibilityHint:
         # Wrong client → no hint
         assert not any("[hint]" in w for w in audit.warnings)
 
-    async def test_no_environment_no_hint_no_crash(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_no_environment_no_hint_no_crash(self, storage: JsonFileStorage) -> None:
         """Round 3 amendment: guard against environment is None for legacy sessions."""
         session = _make_session("trace_test_no_env", with_claude_code_env=False)
         # environment remains None
@@ -671,9 +638,7 @@ class TestRenderOrdering:
     BEFORE less-critical ones (orphan-discovery hints, missing snippets).
     """
 
-    async def test_attribution_warning_before_missing_snippet_in_render(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_attribution_warning_before_missing_snippet_in_render(self, storage: JsonFileStorage) -> None:
         """Build a session triggering both signals, verify ordering."""
         session = _make_session("trace_test_render_order")
         await storage.create_session(session)

@@ -20,9 +20,9 @@ All async tests use `asyncio_mode = "auto"` — no `@pytest.mark.asyncio` needed
 
 ### What the test suite covers
 
-The authoritative count is `uv run pytest` (**889 tests** — 887 passing + 2
-environment-gated skips as of v0.4.2). The table below highlights the main
-areas; it is representative, not an exhaustive per-file tally.
+The authoritative count is `uv run pytest` (**970 tests** — 959 passing + 11
+environment-gated skips). The table below highlights the main areas; it is
+representative, not an exhaustive per-file tally.
 
 | Area | Tests | What's verified |
 |------|------:|-----------------|
@@ -55,8 +55,14 @@ areas; it is representative, not an exhaustive per-file tally.
 
 ## Code style
 
-- **Formatter / linter**: ruff — `uv run ruff check src/` and `uv run ruff format src/`
-- **Type checker**: pyright — `uv run pyright src/`
+- **Linter**: ruff — `uv run ruff check .` lints the full tree (`src/`, `tests/`,
+  `scripts/`) and is CI-gated.
+- **Formatter**: ruff — `uv run ruff format` formats the full tree, and
+  `uv run ruff format --check .` is CI-gated. Run `uv run ruff format` before
+  committing.
+- **Type checker**: pyright — `uv run pyright` type-checks the full tree
+  (`pyrightconfig.json` includes `src/`, `tests/`, `scripts/`) and is CI-gated,
+  clean at 0 errors / 0 warnings.
 - **Line length**: 120
 - **Target**: Python 3.11+
 - Use `from datetime import UTC` (not `timezone.utc`) per ruff UP017
@@ -88,10 +94,30 @@ Host adapters (`src/trace_mcp/adapters/<host>/`) install hook scripts and config
 
 1. **Never push directly to `main`** — always work on a feature branch and open a PR.
 2. All tests must pass (`uv run pytest`).
-3. No new ruff or pyright errors (`uv run ruff check .` and `uv run pyright` — both cover `src/`, `tests/`, and `scripts/`).
+3. No new lint, format, or type errors — all CI-gated on the full tree:
+   `uv run ruff check .`, `uv run ruff format --check .`, and `uv run pyright`.
 4. Add tests for new functionality.
 5. Keep PRs focused — one feature or fix per PR.
 6. If modifying schema models, regenerate the JSON Schema (`python scripts/generate_schema.py`).
+7. Write self-contained commit and PR messages — see *Commit and PR messages* below.
+
+## Commit and PR messages
+
+Write every commit message and PR title/body **self-contained**: a reader with no
+access to the change's authoring context must understand it from the text alone.
+State what changed and the durable rationale (name the failure mode). Do not
+include conversational narrative, AI-generated attribution footers, internal plan
+labels (e.g. "PR B"), review-process or agent counts, or bare finding codes that
+are not defined in the repository.
+
+- **Subject** (commit and PR title): prefer `type(scope): summary` — one type from
+  `feat fix docs test refactor perf build ci chore revert security`, an imperative
+  summary, no trailing period. Use a component scope, not a version or phase. This
+  is a preference, not a hard gate.
+- **Body**: explain the change and the failure mode it addresses, and reference
+  durable anchors — file paths, `docs/adr/NNN`, `docs/INVARIANTS.md`, issue/PR
+  numbers. A PR body should cover **Summary**, **Why**, and **Verification**; see
+  [`.github/pull_request_template.md`](.github/pull_request_template.md).
 
 ## Development roadmap
 

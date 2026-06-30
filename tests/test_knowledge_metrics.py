@@ -91,10 +91,7 @@ class TestComputeKnowledgeMetrics:
     def test_most_surfaced_caps_at_five(self, tmp_path, monkeypatch):
         monkeypatch.setenv("TRACE_KNOWLEDGE_DIR", str(tmp_path))
         ks = KnowledgeStore(project="test")
-        ks.learnings = [
-            Learning(id=f"lrn_{i:03d}", content=f"learning {i}", recall_count=i)
-            for i in range(1, 10)
-        ]
+        ks.learnings = [Learning(id=f"lrn_{i:03d}", content=f"learning {i}", recall_count=i) for i in range(1, 10)]
         save_store(ks)
         metrics = _compute_knowledge_metrics("test")
         assert len(metrics["most_surfaced"]) == 5

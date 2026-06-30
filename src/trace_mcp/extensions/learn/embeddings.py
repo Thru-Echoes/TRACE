@@ -27,21 +27,21 @@ logger = logging.getLogger(__name__)
 # targets the provider unit tests mock, so they must exist as module attributes.
 
 try:
-    import numpy as _np  # noqa: F401 (runtime probe)
+    import numpy as _np  # noqa: F401  # pyright: ignore[reportUnusedImport]  (runtime probe)
 
     _HAS_NUMPY = True
 except ImportError:  # pragma: no cover
     _HAS_NUMPY = False
 
 try:
-    from openai import AsyncOpenAI  # noqa: F401
+    from openai import AsyncOpenAI  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
     _HAS_OPENAI = True
 except ImportError:  # pragma: no cover
     _HAS_OPENAI = False
 
 try:
-    from model2vec import StaticModel  # noqa: F401
+    from model2vec import StaticModel  # noqa: F401  # pyright: ignore[reportUnusedImport]
 
     _HAS_MODEL2VEC = True
 except ImportError:  # pragma: no cover
@@ -187,10 +187,7 @@ def get_embedding_provider(config: LearnConfig | None = None) -> EmbeddingProvid
         msg = "model2vec embeddings requested but package not installed"
         if config.strict_llm:
             logger.error("%s. Refusing to fall back.", msg)
-            raise LLMFallbackError(
-                f"{msg}. Install with: pip install model2vec. "
-                f"Or set TRACE_EMBEDDING_BACKEND=auto."
-            )
+            raise LLMFallbackError(f"{msg}. Install with: pip install model2vec. Or set TRACE_EMBEDDING_BACKEND=auto.")
         logger.warning("%s. Falling back.", msg)
 
     # auto mode fell through — no embeddings available.
@@ -201,8 +198,7 @@ def get_embedding_provider(config: LearnConfig | None = None) -> EmbeddingProvid
             "Refusing to fall through silently to BM25."
         )
         raise LLMFallbackError(
-            "Strict LLM mode: 'openai' package required but not installed. "
-            "Install with: pip install 'trace-mcp[llm]'."
+            "Strict LLM mode: 'openai' package required but not installed. Install with: pip install 'trace-mcp[llm]'."
         )
 
     logger.info("No embedding provider available — falling through to BM25 matching")

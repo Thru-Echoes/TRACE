@@ -23,7 +23,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-import pytest  # noqa: F401 (used by pytest-asyncio for test collection)
+import pytest  # noqa: F401  # pyright: ignore[reportUnusedImport]  (used by pytest-asyncio for test collection)
 
 import trace_mcp
 
@@ -96,9 +96,7 @@ async def _send_and_receive(
             return parsed
 
 
-async def _start_server(
-    sessions_dir: str, env_extra: dict[str, str] | None = None
-) -> asyncio.subprocess.Process:
+async def _start_server(sessions_dir: str, env_extra: dict[str, str] | None = None) -> asyncio.subprocess.Process:
     """Start the TRACE MCP server as a subprocess.
 
     env_extra, if given, overrides individual env vars after the deterministic
@@ -142,11 +140,14 @@ async def _start_server(
 async def _initialize_server(proc: asyncio.subprocess.Process) -> dict[str, Any]:
     """Perform the MCP initialization handshake."""
     # Send initialize request
-    init_request = _make_jsonrpc_request("initialize", {
-        "protocolVersion": "2024-11-05",
-        "capabilities": {},
-        "clientInfo": {"name": "trace-test", "version": "1.0.0"},
-    })
+    init_request = _make_jsonrpc_request(
+        "initialize",
+        {
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "clientInfo": {"name": "trace-test", "version": "1.0.0"},
+        },
+    )
     response = await _send_and_receive(proc, init_request)
 
     # Send initialized notification
@@ -165,10 +166,14 @@ async def _call_tool(
     request_id: int = 1,
 ) -> dict[str, Any]:
     """Call an MCP tool and return the result."""
-    request = _make_jsonrpc_request("tools/call", {
-        "name": tool_name,
-        "arguments": arguments,
-    }, id=request_id)
+    request = _make_jsonrpc_request(
+        "tools/call",
+        {
+            "name": tool_name,
+            "arguments": arguments,
+        },
+        id=request_id,
+    )
     return await _send_and_receive(proc, request)
 
 
@@ -288,10 +293,15 @@ class TestSessionLifecycleE2E:
                 req_id = 2
 
                 # 1. Start a session
-                response = await _call_tool(proc, "trace_start_session", {
-                    "project": "e2e-test",
-                    "description": "End-to-end test session",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_start_session",
+                    {
+                        "project": "e2e-test",
+                        "description": "End-to-end test session",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 assert "result" in response, f"start_session failed: {response}"
@@ -305,75 +315,105 @@ class TestSessionLifecycleE2E:
                 assert session_id.startswith("trace_")
 
                 # 2. Propose a decision
-                response = await _call_tool(proc, "trace_propose_decision", {
-                    "session_id": session_id,
-                    "description": "Use cosine distance metric",
-                    "proposed_by_type": "ai",
-                    "proposed_by_id": "test-ai",
-                    "rationale": "Standard for text embedding comparison",
-                    "suggestion_type": "proactive",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_propose_decision",
+                    {
+                        "session_id": session_id,
+                        "description": "Use cosine distance metric",
+                        "proposed_by_type": "ai",
+                        "proposed_by_id": "test-ai",
+                        "rationale": "Standard for text embedding comparison",
+                        "suggestion_type": "proactive",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
                 assert "evt_001" in result_text
 
                 # 3. Resolve the decision
-                response = await _call_tool(proc, "trace_resolve_decision", {
-                    "event_id": "evt_001",
-                    "session_id": session_id,
-                    "disposition": "accepted",
-                    "resolved_by_type": "human",
-                    "resolved_by_id": "test-researcher",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_resolve_decision",
+                    {
+                        "event_id": "evt_001",
+                        "session_id": session_id,
+                        "disposition": "accepted",
+                        "resolved_by_type": "human",
+                        "resolved_by_id": "test-researcher",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
                 assert "accepted" in result_text
 
                 # 4. Log a contribution
-                response = await _call_tool(proc, "trace_log_contribution", {
-                    "session_id": session_id,
-                    "description": "Implemented distance calculation",
-                    "direction": "human",
-                    "execution": "ai",
-                    "artifact": "src/distances.py",
-                    "related_decision_ids": ["evt_001"],
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_log_contribution",
+                    {
+                        "session_id": session_id,
+                        "description": "Implemented distance calculation",
+                        "direction": "human",
+                        "execution": "ai",
+                        "artifact": "src/distances.py",
+                        "related_decision_ids": ["evt_001"],
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
                 assert "evt_002" in result_text
 
                 # 5. Log an annotation
-                response = await _call_tool(proc, "trace_log_annotation", {
-                    "session_id": session_id,
-                    "category": "learning",
-                    "content": "Cosine distance is invariant to vector magnitude",
-                    "tags": ["methodology", "distance"],
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_log_annotation",
+                    {
+                        "session_id": session_id,
+                        "category": "learning",
+                        "content": "Cosine distance is invariant to vector magnitude",
+                        "tags": ["methodology", "distance"],
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
                 assert "evt_003" in result_text
 
                 # 6. Log a state change
-                response = await _call_tool(proc, "trace_log_state_change", {
-                    "session_id": session_id,
-                    "description": "Switched to GPU compute",
-                    "field": "environment.compute",
-                    "old_value": "cpu",
-                    "new_value": "gpu",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_log_state_change",
+                    {
+                        "session_id": session_id,
+                        "description": "Switched to GPU compute",
+                        "field": "environment.compute",
+                        "old_value": "cpu",
+                        "new_value": "gpu",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
                 assert "evt_004" in result_text
 
                 # 7. Query decisions
-                response = await _call_tool(proc, "trace_get_decisions", {
-                    "session_id": session_id,
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_get_decisions",
+                    {
+                        "session_id": session_id,
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
@@ -382,10 +422,15 @@ class TestSessionLifecycleE2E:
                 assert decisions[0]["decision"]["disposition"] == "accepted"
 
                 # 8. Search events
-                response = await _call_tool(proc, "trace_search", {
-                    "session_id": session_id,
-                    "query": "cosine",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_search",
+                    {
+                        "session_id": session_id,
+                        "query": "cosine",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
@@ -396,9 +441,14 @@ class TestSessionLifecycleE2E:
                 assert search["truncated"] is False  # tiny session, nothing dropped
 
                 # 9. Get session summary
-                response = await _call_tool(proc, "trace_get_session", {
-                    "session_id": session_id,
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_get_session",
+                    {
+                        "session_id": session_id,
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
@@ -407,9 +457,14 @@ class TestSessionLifecycleE2E:
                 assert summary["metadata"]["project"] == "e2e-test"
 
                 # 10. Health check
-                response = await _call_tool(proc, "trace_health_check", {
-                    "project": "e2e-test",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_health_check",
+                    {
+                        "project": "e2e-test",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
@@ -418,10 +473,15 @@ class TestSessionLifecycleE2E:
                 assert health["session_count"] == 1
 
                 # 11. End session
-                response = await _call_tool(proc, "trace_end_session", {
-                    "session_id": session_id,
-                    "summary": "E2E test completed successfully",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_end_session",
+                    {
+                        "session_id": session_id,
+                        "summary": "E2E test completed successfully",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
@@ -448,50 +508,80 @@ class TestSessionLifecycleE2E:
                 req_id = 2
 
                 # Create a session with one event
-                response = await _call_tool(proc, "trace_start_session", {
-                    "project": "export-test",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_start_session",
+                    {
+                        "project": "export-test",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
                 session_id = result_text.split("Session: ")[1].split("\n")[0]
 
-                await _call_tool(proc, "trace_log_annotation", {
-                    "session_id": session_id,
-                    "category": "learning",
-                    "content": "Test annotation for export",
-                }, request_id=req_id)
+                await _call_tool(
+                    proc,
+                    "trace_log_annotation",
+                    {
+                        "session_id": session_id,
+                        "category": "learning",
+                        "content": "Test annotation for export",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
-                await _call_tool(proc, "trace_end_session", {
-                    "session_id": session_id,
-                }, request_id=req_id)
+                await _call_tool(
+                    proc,
+                    "trace_end_session",
+                    {
+                        "session_id": session_id,
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 # Test JSON export
-                response = await _call_tool(proc, "trace_export", {
-                    "session_id": session_id,
-                    "format": "json",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_export",
+                    {
+                        "session_id": session_id,
+                        "format": "json",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
                 json_export = response["result"]["content"][0]["text"]
                 parsed = json.loads(json_export)
                 assert parsed["id"] == session_id
 
                 # Test Markdown export
-                response = await _call_tool(proc, "trace_export", {
-                    "session_id": session_id,
-                    "format": "markdown",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_export",
+                    {
+                        "session_id": session_id,
+                        "format": "markdown",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
                 md_export = response["result"]["content"][0]["text"]
                 assert "# TRACE Session:" in md_export
 
                 # Test PROV-JSONLD export
-                response = await _call_tool(proc, "trace_export", {
-                    "session_id": session_id,
-                    "format": "prov-jsonld",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_export",
+                    {
+                        "session_id": session_id,
+                        "format": "prov-jsonld",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
                 prov_export = response["result"]["content"][0]["text"]
                 prov_data = json.loads(prov_export)
@@ -514,9 +604,14 @@ class TestErrorHandlingE2E:
             try:
                 await _initialize_server(proc)
 
-                response = await _call_tool(proc, "trace_get_session", {
-                    "session_id": "nonexistent_session_id",
-                }, request_id=2)
+                response = await _call_tool(
+                    proc,
+                    "trace_get_session",
+                    {
+                        "session_id": "nonexistent_session_id",
+                    },
+                    request_id=2,
+                )
 
                 result_text = response["result"]["content"][0]["text"]
                 assert "error" in result_text.lower() or "not found" in result_text.lower()
@@ -530,9 +625,14 @@ class TestErrorHandlingE2E:
             try:
                 await _initialize_server(proc)
 
-                response = await _call_tool(proc, "trace_end_session", {
-                    "session_id": "nonexistent",
-                }, request_id=2)
+                response = await _call_tool(
+                    proc,
+                    "trace_end_session",
+                    {
+                        "session_id": "nonexistent",
+                    },
+                    request_id=2,
+                )
 
                 result_text = response["result"]["content"][0]["text"]
                 assert "error" in result_text.lower() or "not found" in result_text.lower()
@@ -548,21 +648,31 @@ class TestErrorHandlingE2E:
                 req_id = 2
 
                 # Create a valid session first
-                response = await _call_tool(proc, "trace_start_session", {
-                    "project": "error-test",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_start_session",
+                    {
+                        "project": "error-test",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
                 result_text = response["result"]["content"][0]["text"]
                 session_id = result_text.split("Session: ")[1].split("\n")[0]
 
                 # Try to resolve nonexistent decision
-                response = await _call_tool(proc, "trace_resolve_decision", {
-                    "event_id": "evt_999",
-                    "session_id": session_id,
-                    "disposition": "accepted",
-                    "resolved_by_type": "human",
-                    "resolved_by_id": "researcher",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc,
+                    "trace_resolve_decision",
+                    {
+                        "event_id": "evt_999",
+                        "session_id": session_id,
+                        "disposition": "accepted",
+                        "resolved_by_type": "human",
+                        "resolved_by_id": "researcher",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
                 result_text = response["result"]["content"][0]["text"]
@@ -586,25 +696,40 @@ class TestSessionPersistenceE2E:
                 await _initialize_server(proc1)
                 req_id = 2
 
-                response = await _call_tool(proc1, "trace_start_session", {
-                    "project": "persistence-test",
-                    "description": "Testing persistence",
-                }, request_id=req_id)
+                response = await _call_tool(
+                    proc1,
+                    "trace_start_session",
+                    {
+                        "project": "persistence-test",
+                        "description": "Testing persistence",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
                 result_text = response["result"]["content"][0]["text"]
                 session_id = result_text.split("Session: ")[1].split("\n")[0]
 
-                await _call_tool(proc1, "trace_propose_decision", {
-                    "session_id": session_id,
-                    "description": "Test decision for persistence",
-                    "proposed_by_type": "ai",
-                    "proposed_by_id": "test",
-                }, request_id=req_id)
+                await _call_tool(
+                    proc1,
+                    "trace_propose_decision",
+                    {
+                        "session_id": session_id,
+                        "description": "Test decision for persistence",
+                        "proposed_by_type": "ai",
+                        "proposed_by_id": "test",
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
-                await _call_tool(proc1, "trace_end_session", {
-                    "session_id": session_id,
-                }, request_id=req_id)
+                await _call_tool(
+                    proc1,
+                    "trace_end_session",
+                    {
+                        "session_id": session_id,
+                    },
+                    request_id=req_id,
+                )
                 req_id += 1
 
             finally:
@@ -615,9 +740,14 @@ class TestSessionPersistenceE2E:
             try:
                 await _initialize_server(proc2)
 
-                response = await _call_tool(proc2, "trace_get_session", {
-                    "session_id": session_id,
-                }, request_id=2)
+                response = await _call_tool(
+                    proc2,
+                    "trace_get_session",
+                    {
+                        "session_id": session_id,
+                    },
+                    request_id=2,
+                )
 
                 result_text = response["result"]["content"][0]["text"]
                 session_data = json.loads(result_text)
@@ -626,9 +756,14 @@ class TestSessionPersistenceE2E:
                 assert session_data["event_count"] == 1
 
                 # Also verify list_sessions finds it
-                response = await _call_tool(proc2, "trace_list_sessions", {
-                    "project": "persistence-test",
-                }, request_id=3)
+                response = await _call_tool(
+                    proc2,
+                    "trace_list_sessions",
+                    {
+                        "project": "persistence-test",
+                    },
+                    request_id=3,
+                )
 
                 result_text = response["result"]["content"][0]["text"]
                 sessions = json.loads(result_text)
@@ -653,19 +788,21 @@ class TestUvxIntegration:
         result = subprocess.run(
             [
                 "uvx",
-                "--from", str(TRACE_ROOT),
-                "--refresh-package", "trace-mcp",
-                "--with", "trace-mcp",
-                "python", "-c",
+                "--from",
+                str(TRACE_ROOT),
+                "--refresh-package",
+                "trace-mcp",
+                "--with",
+                "trace-mcp",
+                "python",
+                "-c",
                 "import trace_mcp; print(trace_mcp.__version__)",
             ],
             capture_output=True,
             text=True,
             timeout=60,
         )
-        assert result.returncode == 0, (
-            f"uvx import failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
-        )
+        assert result.returncode == 0, f"uvx import failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         assert "0." in result.stdout  # Version should start with 0.
 
     def test_uvx_entry_point_resolves(self) -> None:
@@ -673,10 +810,14 @@ class TestUvxIntegration:
         result = subprocess.run(
             [
                 "uvx",
-                "--from", str(TRACE_ROOT),
-                "--refresh-package", "trace-mcp",
-                "--with", "trace-mcp",
-                "python", "-c",
+                "--from",
+                str(TRACE_ROOT),
+                "--refresh-package",
+                "trace-mcp",
+                "--with",
+                "trace-mcp",
+                "python",
+                "-c",
                 "from trace_mcp.server import main; print('entry point OK')",
             ],
             capture_output=True,
@@ -684,7 +825,6 @@ class TestUvxIntegration:
             timeout=60,
         )
         assert result.returncode == 0, (
-            f"uvx entry point check failed.\n"
-            f"stdout: {result.stdout}\nstderr: {result.stderr}"
+            f"uvx entry point check failed.\nstdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert "entry point OK" in result.stdout

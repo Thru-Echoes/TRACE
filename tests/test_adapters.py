@@ -262,9 +262,7 @@ class TestResolveTraceSource:
         monkeypatch.setenv("TRACE_SOURCE_PATH", "/explicit/path")
         assert _resolve_trace_source() == "/explicit/path"
 
-    def test_env_override_wins_even_inside_site_packages(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_env_override_wins_even_inside_site_packages(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         from trace_mcp import init_project as ip
 
         fake = tmp_path / "lib" / "python3.13" / "site-packages" / "trace_mcp" / "init_project.py"
@@ -288,9 +286,7 @@ class TestResolveTraceSource:
 
         assert ip._resolve_trace_source() == "trace-mcp"
 
-    def test_uses_repo_root_for_editable_install(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_uses_repo_root_for_editable_install(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         from trace_mcp import init_project as ip
 
         repo = tmp_path / "TRACE-checkout"

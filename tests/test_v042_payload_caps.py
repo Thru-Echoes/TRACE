@@ -91,9 +91,7 @@ async def test_search_events_core_still_returns_list(storage, active):
 
 async def test_health_check_caps_scan(storage):
     for i in range(5):
-        await storage.create_session(
-            Session(id=f"trace_2026010{i}_000000", metadata=SessionMetadata(project="hc"))
-        )
+        await storage.create_session(Session(id=f"trace_2026010{i}_000000", metadata=SessionMetadata(project="hc")))
     result = await query_tools.health_check(storage, scan_cap=2)
     assert result["sessions_scanned"] <= 2
     assert result["scan_truncated"] is True

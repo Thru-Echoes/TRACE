@@ -41,10 +41,12 @@ class DecisionSummary(BaseModel):
 # v0.4.1: explicit absence markers for conversation_snippet per spec §3.4.1.
 # Documented allow-list; producers MAY define additional markers using the
 # `<...>` convention but these are the canonical ones surfaced in the audit.
-_EXPLICIT_ABSENCE_MARKERS = frozenset({
-    "<autonomous-stretch>",
-    "<no recent user message>",
-})
+_EXPLICIT_ABSENCE_MARKERS = frozenset(
+    {
+        "<autonomous-stretch>",
+        "<no recent user message>",
+    }
+)
 
 
 def _is_explicit_absence(s: str | None) -> bool:
@@ -118,7 +120,7 @@ class AttributionAudit(BaseModel):
                 artifact = f", artifact={c.artifact}" if c.artifact else ""
                 lines.append(
                     f"  {c.event_id}: direction={c.direction}, "
-                    f"execution={c.execution}{artifact} — \"{c.description_preview}\""
+                    f'execution={c.execution}{artifact} — "{c.description_preview}"'
                 )
 
         if self.decisions:
@@ -127,7 +129,7 @@ class AttributionAudit(BaseModel):
                 stype = f", suggestion={d.suggestion_type}" if d.suggestion_type else ""
                 lines.append(
                     f"  {d.event_id}: proposed_by={d.proposed_by_type}{stype}, "
-                    f"disposition={d.disposition} — \"{d.description_preview}\""
+                    f'disposition={d.disposition} — "{d.description_preview}"'
                 )
 
         if self.correction_count:
@@ -147,15 +149,11 @@ class AttributionAudit(BaseModel):
         # Guard rail warnings
         if self.unresolved_decision_count:
             ids = ", ".join(self.unresolved_decision_ids)
-            lines.append(
-                f"Unresolved decisions: {self.unresolved_decision_count} ({ids})"
-            )
+            lines.append(f"Unresolved decisions: {self.unresolved_decision_count} ({ids})")
 
         if self.self_resolution_count:
             ids = ", ".join(self.self_resolution_ids)
-            lines.append(
-                f"AI self-resolutions: {self.self_resolution_count} ({ids})"
-            )
+            lines.append(f"AI self-resolutions: {self.self_resolution_count} ({ids})")
 
         # v0.4.1: generalized same-instance self-resolution count (any actor
         # type, per spec §3.6 Proposer Identity Rule). May overlap with
@@ -169,10 +167,7 @@ class AttributionAudit(BaseModel):
             )
 
         if self.unlinked_correction_count:
-            lines.append(
-                f"Unlinked corrections: {self.unlinked_correction_count} "
-                "(missing corrects_event_ids)"
-            )
+            lines.append(f"Unlinked corrections: {self.unlinked_correction_count} (missing corrects_event_ids)")
 
         if self.orphan_discovery_hint_count:
             ids = ", ".join(self.orphan_discovery_event_ids)
@@ -183,10 +178,7 @@ class AttributionAudit(BaseModel):
                 "consider logging at the moment of discovery per spec §8.1"
             )
 
-        if (
-            self.missing_snippet_contribution_count
-            or self.missing_snippet_correction_count
-        ):
+        if self.missing_snippet_contribution_count or self.missing_snippet_correction_count:
             parts2: list[str] = []
             if self.missing_snippet_contribution_count:
                 parts2.append(f"{self.missing_snippet_contribution_count} contribution(s)")
@@ -208,12 +200,7 @@ class AttributionAudit(BaseModel):
             for w in self.warnings:
                 lines.append(f"  \u26a0\ufe0f {w}")
 
-        if (
-            not self.contributions
-            and not self.decisions
-            and not self.correction_count
-            and not self.warnings
-        ):
+        if not self.contributions and not self.decisions and not self.correction_count and not self.warnings:
             lines.append("No contributions, decisions, or corrections to review.")
 
         return "\n".join(lines)
@@ -254,10 +241,15 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
     # 30-minute pre-window in O(K) rather than O(N²).
     discovery_anchors: list[tuple[str, datetime]] = []  # (event_id, timestamp)
     for e in session.events:
-        if e.type == "annotation" and e.annotation and e.annotation.category in (
-            "discovery",
-            "correction",
-            "gotcha",
+        if (
+            e.type == "annotation"
+            and e.annotation
+            and e.annotation.category
+            in (
+                "discovery",
+                "correction",
+                "gotcha",
+            )
         ):
             discovery_anchors.append((e.id, e.timestamp))
 
@@ -270,13 +262,15 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
             contribution_count += 1
             c = e.contribution
             desc = c.description[:80] + ("..." if len(c.description) > 80 else "")
-            contribs.append(ContributionSummary(
-                event_id=e.id,
-                direction=c.direction,
-                execution=c.execution,
-                artifact=c.artifact,
-                description_preview=desc,
-            ))
+            contribs.append(
+                ContributionSummary(
+                    event_id=e.id,
+                    direction=c.direction,
+                    execution=c.execution,
+                    artifact=c.artifact,
+                    description_preview=desc,
+                )
+            )
 
             # v0.4.1: count contributions missing conversation_snippet.
             # explicit_absence markers count separately so honest absences
@@ -295,23 +289,22 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
             desc_lower = c.description.lower()
             if any(phrase in desc_lower for phrase in _DISCOVERY_PHRASES):
                 window_start = e.timestamp - discovery_window
-                has_anchor = any(
-                    window_start <= ts <= e.timestamp
-                    for _, ts in discovery_anchors
-                )
+                has_anchor = any(window_start <= ts <= e.timestamp for _, ts in discovery_anchors)
                 if not has_anchor:
                     orphan_discovery_ids.append(e.id)
 
         elif e.type == "decision" and e.decision:
             d = e.decision
             desc = d.description[:80] + ("..." if len(d.description) > 80 else "")
-            decs.append(DecisionSummary(
-                event_id=e.id,
-                proposed_by_type=d.proposed_by.type,
-                suggestion_type=d.suggestion_type,
-                disposition=d.disposition,
-                description_preview=desc,
-            ))
+            decs.append(
+                DecisionSummary(
+                    event_id=e.id,
+                    proposed_by_type=d.proposed_by.type,
+                    suggestion_type=d.suggestion_type,
+                    disposition=d.disposition,
+                    description_preview=desc,
+                )
+            )
             if d.disposition == "rejected":
                 rejected.append(e)
             elif d.disposition == "revised":
@@ -366,13 +359,11 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
     # Build aggregate warnings (severity-ordered to match render())
     if unresolved_ids:
         audit_warnings.append(
-            f"{len(unresolved_ids)} decision(s) still in 'proposed' state — "
-            "were they reviewed by the human?"
+            f"{len(unresolved_ids)} decision(s) still in 'proposed' state — were they reviewed by the human?"
         )
     if self_resolved_ids:
         audit_warnings.append(
-            f"{len(self_resolved_ids)} decision(s) were proposed and resolved by AI — "
-            "verify human was consulted."
+            f"{len(self_resolved_ids)} decision(s) were proposed and resolved by AI — verify human was consulted."
         )
     if attribution_warning_ids:
         audit_warnings.append(
@@ -382,8 +373,7 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
         )
     if unlinked_correction_count:
         audit_warnings.append(
-            f"{unlinked_correction_count} correction(s) lack corrects_event_ids — "
-            "link them for full provenance."
+            f"{unlinked_correction_count} correction(s) lack corrects_event_ids — link them for full provenance."
         )
     # Orphan-discovery is surfaced ONLY as the low-severity
     # `orphan_discovery_hint_count` (rendered separately). It is deliberately
@@ -405,12 +395,7 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
     # routinely have 0 tool_call events, so a low threshold would generate
     # permanent noise. Guard against missing environment for legacy sessions.
     env = session.metadata.environment
-    if (
-        contribution_count >= 10
-        and tool_call_count == 0
-        and env is not None
-        and env.client == "Claude Code"
-    ):
+    if contribution_count >= 10 and tool_call_count == 0 and env is not None and env.client == "Claude Code":
         audit_warnings.append(
             f"[hint] Session has {contribution_count} contributions and 0 tool_call "
             "events. If subagent dispatches occurred, consider logging them as "
@@ -715,8 +700,7 @@ def _check_referential_integrity(
     for ref_id, field_name in ids_to_check:
         if ref_id not in existing_ids:
             warnings.append(
-                f"Dangling reference: {field_name} contains '{ref_id}' "
-                f"which does not exist in this session."
+                f"Dangling reference: {field_name} contains '{ref_id}' which does not exist in this session."
             )
 
     return warnings
@@ -781,10 +765,7 @@ async def append_event(
         # Validate referential integrity against the merged state.
         ref_errors = _check_referential_integrity(session, event)
         if ref_errors:
-            raise ValueError(
-                f"Invalid event references in {event.id}:\n"
-                + "\n".join(f"  - {e}" for e in ref_errors)
-            )
+            raise ValueError(f"Invalid event references in {event.id}:\n" + "\n".join(f"  - {e}" for e in ref_errors))
 
         session.events.append(event)
         await storage.update_session(session)

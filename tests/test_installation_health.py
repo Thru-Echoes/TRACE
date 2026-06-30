@@ -62,6 +62,8 @@ class TestPackageImport:
             TraceEvent,
         )
 
+        for model in (Actor, AnnotationData, ContributionData, DecisionData, SessionMetadata):
+            assert model is not None  # the module exports each required model
         assert hasattr(Session, "model_validate")
         assert hasattr(TraceEvent, "model_validate")
 
@@ -147,8 +149,7 @@ class TestMCPConfiguration:
         # source after --from must be the local path '.', never a PyPI
         # package spec. This is the load-bearing local-only guarantee.
         assert args[args.index("--from") + 1] == ".", (
-            "uvx --from must point at the local path '.', not a PyPI "
-            f"package. Got: {args[args.index('--from') + 1]!r}"
+            f"uvx --from must point at the local path '.', not a PyPI package. Got: {args[args.index('--from') + 1]!r}"
         )
         # A refresh flag must be present so local source changes are picked
         # up on server restart. Either form is valid: `--refresh-package
@@ -179,8 +180,7 @@ class TestMCPConfiguration:
         """The legacy bin/ launcher should not exist (replaced by uvx)."""
         legacy_bin = TRACE_ROOT / "bin" / "trace-mcp-server"
         assert not legacy_bin.exists(), (
-            f"Legacy launcher {legacy_bin} still exists. "
-            "Remove it — all projects now use uvx."
+            f"Legacy launcher {legacy_bin} still exists. Remove it — all projects now use uvx."
         )
 
 
@@ -228,8 +228,7 @@ class TestPyprojectConsistency:
             pytest.fail("Could not find version in pyproject.toml")
 
         assert trace_mcp.__version__ == pyproject_version, (
-            f"Installed version {trace_mcp.__version__} != "
-            f"pyproject.toml version {pyproject_version}"
+            f"Installed version {trace_mcp.__version__} != pyproject.toml version {pyproject_version}"
         )
 
     def test_entry_points_in_pyproject(self) -> None:
@@ -293,10 +292,7 @@ class TestConsumerProjects:
 
             trace_config = servers["trace"]
             if trace_config.get("command") != "uvx":
-                failures.append(
-                    f"{project_dir}/.mcp.json: command is "
-                    f"'{trace_config.get('command')}', expected 'uvx'"
-                )
+                failures.append(f"{project_dir}/.mcp.json: command is '{trace_config.get('command')}', expected 'uvx'")
                 continue
 
             args = trace_config.get("args", [])
@@ -306,7 +302,4 @@ class TestConsumerProjects:
                 failures.append(f"{project_dir}/.mcp.json: missing 'trace-mcp' in uvx args")
 
         if failures:
-            pytest.fail(
-                "Consumer project configuration check failed:\n  - "
-                + "\n  - ".join(failures)
-            )
+            pytest.fail("Consumer project configuration check failed:\n  - " + "\n  - ".join(failures))

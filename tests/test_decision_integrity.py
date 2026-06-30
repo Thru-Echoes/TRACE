@@ -40,9 +40,7 @@ def active() -> dict[str, Session]:
     return {}
 
 
-async def _session_with_proposal(
-    storage: JsonFileStorage, active: dict[str, Session]
-) -> tuple[Session, str]:
+async def _session_with_proposal(storage: JsonFileStorage, active: dict[str, Session]) -> tuple[Session, str]:
     """Create a session containing one proposed decision; return (session, event_id)."""
     session = await session_tools.create_session(
         storage, active, project="integrity-test", description="decision integrity"
@@ -130,9 +128,7 @@ class TestH2ReResolution:
 
 
 class TestH1PostCompletionResolution:
-    async def test_resolve_proposed_in_completed_session_allowed_with_warning(
-        self, storage, active
-    ):
+    async def test_resolve_proposed_in_completed_session_allowed_with_warning(self, storage, active):
         """Cross-session resolution (the documented decision lifecycle) keeps working."""
         session, event_id = await _session_with_proposal(storage, active)
         await session_tools.end_session(storage, active, session_id=session.id)
@@ -156,9 +152,7 @@ class TestH1PostCompletionResolution:
         assert decision_evt.decision.disposition == "accepted"
         assert any("after session completion" in w for w in decision_evt.decision.warnings)
 
-    async def test_stale_in_memory_copy_cannot_resurrect_completed_session(
-        self, storage, active
-    ):
+    async def test_stale_in_memory_copy_cannot_resurrect_completed_session(self, storage, active):
         """The write must target the disk object, not the caller's stale copy."""
         session, event_id = await _session_with_proposal(storage, active)
         # Another process completes the session; our in-memory copy still says active.
@@ -205,9 +199,7 @@ class TestWarningsPreserved:
 
 
 class TestCurrentSessionPointerGuard:
-    async def test_completed_session_does_not_become_current(
-        self, storage, active, monkeypatch
-    ):
+    async def test_completed_session_does_not_become_current(self, storage, active, monkeypatch):
         """Explicit session_id to a completed session must not move the pointer."""
         from trace_mcp import server
 
@@ -235,9 +227,7 @@ class TestCurrentSessionPointerGuard:
         assert looked_up.id == session.id
         assert server._current_session_id == session.id
 
-    async def test_stale_cached_active_but_disk_completed_does_not_move_pointer(
-        self, storage, active, monkeypatch
-    ):
+    async def test_stale_cached_active_but_disk_completed_does_not_move_pointer(self, storage, active, monkeypatch):
         """Pointer guard must trust disk status, not the in-memory cache."""
         from trace_mcp import server
 
@@ -255,9 +245,7 @@ class TestCurrentSessionPointerGuard:
         assert looked_up.id == session.id
         assert server._current_session_id == "sentinel-current"
 
-    async def test_completed_current_session_falls_through_to_autocreate(
-        self, storage, active, monkeypatch
-    ):
+    async def test_completed_current_session_falls_through_to_autocreate(self, storage, active, monkeypatch):
         """A completed current session must not wedge pointer-less calls."""
         from trace_mcp import server
 
@@ -339,6 +327,5 @@ class TestLiteralSignatureSweep:
                     )
                     literal_values.update(typing.get_args(arg))
         assert literal_values == expected_values, (
-            f"{tool_name}.{param}: expected Literal{sorted(map(str, expected_values))}, "
-            f"got {hints[param]!r}"
+            f"{tool_name}.{param}: expected Literal{sorted(map(str, expected_values))}, got {hints[param]!r}"
         )

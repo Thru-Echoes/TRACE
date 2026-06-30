@@ -88,9 +88,7 @@ async def test_start_session_response_includes_status(
 ) -> None:
     storage = JsonFileStorage(directory=str(tmp_path))
     active: dict[str, Session] = {}
-    result = await session_tools.start_session(
-        storage, active, project="status-test", description="d"
-    )
+    result = await session_tools.start_session(storage, active, project="status-test", description="d")
     assert "TRACE active" in result
     # Original content still present (additive, not replacing)
     assert "TRACE audit logging is now active." in result

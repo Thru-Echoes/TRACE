@@ -67,9 +67,7 @@ class TestFindDuplicate:
     def test_near_match(self):
         ks = KnowledgeStore(project="test")
         add_learning(ks, content="Always use ml-dev conda environment for ML tasks")
-        result = find_duplicate(
-            ks, "Always use the ml-dev conda environment for ML tasks", threshold=0.7
-        )
+        result = find_duplicate(ks, "Always use the ml-dev conda environment for ML tasks", threshold=0.7)
         assert result is not None
 
     def test_no_match(self):
@@ -92,13 +90,9 @@ class TestFindDuplicate:
         ks = KnowledgeStore(project="test")
         add_learning(ks, content="use conda environment ml-dev for ML")
         # Very high threshold — should not match slightly different content
-        result_strict = find_duplicate(
-            ks, "conda environment setup for data science", threshold=0.95
-        )
+        result_strict = find_duplicate(ks, "conda environment setup for data science", threshold=0.95)
         # Lower threshold — should match
-        result_lenient = find_duplicate(
-            ks, "conda environment setup for data science", threshold=0.1
-        )
+        result_lenient = find_duplicate(ks, "conda environment setup for data science", threshold=0.1)
         assert result_strict is None
         assert result_lenient is not None
 
@@ -117,9 +111,7 @@ class TestAddLearningDedup:
     def test_duplicate_content_skipped(self):
         ks = KnowledgeStore(project="test")
         add_learning(ks, content="Always use ml-dev conda environment")
-        result = add_learning_dedup(
-            ks, content="Always use ml-dev conda environment", dedup_threshold=0.5
-        )
+        result = add_learning_dedup(ks, content="Always use ml-dev conda environment", dedup_threshold=0.5)
         assert result.is_duplicate
         assert result.duplicate_of == "lrn_001"
         assert len(ks.learnings) == 1  # No new learning added
@@ -148,9 +140,7 @@ class TestAddLearningDedup:
     def test_different_content_not_deduplicated(self):
         ks = KnowledgeStore(project="test")
         add_learning(ks, content="Always use ml-dev conda environment")
-        result = add_learning_dedup(
-            ks, content="Best pasta recipe uses fresh tomatoes"
-        )
+        result = add_learning_dedup(ks, content="Best pasta recipe uses fresh tomatoes")
         assert not result.is_duplicate
         assert len(ks.learnings) == 2
 
@@ -166,11 +156,7 @@ class TestDedupInExtraction:
         add_learning(ks, content="Always check data types before processing")
 
         # Session with a very similar annotation
-        events = [
-            _make_annotation_event(
-                "evt_001", "learning", "Always check data types before processing"
-            )
-        ]
+        events = [_make_annotation_event("evt_001", "learning", "Always check data types before processing")]
         session = _make_session(events)
 
         new_ids = extract_from_session(ks, session, dedup_threshold=0.5)
@@ -182,11 +168,7 @@ class TestDedupInExtraction:
         ks = KnowledgeStore(project="test")
         add_learning(ks, content="Always check data types before processing")
 
-        events = [
-            _make_annotation_event(
-                "evt_001", "learning", "Always check data types before processing"
-            )
-        ]
+        events = [_make_annotation_event("evt_001", "learning", "Always check data types before processing")]
         session = _make_session(events)
 
         new_ids = extract_from_session(ks, session, dedup_threshold=None)

@@ -81,8 +81,12 @@ class SchemaSurface(BaseModel):
     tool_count: int = Field(..., description="Number of registered MCP tools introspected.")
     schema_chars: int = Field(..., description="Total characters of name+description+inputSchema JSON across tools.")
     tokens_est: int = Field(..., description="Raw chars/4 token estimate of the schema surface (uncached).")
-    cold_write_tokens_est: int = Field(..., description="First-turn cache-write estimate (tokens_est * write multiplier).")
-    warm_read_tokens_est: int = Field(..., description="Per-later-turn cache-read estimate (tokens_est * read multiplier).")
+    cold_write_tokens_est: int = Field(
+        ..., description="First-turn cache-write estimate (tokens_est * write multiplier)."
+    )
+    warm_read_tokens_est: int = Field(
+        ..., description="Per-later-turn cache-read estimate (tokens_est * read multiplier)."
+    )
     included_extensions: bool = Field(..., description="Whether extension tools were included in the surface.")
     note: str = Field(..., description="Honesty caveat for this measurement.")
 
@@ -93,8 +97,12 @@ class SessionCost(BaseModel):
     session_id: str
     project: str | None = None
     event_count: int
-    authored_tokens_est: int = Field(..., description="chars/4 estimate of authored event payloads (model output side).")
-    by_event_type: dict[str, int] = Field(default_factory=dict, description="authored_tokens_est broken down by event type.")
+    authored_tokens_est: int = Field(
+        ..., description="chars/4 estimate of authored event payloads (model output side)."
+    )
+    by_event_type: dict[str, int] = Field(
+        default_factory=dict, description="authored_tokens_est broken down by event type."
+    )
     tool_call_host_breakdown: dict[str, int] = Field(
         default_factory=dict,
         description="Counts of logged tool_call events by host (mcp/internal/external). internal/external are logged "
@@ -108,7 +116,9 @@ class ReuseSignal(BaseModel):
 
     project: str
     total_learnings: int
-    total_recall_count: int = Field(..., description="Sum of recall_count across learnings (SURFACING, not proven use).")
+    total_recall_count: int = Field(
+        ..., description="Sum of recall_count across learnings (SURFACING, not proven use)."
+    )
     never_surfaced: int
     avg_recall_count: float
     data_quality_flag: str = Field(..., description="Why these counts are a weak, possibly-undercounted signal.")

@@ -88,7 +88,8 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         if _embedding_provider is None:
             return []
         return [
-            lrn for lrn in ks.learnings
+            lrn
+            for lrn in ks.learnings
             if lrn.embedding is None or lrn.embedding_model != _embedding_provider.model_name
         ]
 
@@ -183,11 +184,13 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
 
             if isinstance(exc, LLMFallbackError):
                 logger.error("Strict LLM mode blocked fallback in trace_learn_recall: %s", exc)
-                return json.dumps({
-                    "error": "LLM strict mode: fallback blocked",
-                    "detail": str(exc),
-                    "project": project,
-                })
+                return json.dumps(
+                    {
+                        "error": "LLM strict mode: fallback blocked",
+                        "detail": str(exc),
+                        "project": project,
+                    }
+                )
             logger.exception("Error recalling learnings")
             return json.dumps({"error": "Failed to recall learnings", "project": project})
 
@@ -207,9 +210,11 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         """
         try:
             if category not in _VALID_CATEGORIES:
-                return json.dumps({
-                    "error": f"Invalid category '{category}'. Must be one of: {_VALID_CATEGORIES}",
-                })
+                return json.dumps(
+                    {
+                        "error": f"Invalid category '{category}'. Must be one of: {_VALID_CATEGORIES}",
+                    }
+                )
             # Lock the full load->mutate->save span so concurrent
             # multi-session adds to the same project don't lose updates
             # (last-writer-wins on the shared store).
@@ -226,11 +231,13 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                         dedup_threshold=_config.dedup_threshold,
                     )
                     if result.is_duplicate:
-                        return json.dumps({
-                            "duplicate": True,
-                            "similar_to": result.duplicate_of,
-                            "existing": store.learning_to_dict(result.learning),
-                        })
+                        return json.dumps(
+                            {
+                                "duplicate": True,
+                                "similar_to": result.duplicate_of,
+                                "existing": store.learning_to_dict(result.learning),
+                            }
+                        )
                     lrn = result.learning
                 else:
                     lrn = store.add_learning(
@@ -249,11 +256,13 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
 
             if isinstance(exc, LLMFallbackError):
                 logger.error("Strict LLM mode blocked fallback in trace_learn_add: %s", exc)
-                return json.dumps({
-                    "error": "LLM strict mode: fallback blocked",
-                    "detail": str(exc),
-                    "project": project,
-                })
+                return json.dumps(
+                    {
+                        "error": "LLM strict mode: fallback blocked",
+                        "detail": str(exc),
+                        "project": project,
+                    }
+                )
             logger.exception("Error adding learning")
             return json.dumps({"error": "Failed to add learning", "project": project})
 
@@ -351,10 +360,12 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
 
             if isinstance(exc, LLMFallbackError):
                 logger.error("Strict LLM mode blocked fallback in trace_learn_extract: %s", exc)
-                return json.dumps({
-                    "error": "LLM strict mode: fallback blocked",
-                    "detail": str(exc),
-                    "project": project,
-                })
+                return json.dumps(
+                    {
+                        "error": "LLM strict mode: fallback blocked",
+                        "detail": str(exc),
+                        "project": project,
+                    }
+                )
             logger.exception("Error extracting learnings")
             return json.dumps({"error": "Failed to extract learnings", "project": project})

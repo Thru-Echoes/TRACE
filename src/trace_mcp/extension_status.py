@@ -34,8 +34,7 @@ def get_extension_status() -> str:
         from trace_mcp.extensions.learn.embeddings import get_embedding_provider
     except Exception:
         return (
-            f"{_BANNER} — no learning extension. "
-            "Enable the trace-learn extension for cross-session knowledge recall."
+            f"{_BANNER} — no learning extension. Enable the trace-learn extension for cross-session knowledge recall."
         )
 
     try:

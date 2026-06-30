@@ -55,9 +55,7 @@ class TestSuiteEnvIsolation:
         context-restoration file) or falls back to ~/.trace/scratchpads."""
         isolated = _assert_isolated("TRACE_SCRATCHPAD_DIR")
         resolved = _scratchpad_path().resolve()
-        assert resolved.is_relative_to(isolated), (
-            f"scratchpad resolves to {resolved}, expected inside {isolated}"
-        )
+        assert resolved.is_relative_to(isolated), f"scratchpad resolves to {resolved}, expected inside {isolated}"
         assert not resolved.is_relative_to((Path.cwd() / ".claude").resolve()), (
             "scratchpad would overwrite the developer's real .claude/SCRATCHPAD.md"
         )

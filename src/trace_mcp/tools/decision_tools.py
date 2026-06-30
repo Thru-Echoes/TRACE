@@ -124,10 +124,7 @@ async def resolve_decision(
         # id) proposes and resolves. The ai→ai case warns unconditionally; the
         # generalized non-ai case is gated to multi-actor sessions (see below).
         proposer = target.decision.proposed_by
-        is_self_resolution = (
-            proposer.type == resolved_by_type
-            and proposer.id == resolved_by_id
-        )
+        is_self_resolution = proposer.type == resolved_by_type and proposer.id == resolved_by_id
 
         if is_self_resolution and not suppress:
             if resolved_by_type == "ai":
@@ -135,8 +132,7 @@ async def resolve_decision(
                 # case). Fires unconditionally — AI must not resolve its own
                 # proposal regardless of how many actor types the session has.
                 guard_warnings.append(
-                    "AI resolved its own proposal. Decisions proposed by AI "
-                    "should normally be resolved by a human."
+                    "AI resolved its own proposal. Decisions proposed by AI should normally be resolved by a human."
                 )
             elif write_session.is_multi_actor():
                 # v0.4.1: human→human (or system→system) same-instance

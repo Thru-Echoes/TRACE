@@ -171,10 +171,7 @@ class JaccardBackend:
         context: str,
         context_tags: list[str] | None = None,
     ) -> list[tuple[int, float]]:
-        return [
-            (i, score_learning(lrn, context, context_tags, self.tag_weight))
-            for i, lrn in enumerate(learnings)
-        ]
+        return [(i, score_learning(lrn, context, context_tags, self.tag_weight)) for i, lrn in enumerate(learnings)]
 
 
 # ── BM25 backend ─────────────────────────────────────────────────────────
@@ -289,8 +286,7 @@ class LLMBackend:
     def __init__(self, config: LearnConfig) -> None:
         if not _HAS_OPENAI:
             raise RuntimeError(
-                "The 'openai' package is required for LLM matching. "
-                "Install it with: pip install 'trace-mcp[llm]'"
+                "The 'openai' package is required for LLM matching. Install it with: pip install 'trace-mcp[llm]'"
             )
         self._client = AsyncOpenAI(api_key=config.openai_api_key)
         self._model = config.llm_model
@@ -315,9 +311,7 @@ class LLMBackend:
         index_map: dict[int, int] = {}  # local idx → original idx
         candidates = learnings
         if len(learnings) > self.MAX_DIRECT_CANDIDATES:
-            bm25_scores = await self._bm25_fallback.score_batch(
-                learnings, context, context_tags
-            )
+            bm25_scores = await self._bm25_fallback.score_batch(learnings, context, context_tags)
             bm25_scores.sort(key=lambda x: x[1], reverse=True)
             top_indices = [idx for idx, _ in bm25_scores[: self.MAX_DIRECT_CANDIDATES]]
             candidates = [learnings[i] for i in top_indices]
@@ -343,14 +337,11 @@ class LLMBackend:
                     f"allow silent fallback to BM25."
                 ) from exc
             logger.warning(
-                "LLM scoring failed (model=%s) — falling back to BM25. "
-                "Strict mode is OFF.",
+                "LLM scoring failed (model=%s) — falling back to BM25. Strict mode is OFF.",
                 self._model,
                 exc_info=True,
             )
-            return await self._bm25_fallback.score_batch(
-                learnings, context, context_tags
-            )
+            return await self._bm25_fallback.score_batch(learnings, context, context_tags)
 
         return [(index_map[local], score) for local, score in enumerate(scores)]
 
@@ -426,7 +417,9 @@ class EmbeddingBackend:
         self._provider = provider
         self._tag_weight = tag_weight
         self._bm25_fallback = BM25Backend(
-            k1=bm25_fallback_k1, b=bm25_fallback_b, tag_weight=tag_weight,
+            k1=bm25_fallback_k1,
+            b=bm25_fallback_b,
+            tag_weight=tag_weight,
         )
 
     async def score_batch(
@@ -459,7 +452,8 @@ class EmbeddingBackend:
             query_vec = query_vecs[0]
 
             matrix = np.array(
-                [lrn.embedding for _, lrn in with_emb], dtype=np.float32,
+                [lrn.embedding for _, lrn in with_emb],
+                dtype=np.float32,
             )
             similarities = cosine_similarity_matrix(query_vec, matrix)
 
@@ -473,7 +467,9 @@ class EmbeddingBackend:
         if without_emb:
             bm25_learnings = [lrn for _, lrn in without_emb]
             bm25_scores = await self._bm25_fallback.score_batch(
-                bm25_learnings, context, context_tags,
+                bm25_learnings,
+                context,
+                context_tags,
             )
             for bm25_local_idx, score in bm25_scores:
                 orig_idx = without_emb[bm25_local_idx][0]
@@ -533,7 +529,8 @@ def get_default_backend(config: LearnConfig | None = None) -> MatchingBackend:
 
     logger.warning(
         "Using BM25 matching backend (k1=%s, b=%s) — no LLM or embedding provider available",
-        config.bm25_k1, config.bm25_b,
+        config.bm25_k1,
+        config.bm25_b,
     )
     return BM25Backend(
         k1=config.bm25_k1,
@@ -657,10 +654,13 @@ async def recall_learnings(
     for idx, score in surfaced:
         learnings[idx].recall_count += 1
         learnings[idx].last_surfaced = now
-        results.append({
-            "learning": learnings[idx].model_dump(
-                mode="json", exclude={"embedding", "embedding_model"},
-            ),
-            "score": round(score, 4),
-        })
+        results.append(
+            {
+                "learning": learnings[idx].model_dump(
+                    mode="json",
+                    exclude={"embedding", "embedding_model"},
+                ),
+                "score": round(score, 4),
+            }
+        )
     return results

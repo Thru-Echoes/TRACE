@@ -42,31 +42,46 @@ class TestEmbeddingE2ESubprocess:
                 await _initialize_server(proc)
 
                 # Add the target learning + a distractor (BM25 needs a corpus)
-                result = await _call_tool(proc, "trace_learn_add", {
-                    "project": "e2e-embed-test",
-                    "content": "Always use the ml-dev conda environment, not base",
-                    "category": "gotcha",
-                    "tags": ["conda", "env"],
-                }, request_id=10)
+                result = await _call_tool(
+                    proc,
+                    "trace_learn_add",
+                    {
+                        "project": "e2e-embed-test",
+                        "content": "Always use the ml-dev conda environment, not base",
+                        "category": "gotcha",
+                        "tags": ["conda", "env"],
+                    },
+                    request_id=10,
+                )
 
                 response_text = result["result"]["content"][0]["text"]
                 data = json.loads(response_text)
                 assert "added" in data or "duplicate" in data
 
-                await _call_tool(proc, "trace_learn_add", {
-                    "project": "e2e-embed-test",
-                    "content": "Fresh pasta needs semolina flour and eggs",
-                    "category": "gotcha",
-                    "tags": ["food"],
-                }, request_id=11)
+                await _call_tool(
+                    proc,
+                    "trace_learn_add",
+                    {
+                        "project": "e2e-embed-test",
+                        "content": "Fresh pasta needs semolina flour and eggs",
+                        "category": "gotcha",
+                        "tags": ["food"],
+                    },
+                    request_id=11,
+                )
 
                 # Recall — an overlapping query must surface the conda learning first
-                recall_result = await _call_tool(proc, "trace_learn_recall", {
-                    "project": "e2e-embed-test",
-                    "context": "which conda environment should I use",
-                    "threshold": 0.05,
-                    "limit": 5,
-                }, request_id=12)
+                recall_result = await _call_tool(
+                    proc,
+                    "trace_learn_recall",
+                    {
+                        "project": "e2e-embed-test",
+                        "context": "which conda environment should I use",
+                        "threshold": 0.05,
+                        "limit": 5,
+                    },
+                    request_id=12,
+                )
 
                 recall_text = recall_result["result"]["content"][0]["text"]
                 recall_data = json.loads(recall_text)
@@ -84,24 +99,39 @@ class TestEmbeddingE2ESubprocess:
                 await _initialize_server(proc)
 
                 # Add two learnings with different content
-                await _call_tool(proc, "trace_learn_add", {
-                    "project": "e2e-scores",
-                    "content": "BM25 uses term frequency and inverse document frequency",
-                    "tags": ["bm25", "search"],
-                }, request_id=20)
-                await _call_tool(proc, "trace_learn_add", {
-                    "project": "e2e-scores",
-                    "content": "Fresh pasta needs semolina flour and eggs",
-                    "tags": ["food"],
-                }, request_id=21)
+                await _call_tool(
+                    proc,
+                    "trace_learn_add",
+                    {
+                        "project": "e2e-scores",
+                        "content": "BM25 uses term frequency and inverse document frequency",
+                        "tags": ["bm25", "search"],
+                    },
+                    request_id=20,
+                )
+                await _call_tool(
+                    proc,
+                    "trace_learn_add",
+                    {
+                        "project": "e2e-scores",
+                        "content": "Fresh pasta needs semolina flour and eggs",
+                        "tags": ["food"],
+                    },
+                    request_id=21,
+                )
 
                 # Recall — search-related query with low threshold
-                result = await _call_tool(proc, "trace_learn_recall", {
-                    "project": "e2e-scores",
-                    "context": "BM25 term frequency search ranking",
-                    "threshold": 0.05,
-                    "limit": 5,
-                }, request_id=22)
+                result = await _call_tool(
+                    proc,
+                    "trace_learn_recall",
+                    {
+                        "project": "e2e-scores",
+                        "context": "BM25 term frequency search ranking",
+                        "threshold": 0.05,
+                        "limit": 5,
+                    },
+                    request_id=22,
+                )
 
                 data = json.loads(result["result"]["content"][0]["text"])
                 assert data["total"] >= 1
@@ -111,7 +141,6 @@ class TestEmbeddingE2ESubprocess:
 
             finally:
                 await _shutdown_server(proc)
-
 
 
 # ── Real data E2E tests ──────────────────────────────────────────────────
@@ -136,6 +165,7 @@ class TestRealDataE2E:
             knowledge_dir = Path(sessions_dir) / "knowledge"
             knowledge_dir.mkdir()
             import shutil
+
             shutil.copy2(_REAL_STORE, knowledge_dir / "TRACE.json")
 
             env_override = {"TRACE_KNOWLEDGE_DIR": str(knowledge_dir)}
@@ -145,11 +175,16 @@ class TestRealDataE2E:
             try:
                 await _initialize_server(proc)
 
-                result = await _call_tool(proc, "trace_learn_recall", {
-                    "project": "TRACE",
-                    "context": "schema validation rules for actor types",
-                    "limit": 5,
-                }, request_id=50)
+                result = await _call_tool(
+                    proc,
+                    "trace_learn_recall",
+                    {
+                        "project": "TRACE",
+                        "context": "schema validation rules for actor types",
+                        "limit": 5,
+                    },
+                    request_id=50,
+                )
 
                 data = json.loads(result["result"]["content"][0]["text"])
                 assert data["total"] >= 1

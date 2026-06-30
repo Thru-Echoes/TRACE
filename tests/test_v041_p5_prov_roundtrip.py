@@ -51,9 +51,7 @@ def _session_with_v041_prov_shapes() -> Session:
             session_id=s.id,
             type="annotation",
             actor=Actor(type="human", id="researcher"),
-            annotation=AnnotationData(
-                category="correction", content="fix", corrects_event_ids=["evt_001"]
-            ),
+            annotation=AnnotationData(category="correction", content="fix", corrects_event_ids=["evt_001"]),
         )
     )
     # URI-target correction → qualified prov:wasInfluencedBy + prov:atLocation
@@ -77,9 +75,7 @@ def _session_with_v041_prov_shapes() -> Session:
             session_id=s.id,
             type="tool_call",
             actor=Actor(type="ai", id="claude"),
-            tool_call=ToolCallData(
-                server="claude-code", name="Agent", input={}, parent_event_id="evt_001"
-            ),
+            tool_call=ToolCallData(server="claude-code", name="Agent", input={}, parent_event_id="evt_001"),
         )
     )
     return s

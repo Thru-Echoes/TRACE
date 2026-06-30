@@ -112,9 +112,7 @@ class TestUriSchemeHelperUnit:
 class TestUriFormCorrectsEventIdsE2E:
     """E2E tests: real storage, real session lifecycle, real validator."""
 
-    async def test_external_scheme_accepted_through_append_event(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_external_scheme_accepted_through_append_event(self, storage: JsonFileStorage) -> None:
         """A correction with external: scheme MUST NOT raise on append.
 
         This is the canonical scenario that was failing pre-L3.1: a
@@ -196,9 +194,7 @@ class TestUriFormCorrectsEventIdsE2E:
             "tool-result:xyz",
         ]
 
-    async def test_mixed_event_id_and_uri_form_accepted(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_mixed_event_id_and_uri_form_accepted(self, storage: JsonFileStorage) -> None:
         """A correction can anchor to both an in-session event ID AND a URI.
 
         Real workflow: the corrected work produced a contribution that's
@@ -243,9 +239,7 @@ class TestUriFormCorrectsEventIdsE2E:
         with pytest.raises(ValueError, match="Dangling reference"):
             await append_event(storage, session, event)
 
-    async def test_dangling_mixed_with_uri_still_raises_for_bad_event_id(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_dangling_mixed_with_uri_still_raises_for_bad_event_id(self, storage: JsonFileStorage) -> None:
         """A URI-form entry does NOT shield a bad event-ID entry beside it.
 
         Each entry is validated independently per its kind. URI-form
@@ -262,9 +256,7 @@ class TestUriFormCorrectsEventIdsE2E:
         with pytest.raises(ValueError, match="Dangling reference"):
             await append_event(storage, session, event)
 
-    async def test_uppercase_scheme_treated_as_event_id_and_fails_validation(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_uppercase_scheme_treated_as_event_id_and_fails_validation(self, storage: JsonFileStorage) -> None:
         """A string like `EXTERNAL:foo` is NOT URI-form (must be lowercase).
 
         Therefore it falls through to event-ID validation and (since no
@@ -292,9 +284,7 @@ class TestNonCorrectionFieldsUnchanged:
     event-ID-only.
     """
 
-    async def test_revises_event_id_still_validated(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_revises_event_id_still_validated(self, storage: JsonFileStorage) -> None:
         """A decision's revises_event_id must still be a real event ID."""
         from trace_mcp.schema.events import DecisionData
 
@@ -315,9 +305,7 @@ class TestNonCorrectionFieldsUnchanged:
         with pytest.raises(ValueError, match="Dangling reference"):
             await append_event(storage, session, bad)
 
-    async def test_related_decision_ids_still_validated(
-        self, storage: JsonFileStorage
-    ) -> None:
+    async def test_related_decision_ids_still_validated(self, storage: JsonFileStorage) -> None:
         """A contribution's related_decision_ids must reference real events."""
         from trace_mcp.schema.events import ContributionData
 

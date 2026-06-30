@@ -59,8 +59,11 @@ def test_format_bootstrap_message_is_pure_and_complete():
         session_id="trace_x",
         project="P",
         path="/tmp/trace_x.json",
-        brief={"matched": 2, "capped": False,
-               "most_recent": {"id": "trace_prev", "event_count": 5, "created": "2026-05-30T00:00:00"}},
+        brief={
+            "matched": 2,
+            "capped": False,
+            "most_recent": {"id": "trace_prev", "event_count": 5, "created": "2026-05-30T00:00:00"},
+        },
         recalled_block="",
     )
     assert "trace_x" in msg and "P" in msg
