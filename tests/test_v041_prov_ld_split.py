@@ -68,17 +68,22 @@ class TestCorrectionInvalidatedBy:
         session = _make_session()
         session.events.append(
             TraceEvent(
-                id="evt_001", session_id=session.id, type="annotation",
+                id="evt_001",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="ai", id="claude-opus-4.7"),
                 annotation=AnnotationData(category="observation", content="initial"),
             )
         )
         session.events.append(
             TraceEvent(
-                id="evt_002", session_id=session.id, type="annotation",
+                id="evt_002",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="human", id="researcher"),
                 annotation=AnnotationData(
-                    category="correction", content="that was wrong",
+                    category="correction",
+                    content="that was wrong",
                     corrects_event_ids=["evt_001"],
                 ),
             )
@@ -91,17 +96,22 @@ class TestCorrectionInvalidatedBy:
         session = _make_session()
         session.events.append(
             TraceEvent(
-                id="evt_001", session_id=session.id, type="annotation",
+                id="evt_001",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="ai", id="claude"),
                 annotation=AnnotationData(category="observation", content="x"),
             )
         )
         session.events.append(
             TraceEvent(
-                id="evt_002", session_id=session.id, type="annotation",
+                id="evt_002",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="human", id="researcher"),
                 annotation=AnnotationData(
-                    category="correction", content="wrong",
+                    category="correction",
+                    content="wrong",
                     corrects_event_ids=["evt_001"],
                 ),
             )
@@ -120,10 +130,13 @@ class TestCorrectionInfluencedByUri:
         uri = "external:https://example.com/transcript#L225"
         session.events.append(
             TraceEvent(
-                id="evt_001", session_id=session.id, type="annotation",
+                id="evt_001",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="human", id="researcher"),
                 annotation=AnnotationData(
-                    category="correction", content="claim was false",
+                    category="correction",
+                    content="claim was false",
                     corrects_event_ids=[uri],
                 ),
             )
@@ -139,10 +152,13 @@ class TestCorrectionInfluencedByUri:
         session = _make_session()
         session.events.append(
             TraceEvent(
-                id="evt_001", session_id=session.id, type="annotation",
+                id="evt_001",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="human", id="researcher"),
                 annotation=AnnotationData(
-                    category="correction", content="x",
+                    category="correction",
+                    content="x",
                     corrects_event_ids=["jsonl:/path#L1"],
                 ),
             )
@@ -154,10 +170,13 @@ class TestCorrectionInfluencedByUri:
         session = _make_session()
         session.events.append(
             TraceEvent(
-                id="evt_001", session_id=session.id, type="annotation",
+                id="evt_001",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="human", id="researcher"),
                 annotation=AnnotationData(
-                    category="correction", content="multi",
+                    category="correction",
+                    content="multi",
                     corrects_event_ids=["external:https://example.com/a", "jsonl:/path#L1"],
                 ),
             )
@@ -174,17 +193,22 @@ class TestMixedEventIdAndUriCorrection:
         session = _make_session()
         session.events.append(
             TraceEvent(
-                id="evt_001", session_id=session.id, type="annotation",
+                id="evt_001",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="ai", id="claude"),
                 annotation=AnnotationData(category="observation", content="x"),
             )
         )
         session.events.append(
             TraceEvent(
-                id="evt_002", session_id=session.id, type="annotation",
+                id="evt_002",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="human", id="researcher"),
                 annotation=AnnotationData(
-                    category="correction", content="wrong",
+                    category="correction",
+                    content="wrong",
                     corrects_event_ids=["evt_001", "external:https://example.com/source"],
                 ),
             )
@@ -201,21 +225,30 @@ class TestDispatchParentWasInformedBy:
         session = _make_session()
         session.events.append(
             TraceEvent(
-                id="evt_001", session_id=session.id, type="decision",
+                id="evt_001",
+                session_id=session.id,
+                type="decision",
                 actor=Actor(type="human", id="researcher"),
                 decision=DecisionData(
-                    description="start", proposed_by=Actor(type="human", id="researcher"),
-                    disposition="accepted", resolved_by=Actor(type="ai", id="claude-opus-4.7"),
+                    description="start",
+                    proposed_by=Actor(type="human", id="researcher"),
+                    disposition="accepted",
+                    resolved_by=Actor(type="ai", id="claude-opus-4.7"),
                 ),
             )
         )
         session.events.append(
             TraceEvent(
-                id="evt_002", session_id=session.id, type="tool_call",
+                id="evt_002",
+                session_id=session.id,
+                type="tool_call",
                 actor=Actor(type="ai", id="claude-opus-4.7"),
                 tool_call=ToolCallData(
-                    server="claude-code", name="Agent", input={"task": "x"},
-                    host="internal", parent_event_id="evt_001",
+                    server="claude-code",
+                    name="Agent",
+                    input={"task": "x"},
+                    host="internal",
+                    parent_event_id="evt_001",
                 ),
             )
         )
@@ -226,7 +259,9 @@ class TestDispatchParentWasInformedBy:
         session = _make_session()
         session.events.append(
             TraceEvent(
-                id="evt_001", session_id=session.id, type="tool_call",
+                id="evt_001",
+                session_id=session.id,
+                type="tool_call",
                 actor=Actor(type="ai", id="claude"),
                 tool_call=ToolCallData(server="mcp", name="search", input={"q": "x"}),
             )
@@ -242,22 +277,30 @@ class TestUnchangedRelations:
         session = _make_session()
         session.events.append(
             TraceEvent(
-                id="evt_001", session_id=session.id, type="decision",
+                id="evt_001",
+                session_id=session.id,
+                type="decision",
                 actor=Actor(type="ai", id="claude"),
                 decision=DecisionData(
-                    description="0.85", proposed_by=Actor(type="ai", id="claude"),
-                    disposition="revised", resolved_by=Actor(type="human", id="researcher"),
+                    description="0.85",
+                    proposed_by=Actor(type="ai", id="claude"),
+                    disposition="revised",
+                    resolved_by=Actor(type="human", id="researcher"),
                     revision_note="see evt_002",
                 ),
             )
         )
         session.events.append(
             TraceEvent(
-                id="evt_002", session_id=session.id, type="decision",
+                id="evt_002",
+                session_id=session.id,
+                type="decision",
                 actor=Actor(type="human", id="researcher"),
                 decision=DecisionData(
-                    description="0.80", proposed_by=Actor(type="human", id="researcher"),
-                    disposition="accepted", resolved_by=Actor(type="ai", id="claude"),
+                    description="0.80",
+                    proposed_by=Actor(type="human", id="researcher"),
+                    disposition="accepted",
+                    resolved_by=Actor(type="ai", id="claude"),
                     revises_event_id="evt_001",
                 ),
             )
@@ -269,14 +312,18 @@ class TestUnchangedRelations:
         session = _make_session()
         session.events.append(
             TraceEvent(
-                id="evt_001", session_id=session.id, type="tool_call",
+                id="evt_001",
+                session_id=session.id,
+                type="tool_call",
                 actor=Actor(type="ai", id="claude"),
                 tool_call=ToolCallData(server="mcp", name="s", input={"q": "x"}, status="error"),
             )
         )
         session.events.append(
             TraceEvent(
-                id="evt_002", session_id=session.id, type="tool_call",
+                id="evt_002",
+                session_id=session.id,
+                type="tool_call",
                 actor=Actor(type="ai", id="claude"),
                 tool_call=ToolCallData(server="mcp", name="s", input={"q": "x"}, retries_event_id="evt_001"),
             )
@@ -292,10 +339,13 @@ class TestConformance:
         session = _make_session()
         session.events.append(
             TraceEvent(
-                id="evt_001", session_id=session.id, type="annotation",
+                id="evt_001",
+                session_id=session.id,
+                type="annotation",
                 actor=Actor(type="ai", id="claude"),
                 annotation=AnnotationData(
-                    category="correction", content="x",
+                    category="correction",
+                    content="x",
                     corrects_event_ids=["external:https://example.com/foo"],
                 ),
             )

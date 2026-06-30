@@ -55,9 +55,7 @@ class TestSchemaPackaging:
     def test_generated_schema_is_fresh(self) -> None:
         """Regenerating from the Pydantic models must reproduce both checked-in
         copies byte-for-byte (catches model drift without touching the tree)."""
-        spec = importlib.util.spec_from_file_location(
-            "generate_schema", TRACE_ROOT / "scripts" / "generate_schema.py"
-        )
+        spec = importlib.util.spec_from_file_location("generate_schema", TRACE_ROOT / "scripts" / "generate_schema.py")
         assert spec and spec.loader
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
@@ -96,9 +94,7 @@ class TestValidateFile:
         assert validate_file(garbage, load_schema()) is False
         assert "Invalid JSON" in capsys.readouterr().out
 
-    def test_nonexistent_file_fails_without_traceback(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_nonexistent_file_fails_without_traceback(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         """A missing file must produce a per-file FAIL line (so multi-file
         runs continue), never an unhandled traceback."""
         assert validate_file(tmp_path / "does-not-exist.json", load_schema()) is False
@@ -110,9 +106,7 @@ class TestValidateFile:
         assert validate_file(tmp_path, load_schema()) is False
         assert "FAIL" in capsys.readouterr().out
 
-    def test_non_utf8_file_fails_without_traceback(
-        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-    ) -> None:
+    def test_non_utf8_file_fails_without_traceback(self, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
         binary = tmp_path / "binary.json"
         binary.write_bytes(b"\xff\xfe\x00\x01")
         assert validate_file(binary, load_schema()) is False

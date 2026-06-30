@@ -100,9 +100,7 @@ class TestToolCallWrapperPassesV041Fields:
         assert len(tool_calls) == 1
         assert tool_calls[0]["tool_call"]["host"] == "mcp"
 
-    async def test_host_internal_passes_through(
-        self, server_and_dir: tuple[asyncio.subprocess.Process, str]
-    ) -> None:
+    async def test_host_internal_passes_through(self, server_and_dir: tuple[asyncio.subprocess.Process, str]) -> None:
         """host='internal' must reach the recorded event (the v0.4.1 subagent-dispatch use case)."""
         proc, tmpdir = server_and_dir
         sid, rid = await _start_session(proc)
@@ -112,9 +110,7 @@ class TestToolCallWrapperPassesV041Fields:
         tool_calls = [e for e in data["events"] if e["type"] == "tool_call"]
         assert tool_calls[0]["tool_call"]["host"] == "internal"
 
-    async def test_host_external_passes_through(
-        self, server_and_dir: tuple[asyncio.subprocess.Process, str]
-    ) -> None:
+    async def test_host_external_passes_through(self, server_and_dir: tuple[asyncio.subprocess.Process, str]) -> None:
         """host='external' must reach the recorded event (non-MCP external tools)."""
         proc, tmpdir = server_and_dir
         sid, rid = await _start_session(proc)
@@ -132,7 +128,9 @@ class TestToolCallWrapperPassesV041Fields:
 
         # First call: the parent / dispatching event.
         text1, rid = await _log_tool_call(
-            proc, sid, rid,
+            proc,
+            sid,
+            rid,
             tool_name="dispatch_subagents",
             host="internal",
         )
@@ -142,7 +140,9 @@ class TestToolCallWrapperPassesV041Fields:
 
         # Second call: child with parent_event_id pointing to the first.
         text2, rid = await _log_tool_call(
-            proc, sid, rid,
+            proc,
+            sid,
+            rid,
             tool_name="security_subagent",
             host="internal",
             parent_event_id=parent_id,
@@ -157,14 +157,14 @@ class TestToolCallWrapperPassesV041Fields:
         child = next(e for e in tool_calls if e["tool_call"]["name"] == "security_subagent")
         assert child["tool_call"]["parent_event_id"] == parent_id
 
-    async def test_dangling_parent_event_id_warns(
-        self, server_and_dir: tuple[asyncio.subprocess.Process, str]
-    ) -> None:
+    async def test_dangling_parent_event_id_warns(self, server_and_dir: tuple[asyncio.subprocess.Process, str]) -> None:
         """A parent_event_id that does not exist in-session must surface as a referential-integrity warning."""
         proc, _tmpdir = server_and_dir
         sid, rid = await _start_session(proc)
         text, _ = await _log_tool_call(
-            proc, sid, rid,
+            proc,
+            sid,
+            rid,
             host="internal",
             parent_event_id="evt_does_not_exist",
         )
@@ -172,9 +172,7 @@ class TestToolCallWrapperPassesV041Fields:
         assert "Dangling reference" in text or "evt_does_not_exist" in text
         assert "parent_event_id" in text
 
-    async def test_invalid_host_value_rejected(
-        self, server_and_dir: tuple[asyncio.subprocess.Process, str]
-    ) -> None:
+    async def test_invalid_host_value_rejected(self, server_and_dir: tuple[asyncio.subprocess.Process, str]) -> None:
         """host must be one of 'mcp' | 'internal' | 'external'; other values are rejected by Pydantic."""
         proc, tmpdir = server_and_dir
         sid, rid = await _start_session(proc)

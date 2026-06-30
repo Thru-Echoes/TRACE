@@ -138,9 +138,11 @@ async def test_resolve_decision_preserves_concurrent_append(storage):
     active: dict = {}
     session = await session_tools.create_session(storage, active, project="cc")
     d_id = await decision_tools.propose_decision(
-        storage, session,
+        storage,
+        session,
         description="use method X",
-        proposed_by_type="ai", proposed_by_id="claude",
+        proposed_by_type="ai",
+        proposed_by_id="claude",
     )
 
     # Another writer appends an annotation to disk; `session` view doesn't see it.
@@ -149,9 +151,12 @@ async def test_resolve_decision_preserves_concurrent_append(storage):
 
     # Resolve the decision using the (now stale) session view.
     await decision_tools.resolve_decision(
-        storage, session,
-        event_id=d_id, disposition="accepted",
-        resolved_by_type="human", resolved_by_id="researcher",
+        storage,
+        session,
+        event_id=d_id,
+        disposition="accepted",
+        resolved_by_type="human",
+        resolved_by_id="researcher",
     )
 
     final = await storage.get_session(session.id)

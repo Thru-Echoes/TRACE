@@ -36,11 +36,17 @@ jobs:
       - name: Sync dependencies
         run: uv sync --all-extras
 
+      # All three static gates run on the FULL tree (src + tests + scripts) —
+      # matching CONTRIBUTING and pyrightconfig.json — and the tree is clean
+      # under each, so a gate cannot silently diverge from the documented command.
       - name: Lint (ruff)
-        run: uv run ruff check src/
+        run: uv run ruff check .
+
+      - name: Format check (ruff)
+        run: uv run ruff format --check .
 
       - name: Type check (pyright)
-        run: uv run pyright src/
+        run: uv run pyright
 
       - name: Core/extension boundary invariant (governance ADR 003)
         run: uv run pytest tests/test_v041_core_extension_boundary.py -q -p no:cov

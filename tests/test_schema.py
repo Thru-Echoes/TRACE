@@ -476,6 +476,7 @@ class TestDeadFieldRemoval:
     def test_event_context_has_no_parent_event_id(self) -> None:
         """parent_event_id field was removed from EventContext."""
         from trace_mcp.schema.events import EventContext
+
         assert "parent_event_id" not in EventContext.model_fields
 
     def test_old_json_with_extra_fields_still_loads(self) -> None:

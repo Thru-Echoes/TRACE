@@ -41,14 +41,10 @@ def test_concurrent_adds_do_not_lose_updates(tmp_path: Path) -> None:
 
     ks = store.load_store("concur", directory=d)
     contents = {lrn.content for lrn in ks.learnings}
-    assert contents == {"alpha", "beta"}, (
-        f"lost update — lock did not serialize the RMW span: {contents}"
-    )
+    assert contents == {"alpha", "beta"}, f"lost update — lock did not serialize the RMW span: {contents}"
 
 
-def test_project_lock_graceful_without_filelock(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_project_lock_graceful_without_filelock(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """If filelock is unavailable the context manager is a safe no-op."""
     monkeypatch.setitem(sys.modules, "filelock", None)
     # Reset the one-time-warning flag so the fallback path is exercised.

@@ -47,9 +47,7 @@ def fake_static_model(monkeypatch: pytest.MonkeyPatch) -> MagicMock:
 def test_construction_does_not_load_model(fake_static_model: MagicMock) -> None:
     """Constructing the provider must NOT call StaticModel.from_pretrained."""
     provider = emb.Model2VecEmbeddingProvider()
-    assert fake_static_model.call_count == 0, (
-        "model loaded eagerly at __init__ — must be lazy"
-    )
+    assert fake_static_model.call_count == 0, "model loaded eagerly at __init__ — must be lazy"
     assert provider.model_name == "minishlab/potion-base-8M"
 
 

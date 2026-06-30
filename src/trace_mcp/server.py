@@ -92,9 +92,7 @@ async def _ensure_session(session_id: str | None) -> tuple[Session, str]:
 
     # 1. Explicit session_id provided — look it up (may raise)
     if session_id:
-        session = await session_tools.get_or_load_session(
-            storage, active_sessions, session_id
-        )
+        session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
         # Only an ACTIVE session may become the new current session. An
         # explicit session_id targeting a completed session (e.g. resolving
         # a decision proposed in a prior, now-closed session) must not move
@@ -115,9 +113,7 @@ async def _ensure_session(session_id: str | None) -> tuple[Session, str]:
     # 2. Re-use the current session from earlier in this server process
     if _current_session_id:
         try:
-            session = await session_tools.get_or_load_session(
-                storage, active_sessions, _current_session_id
-            )
+            session = await session_tools.get_or_load_session(storage, active_sessions, _current_session_id)
             if session.status == "active":
                 return session, ""
             # The current session was completed/abandoned (e.g. ended from
@@ -202,9 +198,7 @@ async def trace_start_session(
         # Recall is OFF by default (v0.4.2): opt-in only, rendered once.
         recalled_block = ""
         if recall_learnings and description:
-            recalled = await hooks.recall_if_available(
-                project, description, tags, recall_limit
-            )
+            recalled = await hooks.recall_if_available(project, description, tags, recall_limit)
             if recalled:
                 recalled_block = hooks.format_recalled_learnings(recalled)
 
@@ -246,9 +240,7 @@ async def trace_end_session(
         project: str | None = None
         if extract_learnings:
             try:
-                session = await session_tools.get_or_load_session(
-                    storage, active_sessions, session_id
-                )
+                session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
                 project = session.metadata.project
             except FileNotFoundError:
                 pass
@@ -550,9 +542,7 @@ async def trace_propose_decision(
 
         # Layer 3: Auto-recall related learnings for this decision
         project = session.metadata.project
-        related = await hooks.recall_if_available(
-            project, description, tags, limit=3
-        )
+        related = await hooks.recall_if_available(project, description, tags, limit=3)
         if related:
             result += hooks.format_decision_warnings(related)
 
@@ -688,13 +678,15 @@ async def trace_search(
     all_results = query_tools.search_events(session, query=query)
     cap = max(1, min(limit, query_tools.MAX_SEARCH_LIMIT))
     returned = all_results[:cap]
-    return _compact({
-        "query": query,
-        "total_matched": len(all_results),
-        "returned": len(returned),
-        "truncated": len(all_results) > len(returned),
-        "results": returned,
-    })
+    return _compact(
+        {
+            "query": query,
+            "total_matched": len(all_results),
+            "returned": len(returned),
+            "truncated": len(all_results) > len(returned),
+            "results": returned,
+        }
+    )
 
 
 @mcp.tool()
@@ -726,9 +718,7 @@ async def trace_health_check(
     (total, by type, by actor type). Optionally scoped to a project or session.
     """
     try:
-        result = await query_tools.health_check(
-            storage, project=project, session_id=session_id
-        )
+        result = await query_tools.health_check(storage, project=project, session_id=session_id)
         return _compact(result)
     except Exception as e:
         logger.exception("Error running health check")

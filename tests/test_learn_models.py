@@ -50,7 +50,14 @@ class TestLearningModel:
     def test_all_valid_categories(self):
         """Every LearningCategory literal is accepted."""
         valid: list[LearningCategory] = [
-            "learning", "gotcha", "correction", "decision", "observation", "todo", "question", "other",
+            "learning",
+            "gotcha",
+            "correction",
+            "decision",
+            "observation",
+            "todo",
+            "question",
+            "other",
         ]
         for cat in valid:
             lrn = Learning(content="test", category=cat)

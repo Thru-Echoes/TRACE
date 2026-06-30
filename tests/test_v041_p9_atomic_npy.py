@@ -40,9 +40,7 @@ def test_atomic_npy_roundtrip(tmp_path: Path) -> None:
     assert not list(tmp_path.glob("*.npy.tmp")), "temp residue left behind"
 
 
-def test_failed_save_does_not_corrupt_existing_sidecar(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_failed_save_does_not_corrupt_existing_sidecar(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     ks = _store_with_embedding("fault")
     # Baseline good sidecar.
     good_path = save_embeddings_cache(ks, directory=str(tmp_path))
