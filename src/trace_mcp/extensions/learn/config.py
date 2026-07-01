@@ -2,10 +2,18 @@
 
 Loads settings from environment variables and ~/.trace/.env.
 
-Resolution order for OPENAI_API_KEY (first match wins):
+Resolution order for OPENAI_API_KEY and every other setting
+(highest priority first):
   1. Environment variable (already set in shell)
   2. ~/.trace/.env (shared across all TRACE projects)
-  3. .env in current working directory (project-level override)
+  3. ./.env in the current working directory
+
+Precedence is a MERGE, not first-match-wins: when the same key is set in more
+than one place, the highest-priority source above supplies its value. Note the
+consequence — the global ~/.trace/.env OVERRIDES a project-local ./.env for a
+shared key, so ./.env is the LOWEST-priority source, not a "project override".
+A project's ./.env can still set keys that ~/.trace/.env does not (e.g.
+TRACE_EMBEDDING_BACKEND, TRACE_LOCAL_ONLY), and those do take effect.
 """
 
 from __future__ import annotations

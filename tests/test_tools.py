@@ -1369,31 +1369,37 @@ class TestAutoSession:
             srv.storage, srv.active_sessions = orig_storage, orig_active
             srv._current_session_id = orig_current
 
-    async def test_infer_project_from_recent_session(
+    async def test_infer_project_does_not_inherit_foreign_recent_session(
         self,
         storage: JsonFileStorage,
         active: dict[str, Session],
     ) -> None:
-        """_infer_project falls back to most recent session's project."""
+        """_infer_project must NOT adopt the most-recent session's project.
+
+        The newest session on the shared store can belong to any project;
+        inheriting it silently misrouted auto-created sessions (and any learnings
+        later extracted from them) into an unrelated project's knowledge store.
+        With no TRACE_DEFAULT_PROJECT, the fallback is the stable "auto" sentinel.
+        """
+        import os
+
         import trace_mcp.server as srv
 
         orig_storage = srv.storage
         srv.storage = storage
 
         try:
-            # Create a session so there's something to infer from
+            # A recent session belonging to a DIFFERENT project must not be adopted.
             await session_tools.create_session(
                 storage,
                 active,
-                project="inferred-project",
+                project="some-other-project",
             )
-            # Remove env var if set
-            import os
-
             old_env = os.environ.pop("TRACE_DEFAULT_PROJECT", None)
             try:
                 project = await srv._infer_project()
-                assert project == "inferred-project"
+                assert project == "auto"
+                assert project != "some-other-project"
             finally:
                 if old_env is not None:
                     os.environ["TRACE_DEFAULT_PROJECT"] = old_env

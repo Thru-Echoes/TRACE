@@ -65,17 +65,17 @@ def _compact(obj: Any) -> str:
 
 
 async def _infer_project() -> str:
-    """Infer project name from env var or most recent session."""
-    project = os.environ.get("TRACE_DEFAULT_PROJECT")
-    if project:
-        return project
-    try:
-        sessions = await storage.list_sessions(limit=1)
-        if sessions:
-            return sessions[0].get("project", "auto")
-    except Exception:
-        pass
-    return "auto"
+    """Resolve the project for an auto-created session (no explicit start).
+
+    Uses ``TRACE_DEFAULT_PROJECT`` when set; otherwise returns the stable
+    ``"auto"`` sentinel. It deliberately does NOT infer from the most-recent
+    session on disk: that global fallback read the newest session across the
+    SHARED store and, when it belonged to a different project, silently misrouted
+    the auto-created session (and any learnings later extracted from it) into
+    that unrelated project's knowledge store. A stable sentinel keeps
+    unattributed sessions out of a real project's provenance.
+    """
+    return os.environ.get("TRACE_DEFAULT_PROJECT") or "auto"
 
 
 async def _ensure_session(session_id: str | None) -> tuple[Session, str]:
