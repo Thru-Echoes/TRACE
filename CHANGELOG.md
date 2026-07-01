@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Local-strong embedding tier + local-first default
+
+- **Fully-local, open-weight embedding option (`fastembed` backend).** Adds a
+  `TRACE_EMBEDDING_BACKEND=fastembed` provider (ONNX Runtime, no PyTorch) so
+  users can get retrieval markedly stronger than the static `model2vec`/BM25
+  floor **without** sending any content to OpenAI. Ships as an optional extra,
+  `pip install 'trace-mcp[local-embed]'`. A curated, permissive-license model
+  allowlist (`snowflake/snowflake-arctic-embed-s` default, plus `-m`,
+  `BAAI/bge-small-en-v1.5`, `BAAI/bge-base-en-v1.5`) is selectable via
+  `TRACE_EMBEDDING_MODEL`; any other id is honored with a license/dimension
+  warning. See [docs/embeddings.md](docs/embeddings.md).
+- **Bring-your-own OpenAI-compatible endpoint (`base_url` passthrough).** The
+  `openai` backend now honors `OPENAI_BASE_URL` / `TRACE_OPENAI_BASE_URL`, so it
+  can target any local OpenAI-compatible server (Ollama / LM Studio /
+  text-embeddings-inference / vLLM) — a fully-local path that keeps TRACE out of
+  model-weight and license management.
+- **Local-first `auto` selection (behavior change).** `auto` now prefers a local
+  backend (`fastembed` → `model2vec` → BM25) and **never** auto-selects OpenAI:
+  a mere `OPENAI_API_KEY` on the machine no longer routes embedding content to a
+  third party. Cloud embeddings are opt-in via `TRACE_EMBEDDING_BACKEND=openai`.
+  Existing stores re-embed to the newly-selected model on next recall (the model
+  change is detected per learning); the `.npy` sidecar writer now tolerates
+  mixed-dimension rows during that migration instead of erroring.
+
 ### Diagnostics
 
 - **Offline self-cost report (`python -m trace_mcp.selfcost`).** A standalone,
