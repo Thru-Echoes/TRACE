@@ -65,6 +65,23 @@ export OPENAI_API_KEY=not-needed-but-sdk-wants-one
 
 Because the endpoint is local, no content leaves your machine.
 
+## One switch to disable all egress
+
+`auto` is already local-first for *embeddings*, but the LLM extraction and
+LLM-matching paths can still use OpenAI when a key is configured. To force
+**everything** local in one move — no OpenAI embeddings, no LLM extraction, no
+LLM matching — set:
+
+```bash
+export TRACE_LOCAL_ONLY=1
+```
+
+This is the single, unambiguous kill switch. It overrides an explicit
+`TRACE_EMBEDDING_BACKEND=openai` (down to local `auto`) and disables cloud LLM
+features regardless of whether a key is present. It closes the "off-switch trap"
+where disabling one path (`TRACE_LLM_ENABLED=false` **or**
+`TRACE_EMBEDDING_BACKEND=none`) still left the other egressing.
+
 ## Switching backends re-embeds your store
 
 Each learning records the model that produced its vector. When you change the
