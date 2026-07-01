@@ -62,6 +62,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Auto-created sessions no longer inherit a foreign project.** `_infer_project`
+  fell back to the most-recent session across the *shared* store, so when the
+  newest session on disk belonged to a different project, a pointer-less
+  `trace_log_*` call auto-created a session — and routed any learnings later
+  extracted from it — under that unrelated project. With no
+  `TRACE_DEFAULT_PROJECT` it now returns the stable `"auto"` sentinel rather than
+  a foreign project name.
+- **Corrected the OpenAI-key precedence docstring.** `config.py` described
+  resolution as "first match wins" and labeled `./.env` a "project-level
+  override", but the real behavior is a merge where the global `~/.trace/.env`
+  OVERRIDES a project-local `./.env` (env var > global > project). The docstring
+  now states this so a project's `./.env` is not mistaken for an override of the
+  shared key.
 - **Wheels built from the sdist were missing 7 runtime files** (`py.typed` and
   all six `adapters/claude_code/assets/` files: the settings template, the
   CLAUDE block, and the four hook scripts). The sdist allowlist's only src
