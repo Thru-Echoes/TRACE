@@ -100,8 +100,12 @@ class LearnConfig:
     evergreen_floor: float = 0.8
     dedup_enabled: bool = True
     dedup_threshold: float = 0.85
-    embedding_backend: str = "auto"  # "openai" | "model2vec" | "none" | "auto"
+    embedding_backend: str = "auto"  # "auto" | "fastembed" | "model2vec" | "openai" | "none"
     embedding_model: str = "text-embedding-3-small"
+    # Custom OpenAI-compatible endpoint for the "openai" backend, letting a user
+    # point it at any local server (Ollama / LM Studio / text-embeddings-inference
+    # / vLLM). None → the SDK default (api.openai.com or its own OPENAI_BASE_URL).
+    embedding_base_url: str | None = None
 
 
 def load_config() -> LearnConfig:
@@ -133,6 +137,8 @@ def load_config() -> LearnConfig:
         "TRACE_DEDUP_THRESHOLD",
         "TRACE_EMBEDDING_BACKEND",
         "TRACE_EMBEDDING_MODEL",
+        "OPENAI_BASE_URL",
+        "TRACE_OPENAI_BASE_URL",
     ):
         env_val = os.environ.get(key)
         if env_val is not None:
@@ -182,4 +188,5 @@ def load_config() -> LearnConfig:
         dedup_threshold=float(merged.get("TRACE_DEDUP_THRESHOLD", "0.85")),
         embedding_backend=merged.get("TRACE_EMBEDDING_BACKEND", "auto"),
         embedding_model=merged.get("TRACE_EMBEDDING_MODEL", "text-embedding-3-small"),
+        embedding_base_url=merged.get("TRACE_OPENAI_BASE_URL") or merged.get("OPENAI_BASE_URL") or None,
     )

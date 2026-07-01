@@ -46,6 +46,14 @@ embeddings = [
     "model2vec>=0.4",
     "filelock>=3.12",
 ]
+# Local-strong embedding tier: a small permissive transformer via fastembed
+# (ONNX Runtime, no PyTorch). Stronger retrieval than static model2vec while
+# staying condensed and offline — the non-OpenAI option for privacy-conscious use.
+local-embed = [
+    "numpy>=1.24",
+    "filelock>=3.12",
+    "fastembed>=0.4",
+]
 validate = [
     "jsonschema>=4.0",
 ]
@@ -55,6 +63,7 @@ all = [
     "model2vec>=0.4",
     "filelock>=3.12",
     "jsonschema>=4.0",
+    "fastembed>=0.4",
 ]
 dev = [
     "pytest>=8.0",

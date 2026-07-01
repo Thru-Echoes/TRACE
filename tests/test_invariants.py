@@ -100,3 +100,23 @@ def test_inv3_resolve_decision_validates_before_write() -> None:
         "INV-3 violation: resolve_decision no longer validates the decision via "
         "model_validate before writing — an invalid disposition could reach disk."
     )
+
+
+# ── INV-4: project scoping uses ONE (exact) predicate across core + hooks ──
+# The core query filters (list_sessions, session_brief) must match projects
+# EXACTLY (metadata.project == project) — the same predicate the adapter hooks
+# use — never a case-insensitive SUBSTRING match, which silently merged distinct
+# projects (e.g. "trace" pulling in "trace-mcp" and "TRACE-research"). See INV-4.
+
+
+def test_inv4_project_filter_is_exact_not_substring() -> None:
+    source = (SRC / "storage" / "json_file.py").read_text(encoding="utf-8")
+    assert "not in proj.lower()" not in source, (
+        "INV-4 regression: json_file.py filters projects by case-insensitive "
+        "SUBSTRING again — core must match projects EXACTLY (proj != project), "
+        "the same predicate the adapter hooks use, or distinct projects merge."
+    )
+    assert source.count("proj != project") >= 2, (
+        "INV-4: both list_sessions and session_brief must filter by exact project "
+        "match (proj != project) so core and hooks resolve one session set."
+    )
