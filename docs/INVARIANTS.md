@@ -78,21 +78,24 @@ the parameter as a `Literal`.
 
 ---
 
-## INV-4 — Project scoping uses ONE comparison rule across core and hooks  · OPEN
+## INV-4 — Project scoping uses ONE comparison rule across core and hooks  · CLOSED
 
 **Statement.** A project name must resolve to the **same** session set in the
-core query layer and in the adapter hooks. Today they disagree: core
-(`json_file.py :: list_sessions` / `session_brief`) uses case-insensitive
-**substring** match (so `trace_project_summary("trace")` silently merges
-`trace-mcp` and `TRACE-research`), while the hooks use **exact** match.
+core query layer and in the adapter hooks. The single shared predicate is
+**exact, case-sensitive** match (`metadata.project == project`). A
+case-insensitive **substring** match must never be used, as it silently merges
+distinct projects (e.g. `trace_project_summary("trace")` pulling in `trace-mcp`
+and `TRACE-research`).
 
 **Sites:** `src/trace_mcp/storage/json_file.py` (`list_sessions`,
 `session_brief`); `src/trace_mcp/adapters/claude_code/assets/hooks/*.sh`.
 
-**Status.** OPEN — still present on `main`. The fix
-(make core exact, or an explicit `exact=` flag defaulting to exact) is tracked
-as a follow-up; `tests/test_invariants.py` should fail until the two layers
-share one predicate.
+**Guard:** `tests/test_invariants.py :: test_inv4_project_filter_is_exact_not_substring`
+fails if the substring idiom reappears at either core filter site; the exact
+semantics are pinned by `tests/test_storage.py :: test_list_filter_by_project`.
+
+**Status.** CLOSED — core (`list_sessions`, `session_brief`) now uses the same
+exact-match predicate as the hooks, so both layers resolve one session set.
 
 ---
 
