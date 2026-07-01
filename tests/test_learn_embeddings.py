@@ -215,13 +215,19 @@ class TestModel2VecEmbeddingProvider:
 
 
 class TestEmbeddingProviderAutoSelection:
-    def test_auto_selects_openai_when_available(self):
+    def test_auto_never_selects_openai_even_with_key(self):
+        """Local-first: a mere API key must NOT route embeddings to OpenAI via
+        auto. Auto prefers a local backend (model2vec here); OpenAI is opt-in."""
         config = LearnConfig(openai_api_key="sk-test", embedding_backend="auto")
+        mock_instance = MagicMock()
+        mock_instance.dim = 256
         with patch("trace_mcp.extensions.learn.embeddings._HAS_OPENAI", True):
             with patch("trace_mcp.extensions.learn.embeddings.AsyncOpenAI"):
-                provider = get_embedding_provider(config)
-        assert provider is not None
-        assert isinstance(provider, OpenAIEmbeddingProvider)
+                with patch("trace_mcp.extensions.learn.embeddings._HAS_FASTEMBED", False):
+                    with patch("trace_mcp.extensions.learn.embeddings._HAS_MODEL2VEC", True):
+                        with patch("model2vec.StaticModel.from_pretrained", return_value=mock_instance):
+                            provider = get_embedding_provider(config)
+        assert isinstance(provider, Model2VecEmbeddingProvider)
 
     def test_auto_selects_model2vec_when_no_openai_key(self):
         config = LearnConfig(openai_api_key=None, embedding_backend="auto")

@@ -311,8 +311,12 @@ def save_embeddings_cache(store: KnowledgeStore, directory: str | None = None) -
     dim = len(first_emb)
     matrix = np.full((len(store.learnings), dim), np.nan, dtype=np.float32)
     for i, lrn in enumerate(store.learnings):
-        if lrn.embedding is not None:
+        if lrn.embedding is not None and len(lrn.embedding) == dim:
             matrix[i] = lrn.embedding
+        # Off-dimension rows (a store mid-migration between embedding backends of
+        # different vector sizes) are left as NaN — treated as missing rather than
+        # crashing the writer with a numpy broadcast error. A stale sidecar is
+        # then rebuilt once _needs_embedding re-embeds every row to one model.
 
     path = _embeddings_cache_path(store.project, directory)
     # Atomic write — a crash or a concurrent reader
