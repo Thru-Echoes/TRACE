@@ -135,9 +135,12 @@ class TestListSessions:
                 metadata=SessionMetadata(project="materials-science"),
             )
         )
-        result = await storage.list_sessions(project="climate")
-        assert len(result) == 1
-        assert result[0]["project"] == "climate-analysis"
+        # INV-4: project filtering is EXACT (case-sensitive), matching the adapter
+        # hooks — a substring like "climate" must NOT merge in "climate-analysis".
+        assert await storage.list_sessions(project="climate") == []
+        exact = await storage.list_sessions(project="climate-analysis")
+        assert len(exact) == 1
+        assert exact[0]["project"] == "climate-analysis"
 
     async def test_list_limit(self, storage: JsonFileStorage) -> None:
         for i in range(5):
