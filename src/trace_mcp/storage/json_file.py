@@ -263,7 +263,11 @@ class JsonFileStorage(TraceStorage):
                 with open(path) as f:
                     raw = json.load(f)
                 proj = raw.get("metadata", {}).get("project", "")
-                if project and project.lower() not in proj.lower():
+                # INV-4: EXACT (case-sensitive) project match — the same predicate
+                # the adapter hooks use (metadata.project == project). A substring
+                # match here silently merged distinct projects (e.g. "trace" pulling
+                # in "trace-mcp" and "TRACE-research").
+                if project and proj != project:
                     continue
                 summaries.append(
                     {
@@ -307,7 +311,9 @@ class JsonFileStorage(TraceStorage):
             except (json.JSONDecodeError, OSError):
                 continue
             proj = raw.get("metadata", {}).get("project", "")
-            if project and project.lower() not in proj.lower():
+            # INV-4: EXACT (case-sensitive) project match — same predicate as the
+            # adapter hooks and list_sessions above (no substring merging).
+            if project and proj != project:
                 continue
             matched += 1
             if most_recent is None:
