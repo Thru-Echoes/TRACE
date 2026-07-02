@@ -120,3 +120,75 @@ def test_inv4_project_filter_is_exact_not_substring() -> None:
         "INV-4: both list_sessions and session_brief must filter by exact project "
         "match (proj != project) so core and hooks resolve one session set."
     )
+
+
+# ── INV-5: no cloud egress without a pre-call ledger attestation ───────────
+# Every OpenAI-SDK network call site in the trace-learn extension
+# (`...completions.create(...)` / `...embeddings.create(...)`) must call
+# attest_egress() in the SAME function, before the request. The egress ledger
+# (~/.trace/egress.jsonl) is only trustworthy if no call site can bypass it —
+# an unattested site is unrecorded egress, the exact failure mode the ledger
+# exists to prevent.
+#
+# Registered as (module-relative-path, function-name). The key is the function
+# NAME, not the qualified class method — good enough as a tripwire: a new
+# `.create` site in a new or existing function fails the first test until it is
+# registered AND attests.
+
+INV5_EGRESS_CALL_SITES = {
+    ("extensions/learn/extraction.py", "extract_from_session_llm"),
+    ("extensions/learn/matching.py", "_llm_score"),
+    ("extensions/learn/embeddings.py", "embed_texts"),
+}
+
+
+def _openai_network_call_sites() -> set[tuple[str, str]]:
+    """Every (relpath, function) under extensions/learn/ whose body makes an
+    OpenAI-SDK network call (an attribute call ``<x>.completions.create(...)``
+    or ``<x>.embeddings.create(...)``)."""
+    found: set[tuple[str, str]] = set()
+    learn = SRC / "extensions" / "learn"
+    for path in sorted(learn.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                for sub in ast.walk(node):
+                    if (
+                        isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Attribute)
+                        and sub.func.attr == "create"
+                        and isinstance(sub.func.value, ast.Attribute)
+                        and sub.func.value.attr in ("completions", "embeddings")
+                    ):
+                        found.add((_rel(path), node.name))
+    return found
+
+
+def test_inv5_every_openai_call_site_is_registered() -> None:
+    """A new OpenAI network call site must be registered (and attest) before it
+    can merge; a registered site that disappears must be de-registered so the
+    registry cannot rot."""
+    sites = _openai_network_call_sites()
+    assert sites, (
+        "INV-5 positive control failed: no OpenAI call sites found at all — "
+        "the AST pattern in _openai_network_call_sites no longer matches the "
+        "codebase idiom and the guard is blind. Fix the pattern."
+    )
+    unregistered = sites - INV5_EGRESS_CALL_SITES
+    assert not unregistered, (
+        "INV-5 violation (docs/INVARIANTS.md): these functions make OpenAI "
+        f"network calls but are not registered egress sites: {sorted(unregistered)}. "
+        "Call attest_egress() before the request and add them to INV5_EGRESS_CALL_SITES."
+    )
+    stale = INV5_EGRESS_CALL_SITES - sites
+    assert not stale, f"INV-5 registry is stale — registered sites with no OpenAI call anymore: {sorted(stale)}."
+
+
+def test_inv5_every_egress_site_attests_first() -> None:
+    """Each registered egress site must actually call attest_egress()."""
+    attesters = _functions_calling("attest_egress")
+    missing = INV5_EGRESS_CALL_SITES - attesters
+    assert not missing, (
+        f"INV-5 violation: egress call sites that never call attest_egress(): {sorted(missing)} — "
+        "cloud content would leave the machine with no ledger record."
+    )
