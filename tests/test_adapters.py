@@ -273,9 +273,14 @@ class TestResolveTraceSource:
 
         assert ip._resolve_trace_source() == "/override"
 
-    def test_falls_back_to_package_name_when_inside_site_packages(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
+    def test_site_packages_without_override_fails_closed(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+        """An installed wheel must NEVER fall back to the PyPI name 'trace-mcp'.
+
+        That name belongs to an unrelated package, so writing
+        `uvx --from trace-mcp` into .mcp.json would make the next MCP server
+        start download and execute third-party code (dependency confusion).
+        With no TRACE_SOURCE_PATH, resolution must raise — never guess.
+        """
         from trace_mcp import init_project as ip
 
         fake = tmp_path / "lib" / "python3.13" / "site-packages" / "trace_mcp" / "init_project.py"
@@ -284,7 +289,31 @@ class TestResolveTraceSource:
         monkeypatch.setattr(ip, "__file__", str(fake))
         monkeypatch.delenv("TRACE_SOURCE_PATH", raising=False)
 
-        assert ip._resolve_trace_source() == "trace-mcp"
+        with pytest.raises(ip.TraceSourceUnresolvedError, match="TRACE_SOURCE_PATH"):
+            ip._resolve_trace_source()
+
+    def test_init_project_surfaces_unresolvable_source_as_exit_1(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """`trace-mcp init` (even --dry-run) exits 1 with the remedy in the message,
+        instead of writing a dependency-confused .mcp.json."""
+        from trace_mcp import init_project as ip
+
+        fake = tmp_path / "lib" / "python3.13" / "site-packages" / "trace_mcp" / "init_project.py"
+        fake.parent.mkdir(parents=True)
+        fake.touch()
+        monkeypatch.setattr(ip, "__file__", str(fake))
+        monkeypatch.delenv("TRACE_SOURCE_PATH", raising=False)
+
+        project = tmp_path / "some-project"
+        project.mkdir()
+
+        with pytest.raises(SystemExit) as excinfo:
+            ip.init_project(str(project), client="none", dry_run=True)
+        assert excinfo.value.code == 1
+        out = capsys.readouterr().out
+        assert "TRACE_SOURCE_PATH" in out
+        assert not (project / ".mcp.json").exists()
 
     def test_uses_repo_root_for_editable_install(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         from trace_mcp import init_project as ip

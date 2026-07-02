@@ -140,7 +140,7 @@ Worked examples for logging decisions, corrections, contributions, and decision 
 | `TRACE_PROMPT_MIN_TURNS` | `3` | Minimum prompt turns before `prompt-reminder.sh` will nudge. |
 | `TRACE_PROMPT_COOLDOWN_SEC` | `300` | Wall-clock cooldown between nudges from `prompt-reminder.sh`. |
 | `TRACE_RUNTIME_DIR` | `~/.trace/runtime` | Per-project nudge state (`<project>.state.json`). Safe to delete to reset. |
-| `TRACE_SOURCE_PATH` | _unset_ | Override what `trace-mcp-init` writes into `.mcp.json` as `uvx --from <X>`. Pre-PyPI consumers can set to a local TRACE clone path. |
+| `TRACE_SOURCE_PATH` | _unset_ | Override what `trace-mcp-init` writes into `.mcp.json` as `uvx --from <X>`. Set to a local TRACE clone path. **Required when running init from an installed wheel** — with no override, init fails closed rather than writing the PyPI name `trace-mcp`, which belongs to an unrelated package (dependency confusion). |
 
 ### Run a first session
 
