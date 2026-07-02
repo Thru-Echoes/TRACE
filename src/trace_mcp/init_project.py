@@ -18,35 +18,57 @@ from trace_mcp.adapters import detect_adapter, get_adapter, list_adapters
 from trace_mcp.adapters.base import Adapter
 
 
+class TraceSourceUnresolvedError(RuntimeError):
+    """No safe ``uvx --from <X>`` source could be determined for `.mcp.json`."""
+
+
 def _resolve_trace_source() -> str:
     """Pick the value to write into `.mcp.json`'s `uvx --from <X>` argument.
 
     Order:
-    1. ``TRACE_SOURCE_PATH`` env var (explicit override) — useful pre-PyPI to
-       point at a local clone, e.g. `TRACE_SOURCE_PATH=/abs/path/to/TRACE`.
-    2. If this module lives under a ``site-packages`` directory (i.e. it was
-       installed from a wheel / via ``uvx``), fall back to the published
-       package name ``"trace-mcp"`` — ``uvx --from trace-mcp`` resolves to
-       PyPI without baking in a per-machine cache path.
-    3. Otherwise (editable / source checkout), use the repo root, which is
-       three levels above this file (``src/trace_mcp/init_project.py``).
+    1. ``TRACE_SOURCE_PATH`` env var (explicit override) — point at a local
+       clone, e.g. `TRACE_SOURCE_PATH=/abs/path/to/TRACE`.
+    2. Editable / source checkout: the repo root, which is three levels above
+       this file (``src/trace_mcp/init_project.py``).
+    3. Installed wheel (module under ``site-packages``): **fail closed**
+       (raise ``TraceSourceUnresolvedError``). The PyPI distribution name
+       ``trace-mcp`` belongs to an unrelated project, so writing
+       ``uvx --from trace-mcp`` into `.mcp.json` would make the next MCP
+       server start download and execute a third party's code (dependency
+       confusion). Until this package is published under its own name, an
+       installed copy has no safe source to infer — the user must supply
+       ``TRACE_SOURCE_PATH``.
     """
     if env_override := os.environ.get("TRACE_SOURCE_PATH"):
         return env_override
     here = Path(__file__).resolve()
-    if "site-packages" in here.parts:
-        return "trace-mcp"
-    return str(here.parent.parent.parent)
+    if "site-packages" not in here.parts:
+        return str(here.parent.parent.parent)
+    raise TraceSourceUnresolvedError(
+        "Cannot determine a safe source for `.mcp.json`'s `uvx --from <X>`: "
+        "trace-mcp init is running from an installed wheel, and the name "
+        "'trace-mcp' on PyPI belongs to an UNRELATED package — writing it "
+        "would make the next MCP server start download and run third-party "
+        "code (dependency confusion). Set "
+        "TRACE_SOURCE_PATH=/abs/path/to/your/TRACE/clone and re-run."
+    )
 
 
-_TRACE_ROOT = _resolve_trace_source()
+def _mcp_server_config() -> dict:
+    """Build the `.mcp.json` ``mcpServers`` entry for TRACE.
 
-MCP_CONFIG = {
-    "trace": {
-        "command": "uvx",
-        "args": ["--from", _TRACE_ROOT, "--refresh-package", "trace-mcp", "trace-mcp"],
+    Resolves the ``--from`` source lazily, at write time — not at import
+    time — so importing this module (tests, ``--help``) never raises;
+    only actually writing `.mcp.json` can surface
+    ``TraceSourceUnresolvedError``.
+    """
+    source = _resolve_trace_source()
+    return {
+        "trace": {
+            "command": "uvx",
+            "args": ["--from", source, "--refresh-package", "trace-mcp", "trace-mcp"],
+        }
     }
-}
 
 
 def _write_mcp_json(project_dir: Path) -> str:
@@ -62,7 +84,7 @@ def _write_mcp_json(project_dir: Path) -> str:
 
     config.setdefault("mcpServers", {})
     was_present = "trace" in config["mcpServers"]
-    config["mcpServers"]["trace"] = MCP_CONFIG["trace"]
+    config["mcpServers"]["trace"] = _mcp_server_config()["trace"]
 
     mcp_path.write_text(json.dumps(config, indent=2) + "\n")
     return f"  {'updated' if was_present else 'wrote'}: {mcp_path}"
@@ -101,11 +123,17 @@ def init_project(
 
     print(f"Initializing TRACE in {project_dir}")
 
-    # 1. .mcp.json (host-independent)
-    if not dry_run:
-        print(_write_mcp_json(project_dir))
-    else:
-        print(f"  [dry-run] would write: {project_dir / '.mcp.json'}")
+    # 1. .mcp.json (host-independent). A dry run resolves the source too, so
+    # an unresolvable source is discovered before a real run, not during it.
+    try:
+        if not dry_run:
+            print(_write_mcp_json(project_dir))
+        else:
+            entry = _mcp_server_config()["trace"]
+            print(f"  [dry-run] would write: {project_dir / '.mcp.json'} (uvx --from {entry['args'][1]})")
+    except TraceSourceUnresolvedError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
 
     # 2. Host adapter
     adapter = _pick_adapter(project_dir, client)
