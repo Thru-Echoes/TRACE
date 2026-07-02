@@ -86,7 +86,10 @@ class LearnConfig:
     openai_api_key: str | None = field(default=None, repr=False)
     llm_model: str = "gpt-5.4-mini"
     llm_extraction_model: str = "gpt-5.4-mini"
-    llm_enabled: bool = True
+    # Cloud LLM matching/extraction is OPT-IN (local-first): an OPENAI_API_KEY
+    # on the machine must not, by itself, route session content to a third
+    # party. Enable with TRACE_LLM_ENABLED=true (a key is still required).
+    llm_enabled: bool = False
     # Strict mode: if True, LLM failures raise instead of falling back to
     # BM25/rule-based. Auto-defaults to True when an API key is present — the
     # assumption being "if you configured it, you expect it to work."
@@ -118,6 +121,11 @@ def load_config() -> LearnConfig:
     The user puts their OpenAI key in ONE place — ``~/.trace/.env`` — and
     every TRACE project picks it up automatically.  Env vars take precedence
     so CI / containers can override.
+
+    The key alone activates nothing: cloud LLM matching/extraction also
+    requires the explicit ``TRACE_LLM_ENABLED=true`` opt-in, and cloud
+    embeddings require an explicit ``TRACE_EMBEDDING_BACKEND=openai``.
+    ``TRACE_LOCAL_ONLY=1`` overrides both (no egress anywhere).
     """
     # Low-priority → high-priority merge
     project_env = _parse_dotenv(Path.cwd() / ".env")
@@ -150,7 +158,13 @@ def load_config() -> LearnConfig:
             merged[key] = env_val
 
     api_key = merged.get("OPENAI_API_KEY") or None
-    llm_enabled = merged.get("TRACE_LLM_ENABLED", "true").lower() in ("true", "1", "yes")
+    local_only = merged.get("TRACE_LOCAL_ONLY", "false").lower() in ("true", "1", "yes")
+
+    # Cloud LLM matching/extraction is OPT-IN (local-first): unset means OFF,
+    # even when an API key is present. Distinguish "unset" from an explicit
+    # false so the informational nudge below never nags a user who opted out.
+    raw_llm_enabled = merged.get("TRACE_LLM_ENABLED")
+    llm_enabled = (raw_llm_enabled or "false").lower() in ("true", "1", "yes")
 
     # Strict mode: default ON when API key is present.
     # If the user bothered to configure an API key, fall-backs should fail
@@ -172,8 +186,13 @@ def load_config() -> LearnConfig:
             "Set TRACE_STRICT_LLM=false to allow silent fallback.",
             merged.get("TRACE_LLM_MODEL", "gpt-5.4-mini"),
         )
-
-    local_only = merged.get("TRACE_LOCAL_ONLY", "false").lower() in ("true", "1", "yes")
+    elif api_key and raw_llm_enabled is None and not local_only:
+        # A key exists but the user never chose: say so once at config load,
+        # instead of silently ignoring the key (the pre-opt-in default used it).
+        logger.info(
+            "OPENAI_API_KEY found, but cloud LLM matching/extraction is OFF by default "
+            "(local-first). Set TRACE_LLM_ENABLED=true to enable it."
+        )
     embedding_backend = merged.get("TRACE_EMBEDDING_BACKEND", "auto")
     if local_only:
         # One switch, all three egress paths: force cloud LLM features off and
