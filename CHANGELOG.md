@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Egress kill switch + point-of-use disclosure
+
+- **`TRACE_LOCAL_ONLY=1` — one switch, no egress anywhere.** Forces all three
+  `trace-learn` cloud paths off in a single flag: OpenAI embeddings, LLM
+  extraction, and LLM matching. Enforced at config load (it overrides an explicit
+  `TRACE_EMBEDDING_BACKEND=openai` down to local `auto` and disables LLM features
+  regardless of key presence), so every downstream reader honors it. This closes
+  the "off-switch trap" where disabling one path (`TRACE_LLM_ENABLED=false` or
+  `TRACE_EMBEDDING_BACKEND=none`) still left the other egressing content.
+- **Point-of-use egress disclosure.** The `trace_learn_extract`,
+  `trace_learn_recall`, and `trace_learn_add` tool docstrings now state, at the
+  point of use, that content is sent to OpenAI when the OpenAI backend/LLM is
+  configured, and how to stay local (`TRACE_LOCAL_ONLY=1`).
+
 ### Local-strong embedding tier + local-first default
 
 - **Fully-local, open-weight embedding option (`fastembed` backend).** Adds a

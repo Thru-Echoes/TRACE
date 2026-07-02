@@ -153,6 +153,10 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         and tag matching. Returns scored results above the threshold.
 
         When threshold is None, uses the backend's default (BM25: 0.15, LLM: 0.2).
+
+        Data flow: with the OpenAI embedding/LLM backend configured, the query
+        text is sent to OpenAI to score matches. Set ``TRACE_LOCAL_ONLY=1`` to
+        keep recall fully local.
         """
         try:
             # Lock the full span (recall may backfill
@@ -207,6 +211,9 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
 
         Use this to record insights, patterns, or corrections that should
         persist across sessions.
+
+        Data flow: with the OpenAI embedding backend configured, the learning
+        content is embedded via OpenAI. Set ``TRACE_LOCAL_ONLY=1`` for local-only.
         """
         try:
             if category not in _VALID_CATEGORIES:
@@ -316,6 +323,12 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         on the same session produces no duplicates.
 
         Uses LLM-enhanced extraction when configured, otherwise rule-based.
+
+        Data flow: when an OpenAI key is configured and LLM features are enabled,
+        this sends session event content (and the existing knowledge store, as
+        de-duplication context) to OpenAI for extraction. To keep everything on
+        your machine, set ``TRACE_LOCAL_ONLY=1`` (forces local embeddings +
+        rule-based extraction, no egress). See docs/embeddings.md.
 
         If session_id is provided, extracts from that session only.
         Otherwise, extracts from all sessions for the project.
