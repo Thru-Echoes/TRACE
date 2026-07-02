@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **`trace-mcp init` no longer writes a dependency-confused `.mcp.json` from
+  an installed wheel.** When run from an installed copy (module under
+  `site-packages`) with no `TRACE_SOURCE_PATH` set, source resolution
+  previously fell back to writing `uvx --from trace-mcp` — but the name
+  `trace-mcp` on PyPI belongs to an unrelated package, so the next MCP server
+  start would have downloaded and executed third-party code. Resolution now
+  **fails closed** (`TraceSourceUnresolvedError`; `trace-mcp init` exits 1,
+  including on `--dry-run`) with the remedy in the message: set
+  `TRACE_SOURCE_PATH=/abs/path/to/your/TRACE/clone`. Source checkouts and the
+  `TRACE_SOURCE_PATH` override behave as before; the server entry is now built
+  lazily at write time so importing the module never raises.
+  
+### Cloud LLM matching/extraction now opt-in (behavior change)
+
+- **`TRACE_LLM_ENABLED` now defaults to `false`.** An `OPENAI_API_KEY` on the
+  machine no longer opts sessions into cloud LLM matching and extraction by
+  itself — completing the local-first posture already applied to embeddings
+  (where `auto` never selects OpenAI). Unset now means rule-based/BM25; cloud
+  LLM requires the explicit `TRACE_LLM_ENABLED=true` opt-in. To restore the
+  previous behavior everywhere, set `TRACE_LLM_ENABLED=true` once in
+  `~/.trace/.env`. When a key is present but the flag is unset, config load
+  logs an INFO pointing at the flag (suppressed when the flag is explicitly
+  `false` or `TRACE_LOCAL_ONLY` is set). The `LearnConfig.llm_enabled`
+  dataclass default flips to `False` to match, so directly-constructed
+  configs are safe-by-default too.
+
 ### Egress kill switch + point-of-use disclosure
 
 - **`TRACE_LOCAL_ONLY=1` — one switch, no egress anywhere.** Forces all three
