@@ -38,6 +38,13 @@ class Learning(BaseModel):
     last_surfaced: datetime | None = None
     embedding: list[float] | None = None
     embedding_model: str | None = None
+    # Creation-path provenance (egress-as-provenance): whether a cloud LLM,
+    # the local rule-based extractor, or a human-initiated trace_learn_add
+    # produced this learning's content. None on records predating the field.
+    extraction_method: Literal["llm", "rule-based", "manual"] | None = None
+    # Model id that generated the content when extraction_method == "llm"
+    # (the content is model output, not a verbatim quote of session events).
+    generated_by: str | None = None
 
 
 class KnowledgeStore(BaseModel):
