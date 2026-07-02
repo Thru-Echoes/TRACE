@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from trace_mcp.extensions.learn.egress import attest_egress
 from trace_mcp.extensions.learn.models import Learning
 
 if TYPE_CHECKING:
@@ -367,6 +368,19 @@ class LLMBackend:
             "to its relevance score (0.0–1.0)."
         )
 
+        # Egress-as-provenance: record the fact of the cloud call before making
+        # it. Raising here is caught by score_batch's strict/permissive
+        # handling like any LLM failure — and no content leaves the machine.
+        # (project is unknown at this layer; the matcher scores one store's
+        # learnings but is constructed from config alone.)
+        attest_egress(
+            provider="openai",
+            endpoint="chat.completions",
+            model=self._model,
+            purpose="matching",
+            content_class="learning-content+recall-query",
+            item_count=len(learnings),
+        )
         response = await self._client.chat.completions.create(
             model=self._model,
             messages=[

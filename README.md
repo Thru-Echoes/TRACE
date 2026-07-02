@@ -226,6 +226,7 @@ See [`docs/extensions/trace-learn.md`](https://github.com/Thru-Echoes/TRACE/blob
 |----------|---------|-------------|
 | `TRACE_SESSIONS_DIR` | `~/.trace/sessions/` | Directory for session JSON files |
 | `TRACE_KNOWLEDGE_DIR` | `~/.trace/knowledge/` | Directory for trace-learn knowledge stores |
+| `TRACE_EGRESS_LOG` | `~/.trace/egress.jsonl` | Cloud-egress ledger: one JSONL line per cloud call trace-learn makes (the fact of the call — provider, endpoint, model, purpose, item count — never the content) |
 | `TRACE_LOG_LEVEL` | `INFO` | Logging verbosity |
 | `OPENAI_API_KEY` | — | OpenAI API key for LLM matching and extraction |
 | `TRACE_LLM_MODEL` | `gpt-5.4-mini` | Model for LLM relevance scoring |

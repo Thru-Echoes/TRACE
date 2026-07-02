@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
+from trace_mcp.extensions.learn.egress import attest_egress
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, LearningCategory
 from trace_mcp.extensions.learn.store import add_learning, add_learning_dedup
 from trace_mcp.schema import Session
@@ -74,6 +75,8 @@ def _add_with_optional_dedup(
     corrects_event_ids: list[str] | None = None,
     tags: list[str] | None = None,
     dedup_threshold: float | None = None,
+    extraction_method: Literal["llm", "rule-based", "manual"] | None = None,
+    generated_by: str | None = None,
 ) -> Learning | None:
     """Add a learning, optionally checking for content duplicates first.
 
@@ -89,6 +92,8 @@ def _add_with_optional_dedup(
             corrects_event_ids=corrects_event_ids,
             tags=tags,
             dedup_threshold=dedup_threshold,
+            extraction_method=extraction_method,
+            generated_by=generated_by,
         )
         if result.is_duplicate:
             logger.debug(
@@ -106,6 +111,8 @@ def _add_with_optional_dedup(
         source_event=source_event,
         corrects_event_ids=corrects_event_ids,
         tags=tags,
+        extraction_method=extraction_method,
+        generated_by=generated_by,
     )
 
 
@@ -148,6 +155,7 @@ def extract_from_session(
                     corrects_event_ids=list(ann.corrects_event_ids) if ann.corrects_event_ids else None,
                     tags=list(ann.tags),
                     dedup_threshold=dedup_threshold,
+                    extraction_method="rule-based",
                 )
                 if lrn is not None:
                     new_ids.append(lrn.id)
@@ -184,6 +192,7 @@ def extract_from_session(
                     source_event=evt.id,
                     tags=tags,
                     dedup_threshold=dedup_threshold,
+                    extraction_method="rule-based",
                 )
                 if lrn is not None:
                     new_ids.append(lrn.id)
@@ -203,6 +212,7 @@ def extract_from_session(
                     source_event=evt.id,
                     tags=list(contrib.tags),
                     dedup_threshold=dedup_threshold,
+                    extraction_method="rule-based",
                 )
                 if lrn is not None:
                     new_ids.append(lrn.id)
@@ -310,6 +320,19 @@ async def extract_from_session_llm(
     )
 
     try:
+        # Egress-as-provenance: record the fact of the cloud call before making
+        # it. Attestation failure is handled by this try's strict/permissive
+        # logic like any LLM failure — and no content leaves the machine.
+        attest_egress(
+            provider="openai",
+            endpoint="chat.completions",
+            model=config.llm_extraction_model,
+            purpose="extraction",
+            content_class="session-events+existing-learnings",
+            item_count=len(session.events),
+            project=session.metadata.project,
+            session_id=session.id,
+        )
         client = AsyncOpenAI(api_key=config.openai_api_key)
         response = await client.chat.completions.create(
             model=config.llm_extraction_model,
@@ -355,6 +378,8 @@ async def extract_from_session_llm(
                 corrects_event_ids=item.get("corrects_event_ids"),
                 tags=item.get("tags", []),
                 dedup_threshold=dedup_threshold,
+                extraction_method="llm",
+                generated_by=config.llm_extraction_model,
             )
             if lrn is not None:
                 new_ids.append(lrn.id)
