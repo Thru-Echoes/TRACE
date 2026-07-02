@@ -216,7 +216,7 @@ Claude: -> trace_end_session(summary="Analyzed 47 passages...")
 
 ## Knowledge persistence (trace-learn)
 
-The default `trace-learn` extension surfaces relevant past learnings at session start, on-demand via `trace_learn_recall`, and when decisions are proposed — and auto-extracts new learnings at session end. Matching uses LLM scoring when `OPENAI_API_KEY` is configured, with BM25 fallback. Storage: `~/.trace/knowledge/{project}.json` (env: `TRACE_KNOWLEDGE_DIR`).
+The default `trace-learn` extension surfaces relevant past learnings at session start, on-demand via `trace_learn_recall`, and when decisions are proposed — and auto-extracts new learnings at session end. Matching uses cloud LLM scoring only when explicitly opted in (`TRACE_LLM_ENABLED=true` plus an `OPENAI_API_KEY`), with BM25 fallback otherwise. Storage: `~/.trace/knowledge/{project}.json` (env: `TRACE_KNOWLEDGE_DIR`).
 
 See [`docs/extensions/trace-learn.md`](https://github.com/Thru-Echoes/TRACE/blob/main/docs/extensions/trace-learn.md) for matching backends, BM25 stemming, per-backend thresholds, extraction details, and LLM configuration.
 
@@ -230,7 +230,7 @@ See [`docs/extensions/trace-learn.md`](https://github.com/Thru-Echoes/TRACE/blob
 | `OPENAI_API_KEY` | — | OpenAI API key for LLM matching and extraction |
 | `TRACE_LLM_MODEL` | `gpt-5.4-mini` | Model for LLM relevance scoring |
 | `TRACE_LLM_EXTRACTION_MODEL` | `gpt-5.4-mini` | Model for LLM learning extraction |
-| `TRACE_LLM_ENABLED` | `true` | Set `false` to force BM25/rule-based only |
+| `TRACE_LLM_ENABLED` | `false` | Cloud LLM matching/extraction is opt-in: set `true` (with `OPENAI_API_KEY`) to enable |
 | `TRACE_STRICT_LLM` | `true` if key set, else `false` | Fail loudly on LLM errors instead of silent BM25 fallback |
 | `TRACE_BM25_K1` | `1.5` | BM25 term frequency saturation parameter |
 | `TRACE_BM25_B` | `0.75` | BM25 document length normalization parameter |
