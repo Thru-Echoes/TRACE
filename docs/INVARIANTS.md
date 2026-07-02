@@ -99,6 +99,38 @@ exact-match predicate as the hooks, so both layers resolve one session set.
 
 ---
 
+## INV-5 — No cloud egress without a pre-call ledger attestation  · ENFORCED
+
+**Statement.** Every OpenAI-SDK network call in the trace-learn extension
+(`…completions.create(...)` / `…embeddings.create(...)`) must be preceded, in
+the same function, by `attest_egress()` — one appended line in the egress
+ledger (`~/.trace/egress.jsonl`, override `TRACE_EGRESS_LOG`) recording the
+fact of the call (provider, endpoint, model, purpose, item count,
+project/session when known) and never the content. The attestation **fails
+closed**: if the ledger cannot be written, the cloud call must not happen —
+call sites sit inside the existing strict/permissive LLM handling, so a failed
+attestation degrades like a failed provider (strict raises, permissive falls
+back to the local path). An unattested call site is unrecorded egress, the
+exact failure mode the ledger exists to prevent.
+
+**Sites:** `src/trace_mcp/extensions/learn/extraction.py`
+(`extract_from_session_llm`); `src/trace_mcp/extensions/learn/matching.py`
+(`_llm_score`); `src/trace_mcp/extensions/learn/embeddings.py`
+(`OpenAIEmbeddingProvider.embed_texts`). Writer:
+`src/trace_mcp/extensions/learn/egress.py`.
+
+**Guard:** `tests/test_invariants.py :: test_inv5_every_openai_call_site_is_registered`
+(AST enumeration — a new `.create` site fails until registered in
+`INV5_EGRESS_CALL_SITES`, and stale registrations fail too, with a positive
+control against pattern rot) and `:: test_inv5_every_egress_site_attests_first`
+(each registered site must call `attest_egress`). Behavior pinned by
+`tests/test_egress_ledger.py` (pre-call ordering; no egress when the ledger is
+unwritable).
+
+**Status.** ENFORCED.
+
+---
+
 *To add an invariant: give it the next `INV-N`, state it, enumerate the
 exhaustive site-set, name the guard + test, and add a check to
 `tests/test_invariants.py` that fails when a new site violates it.*

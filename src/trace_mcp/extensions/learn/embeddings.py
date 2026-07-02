@@ -21,6 +21,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
+from trace_mcp.extensions.learn.egress import attest_egress
+
 if TYPE_CHECKING:
     import numpy as np
 
@@ -131,6 +133,22 @@ class OpenAIEmbeddingProvider:
         self.base_url = base_url
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+        # Egress-as-provenance: record the fact of the cloud call before making
+        # it. Raising here is caught by the callers' strict/permissive handling
+        # (e.g. _embed_learnings) like any provider failure — and no content
+        # leaves the machine. This is the single true egress point for
+        # embeddings, so the attestation lives here rather than in each caller;
+        # project/purpose are unknown at this layer (base_url set = the call
+        # targets a user-configured, possibly local, OpenAI-compatible server).
+        attest_egress(
+            provider="openai",
+            endpoint="embeddings",
+            model=self.model_name,
+            purpose="embedding",
+            content_class="learning-or-query-text",
+            item_count=len(texts),
+            base_url=self.base_url,
+        )
         kwargs: dict = {"model": self.model_name, "input": texts}
         if self.dimensions > 0:
             kwargs["dimensions"] = self.dimensions

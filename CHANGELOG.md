@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `trace_learn_recall`, and `trace_learn_add` tool docstrings now state, at the
   point of use, that content is sent to OpenAI when the OpenAI backend/LLM is
   configured, and how to stay local (`TRACE_LOCAL_ONLY=1`).
+- **Egress ledger (egress-as-provenance).** Every cloud call trace-learn makes
+  (LLM extraction, LLM matching, OpenAI embeddings) now appends one JSONL line
+  to `~/.trace/egress.jsonl` (override: `TRACE_EGRESS_LOG`) — recording the
+  FACT of the call (provider, endpoint, model, purpose, item count, and
+  project/session where the call site knows them), never the content. The
+  attestation is written **before** the request and **fails closed**: if the
+  ledger cannot be written, the cloud call does not happen — under permissive
+  config the caller falls back to the local path (BM25 / rule-based /
+  un-embedded), under strict config it raises. Registered as **INV-5** in
+  `docs/INVARIANTS.md` with an AST enumeration guard, so a new OpenAI call
+  site cannot merge without attesting. The test suite isolates the ledger the
+  same way it isolates the session/knowledge stores (`tests/conftest.py`).
 
 ### Local-strong embedding tier + local-first default
 

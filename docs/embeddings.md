@@ -82,6 +82,31 @@ features regardless of whether a key is present. It closes the "off-switch trap"
 where disabling one path (`TRACE_LLM_ENABLED=false` **or**
 `TRACE_EMBEDDING_BACKEND=none`) still left the other egressing.
 
+## Egress ledger (egress-as-provenance)
+
+When cloud calls *are* enabled, every one of them is recorded: each LLM
+extraction, LLM matching, and OpenAI embedding request appends one JSON line to
+`~/.trace/egress.jsonl` (override the path with `TRACE_EGRESS_LOG`) **before**
+the request is made. A line records the *fact* of the call — timestamp,
+provider, endpoint, model, purpose, item count, and project/session where the
+call site knows them — never the content. A `base_url` field on embedding
+entries marks calls that target a user-configured OpenAI-compatible endpoint
+(e.g. a local Ollama) rather than api.openai.com.
+
+The attestation fails closed: if the ledger cannot be written, the cloud call
+does not happen. Under permissive config that degrades to the local path
+(BM25 / rule-based / un-embedded learnings) like any provider failure; under
+strict config (`TRACE_STRICT_LLM=true`) it raises. This is INV-5 in
+[docs/INVARIANTS.md](INVARIANTS.md): an enumeration guard fails CI when a new
+OpenAI call site appears without an attestation, so the ledger stays complete
+by construction.
+
+To inspect your machine's egress history:
+
+```bash
+cat ~/.trace/egress.jsonl | python3 -m json.tool --json-lines
+```
+
 ## Switching backends re-embeds your store
 
 Each learning records the model that produced its vector. When you change the
