@@ -31,10 +31,15 @@ def active() -> dict[str, Session]:
 
 class TestInitProjectMCPConfig:
     def test_init_project_mcp_config_uses_uvx(self) -> None:
-        """MCP_CONFIG should use 'uvx --from ... --refresh-package trace-mcp trace-mcp'."""
-        from trace_mcp.init_project import MCP_CONFIG
+        """The server entry should use 'uvx --from ... --refresh-package trace-mcp trace-mcp'.
 
-        trace_config = MCP_CONFIG["trace"]
+        (Runs from a source checkout here, so the lazily-resolved --from source
+        is this repo's root; the wheel-installed case is covered by the
+        fail-closed tests in test_adapters.py.)
+        """
+        from trace_mcp.init_project import _mcp_server_config
+
+        trace_config = _mcp_server_config()["trace"]
         assert trace_config["command"] == "uvx"
         args = trace_config["args"]
         assert "--from" in args
