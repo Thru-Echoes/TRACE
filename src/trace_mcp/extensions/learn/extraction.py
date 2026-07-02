@@ -16,6 +16,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from trace_mcp.extensions.learn.egress import attest_egress
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, LearningCategory
 from trace_mcp.extensions.learn.store import add_learning, add_learning_dedup
 from trace_mcp.schema import Session
@@ -310,6 +311,19 @@ async def extract_from_session_llm(
     )
 
     try:
+        # Egress-as-provenance: record the fact of the cloud call before making
+        # it. Attestation failure is handled by this try's strict/permissive
+        # logic like any LLM failure — and no content leaves the machine.
+        attest_egress(
+            provider="openai",
+            endpoint="chat.completions",
+            model=config.llm_extraction_model,
+            purpose="extraction",
+            content_class="session-events+existing-learnings",
+            item_count=len(session.events),
+            project=session.metadata.project,
+            session_id=session.id,
+        )
         client = AsyncOpenAI(api_key=config.openai_api_key)
         response = await client.chat.completions.create(
             model=config.llm_extraction_model,
