@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **`trace-mcp init` no longer writes a dependency-confused `.mcp.json` from
+  an installed wheel.** When run from an installed copy (module under
+  `site-packages`) with no `TRACE_SOURCE_PATH` set, source resolution
+  previously fell back to writing `uvx --from trace-mcp` — but the name
+  `trace-mcp` on PyPI belongs to an unrelated package, so the next MCP server
+  start would have downloaded and executed third-party code. Resolution now
+  **fails closed** (`TraceSourceUnresolvedError`; `trace-mcp init` exits 1,
+  including on `--dry-run`) with the remedy in the message: set
+  `TRACE_SOURCE_PATH=/abs/path/to/your/TRACE/clone`. Source checkouts and the
+  `TRACE_SOURCE_PATH` override behave as before; the server entry is now built
+  lazily at write time so importing the module never raises.
+  
+### Cloud LLM matching/extraction now opt-in (behavior change)
+
+- **`TRACE_LLM_ENABLED` now defaults to `false`.** An `OPENAI_API_KEY` on the
+  machine no longer opts sessions into cloud LLM matching and extraction by
+  itself — completing the local-first posture already applied to embeddings
+  (where `auto` never selects OpenAI). Unset now means rule-based/BM25; cloud
+  LLM requires the explicit `TRACE_LLM_ENABLED=true` opt-in. To restore the
+  previous behavior everywhere, set `TRACE_LLM_ENABLED=true` once in
+  `~/.trace/.env`. When a key is present but the flag is unset, config load
+  logs an INFO pointing at the flag (suppressed when the flag is explicitly
+  `false` or `TRACE_LOCAL_ONLY` is set). The `LearnConfig.llm_enabled`
+  dataclass default flips to `False` to match, so directly-constructed
+  configs are safe-by-default too.
+
 ### Egress kill switch + point-of-use disclosure
 
 - **`TRACE_LOCAL_ONLY=1` — one switch, no egress anywhere.** Forces all three
@@ -20,6 +48,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `trace_learn_recall`, and `trace_learn_add` tool docstrings now state, at the
   point of use, that content is sent to OpenAI when the OpenAI backend/LLM is
   configured, and how to stay local (`TRACE_LOCAL_ONLY=1`).
+- **Egress ledger (egress-as-provenance).** Every cloud call trace-learn makes
+  (LLM extraction, LLM matching, OpenAI embeddings) now appends one JSONL line
+  to `~/.trace/egress.jsonl` (override: `TRACE_EGRESS_LOG`) — recording the
+  FACT of the call (provider, endpoint, model, purpose, item count, and
+  project/session where the call site knows them), never the content. The
+  attestation is written **before** the request and **fails closed**: if the
+  ledger cannot be written, the cloud call does not happen — under permissive
+  config the caller falls back to the local path (BM25 / rule-based /
+  un-embedded), under strict config it raises. Registered as **INV-5** in
+  `docs/INVARIANTS.md` with an AST enumeration guard, so a new OpenAI call
+  site cannot merge without attesting. The test suite isolates the ledger the
+  same way it isolates the session/knowledge stores (`tests/conftest.py`).
 
 ### Local-strong embedding tier + local-first default
 

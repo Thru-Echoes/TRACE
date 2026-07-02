@@ -53,20 +53,23 @@ Learnings are extracted from session events via two backends:
 
 | Backend | When used | What it does |
 |---------|-----------|--------------|
-| **LLM-enhanced** (primary) | When configured | Sends all session events to an OpenAI model which identifies valuable, actionable learnings and generates quality tags. Avoids duplicating existing learnings. |
-| **Rule-based** (fallback) | When no API key | Processes annotations with category in {learning, correction, gotcha}, rejected/revised decisions (preserving rationale and revision notes), and collaborative contributions. |
+| **LLM-enhanced** (opt-in) | `TRACE_LLM_ENABLED=true` + API key | Sends all session events to an OpenAI model which identifies valuable, actionable learnings and generates quality tags. Avoids duplicating existing learnings. |
+| **Rule-based** (default) | Otherwise (no key, or LLM not enabled) | Processes annotations with category in {learning, correction, gotcha}, rejected/revised decisions (preserving rationale and revision notes), and collaborative contributions. |
 
 Both backends are **idempotent** — running extraction twice on the same session produces no duplicates.
 
 ## LLM configuration
 
-Place your OpenAI API key in `~/.trace/.env` (shared across all TRACE projects):
+Cloud LLM features are **off by default** (local-first): an API key on the
+machine does not, by itself, send any session content to OpenAI. To opt in,
+place your key in `~/.trace/.env` (shared across all TRACE projects) **and**
+set `TRACE_LLM_ENABLED=true`:
 
 ```bash
 OPENAI_API_KEY=sk-...
+TRACE_LLM_ENABLED=true                   # Opt-in: cloud LLM is OFF by default
 TRACE_LLM_MODEL=gpt-5.4-mini             # Model for matching/scoring
 TRACE_LLM_EXTRACTION_MODEL=gpt-5.4-mini  # Model for extraction (can be different)
-TRACE_LLM_ENABLED=true                   # Set false to force BM25-only
 TRACE_STRICT_LLM=true                    # Fail loudly on LLM errors (default: true when key set)
 ```
 
