@@ -91,6 +91,10 @@ class LearnConfig:
     # BM25/rule-based. Auto-defaults to True when an API key is present — the
     # assumption being "if you configured it, you expect it to work."
     strict_llm: bool = True
+    # Unified kill switch: when True, ALL cloud egress is off — no OpenAI
+    # embeddings and no LLM extraction/matching — regardless of key presence or
+    # backend. Set via TRACE_LOCAL_ONLY; enforced in load_config().
+    local_only: bool = False
     bm25_k1: float = 1.5
     bm25_b: float = 0.75
     tag_weight: float = 0.3
@@ -126,6 +130,7 @@ def load_config() -> LearnConfig:
         "TRACE_LLM_EXTRACTION_MODEL",
         "TRACE_LLM_ENABLED",
         "TRACE_STRICT_LLM",
+        "TRACE_LOCAL_ONLY",
         "TRACE_BM25_K1",
         "TRACE_BM25_B",
         "TRACE_TAG_WEIGHT",
@@ -168,6 +173,21 @@ def load_config() -> LearnConfig:
             merged.get("TRACE_LLM_MODEL", "gpt-5.4-mini"),
         )
 
+    local_only = merged.get("TRACE_LOCAL_ONLY", "false").lower() in ("true", "1", "yes")
+    embedding_backend = merged.get("TRACE_EMBEDDING_BACKEND", "auto")
+    if local_only:
+        # One switch, all three egress paths: force cloud LLM features off and
+        # override an explicit OpenAI embedding backend to the local-first "auto".
+        # Closes the off-switch trap (TRACE_LLM_ENABLED=false alone still egressed
+        # via embeddings; TRACE_EMBEDDING_BACKEND=none alone still egressed via
+        # LLM matching/extraction).
+        if llm_enabled:
+            logger.info("TRACE_LOCAL_ONLY is set — forcing LLM features off (no cloud extraction/matching).")
+        llm_enabled = False
+        if embedding_backend == "openai":
+            logger.warning("TRACE_LOCAL_ONLY is set — overriding TRACE_EMBEDDING_BACKEND=openai to local 'auto'.")
+            embedding_backend = "auto"
+
     decay_enabled = merged.get("TRACE_DECAY_ENABLED", "true").lower() in ("true", "1", "yes")
     dedup_enabled = merged.get("TRACE_DEDUP_ENABLED", "true").lower() in ("true", "1", "yes")
 
@@ -177,6 +197,7 @@ def load_config() -> LearnConfig:
         llm_extraction_model=merged.get("TRACE_LLM_EXTRACTION_MODEL", "gpt-5.4-mini"),
         llm_enabled=llm_enabled,
         strict_llm=strict_llm,
+        local_only=local_only,
         bm25_k1=float(merged.get("TRACE_BM25_K1", "1.5")),
         bm25_b=float(merged.get("TRACE_BM25_B", "0.75")),
         tag_weight=float(merged.get("TRACE_TAG_WEIGHT", "0.3")),
@@ -186,7 +207,7 @@ def load_config() -> LearnConfig:
         evergreen_floor=float(merged.get("TRACE_EVERGREEN_FLOOR", "0.8")),
         dedup_enabled=dedup_enabled,
         dedup_threshold=float(merged.get("TRACE_DEDUP_THRESHOLD", "0.85")),
-        embedding_backend=merged.get("TRACE_EMBEDDING_BACKEND", "auto"),
+        embedding_backend=embedding_backend,
         embedding_model=merged.get("TRACE_EMBEDDING_MODEL", "text-embedding-3-small"),
         embedding_base_url=merged.get("TRACE_OPENAI_BASE_URL") or merged.get("OPENAI_BASE_URL") or None,
     )

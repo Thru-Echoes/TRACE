@@ -257,6 +257,13 @@ def get_embedding_provider(config: LearnConfig | None = None) -> EmbeddingProvid
 
     backend = config.embedding_backend
 
+    # Belt-and-suspenders for the unified kill switch: a local-only config must
+    # never reach the cloud provider even if backend=="openai". load_config()
+    # already downgrades this, but library callers / tests may build a
+    # LearnConfig directly and bypass that enforcement.
+    if config.local_only and backend == "openai":
+        backend = "auto"
+
     if backend == "none":
         return None
 
