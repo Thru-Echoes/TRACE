@@ -60,6 +60,16 @@ class TestSuiteEnvIsolation:
             "scratchpad would overwrite the developer's real .claude/SCRATCHPAD.md"
         )
 
+    def test_egress_log_points_at_tmp(self) -> None:
+        """Every mocked LLM/embedding test triggers a pre-call egress
+        attestation; unisolated, suite runs would append hundreds of
+        test-fixture lines to the developer's real ~/.trace/egress.jsonl."""
+        isolated = _assert_isolated("TRACE_EGRESS_LOG")
+        from trace_mcp.extensions.learn.egress import egress_log_path
+
+        resolved = egress_log_path().resolve()
+        assert resolved == isolated, f"egress ledger resolves to {resolved}, expected {isolated}"
+
     def test_default_knowledge_store_writes_land_in_tmp(self) -> None:
         """A store saved WITHOUT an explicit directory (the leak pattern that
         polluted the real ~/.trace/knowledge) must land in the isolated dir.
