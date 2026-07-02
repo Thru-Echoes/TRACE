@@ -236,6 +236,7 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                         source_event=source_event,
                         tags=tags,
                         dedup_threshold=_config.dedup_threshold,
+                        extraction_method="manual",
                     )
                     if result.is_duplicate:
                         return json.dumps(
@@ -254,6 +255,7 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                         source_session=source_session,
                         source_event=source_event,
                         tags=tags,
+                        extraction_method="manual",
                     )
                 await _embed_learnings([lrn])
                 store.save_store(ks)

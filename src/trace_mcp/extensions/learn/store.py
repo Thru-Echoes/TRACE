@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning
 
@@ -165,6 +165,8 @@ def add_learning(
     source_event: str | None = None,
     corrects_event_ids: list[str] | None = None,
     tags: list[str] | None = None,
+    extraction_method: Literal["llm", "rule-based", "manual"] | None = None,
+    generated_by: str | None = None,
 ) -> Learning:
     """Add a learning to the store and return it."""
     learning = Learning(
@@ -175,6 +177,8 @@ def add_learning(
         source_event=source_event,
         corrects_event_ids=corrects_event_ids or [],
         tags=tags or [],
+        extraction_method=extraction_method,
+        generated_by=generated_by,
     )
     store.learnings.append(learning)
     return learning
@@ -260,6 +264,8 @@ def add_learning_dedup(
     corrects_event_ids: list[str] | None = None,
     tags: list[str] | None = None,
     dedup_threshold: float = 0.85,
+    extraction_method: Literal["llm", "rule-based", "manual"] | None = None,
+    generated_by: str | None = None,
 ) -> DedupResult:
     """Add a learning with content deduplication.
 
@@ -278,6 +284,8 @@ def add_learning_dedup(
         source_event=source_event,
         corrects_event_ids=corrects_event_ids,
         tags=tags,
+        extraction_method=extraction_method,
+        generated_by=generated_by,
     )
     return DedupResult(learning=lrn, is_duplicate=False)
 
