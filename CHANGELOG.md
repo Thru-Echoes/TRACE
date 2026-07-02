@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **`trace-mcp init` no longer writes a dependency-confused `.mcp.json` from
+  an installed wheel.** When run from an installed copy (module under
+  `site-packages`) with no `TRACE_SOURCE_PATH` set, source resolution
+  previously fell back to writing `uvx --from trace-mcp` — but the name
+  `trace-mcp` on PyPI belongs to an unrelated package, so the next MCP server
+  start would have downloaded and executed third-party code. Resolution now
+  **fails closed** (`TraceSourceUnresolvedError`; `trace-mcp init` exits 1,
+  including on `--dry-run`) with the remedy in the message: set
+  `TRACE_SOURCE_PATH=/abs/path/to/your/TRACE/clone`. Source checkouts and the
+  `TRACE_SOURCE_PATH` override behave as before; the server entry is now built
+  lazily at write time so importing the module never raises.
+
 ### Egress kill switch + point-of-use disclosure
 
 - **`TRACE_LOCAL_ONLY=1` — one switch, no egress anywhere.** Forces all three
