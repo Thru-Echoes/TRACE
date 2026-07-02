@@ -45,6 +45,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   change is detected per learning); the `.npy` sidecar writer now tolerates
   mixed-dimension rows during that migration instead of erroring.
 
+### Learning creation-path provenance
+
+- **`Learning.extraction_method` and `Learning.generated_by`.** Every learning
+  now records how it was created: `"llm"` (cloud extraction — the content is
+  model output, so `generated_by` names the generating model), `"rule-based"`
+  (local extractor — the content is quoted from session events), or `"manual"`
+  (`trace_learn_add`). Records predating the fields load as `None`; tool
+  responses (`learning_to_dict`) expose both fields so clients can distinguish
+  model-generated from quoted content. This closes the gap where a paraphrased
+  LLM extraction was indistinguishable from a verbatim event quote in the
+  knowledge store.
+
 ### Diagnostics
 
 - **Offline self-cost report (`python -m trace_mcp.selfcost`).** A standalone,
