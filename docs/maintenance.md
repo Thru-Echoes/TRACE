@@ -38,13 +38,14 @@ In short: self-contained, durable prose; preferred subject shape
   release commit at release time (not retroactively).
 - Versioning follows [SemVer](https://semver.org); the changelog follows
   [Keep a Changelog](https://keepachangelog.com).
-- `release.yml` builds and verifies the shipped distribution. **PyPI
-  publication is paused** pending finalization of the published distribution
-  name, so a release is currently "tagged + built + verified", not "published".
-  Because a pushed `vX.Y.Z` tag currently triggers the publish job, version
-  tags are not pushed to the remote while the publication pause is in effect;
-  the tag/publish coupling will be made safe (publish gated to a deliberate
-  action) before remote tagging resumes.
+- `release.yml` is **manual-only** (`workflow_dispatch`); it has no push or tag
+  trigger. Dispatching it with the `confirm` input left blank builds and
+  verifies the shipped distribution (a safe dry run); only a dispatch with
+  `confirm: PUBLISH` uploads to PyPI. **PyPI publication remains paused**
+  pending finalization of the distribution name, so a release is currently
+  "built + verified", not "published". Because no tag or GitHub Release can
+  trigger a publish, version tags and Releases are safe to create — e.g. for
+  Zenodo DOI archival — while the pause is in effect.
 
 ## Maintenance backlog
 

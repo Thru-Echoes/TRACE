@@ -1,12 +1,25 @@
 name: Release
 
-# Tag-triggered publish to PyPI via Trusted Publishing (OIDC — no stored token).
-# Tag the release commit with `vX.Y.Z` (matching pyproject `version`) and push
-# the tag; this builds, runs the full quality gate + a leak guard, then publishes.
+# Manual-only release. PyPI publishing is intentionally PAUSED and MUST NOT be
+# automated. This workflow has no push or tag trigger, so creating a git tag or
+# a GitHub Release (e.g. for Zenodo DOI archival) can never trigger a PyPI
+# upload.
+#
+# Fail-closed, two-step flow via "Run workflow":
+#   1. Dispatch with the `confirm` input left blank to build and run the full
+#      quality gate + packaging/leak guards against the selected ref (a safe
+#      dry run; nothing is published).
+#   2. Only a dispatch with `confirm: PUBLISH` runs the publish job, uploading
+#      to PyPI via Trusted Publishing (OIDC — no stored token).
+# Publishing stays paused until the distribution name is resolved and a release
+# is deliberately initiated.
 on:
-  push:
-    tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      confirm:
+        description: "Type PUBLISH to release to PyPI. Leave blank to build & verify only (no publish)."
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -62,10 +75,13 @@ jobs:
     name: Publish to PyPI
     needs: build
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Fail closed: publish only on an explicit, typed confirmation. No git tag
+    # or GitHub Release reaches this job — the workflow has no push trigger.
+    if: ${{ inputs.confirm == 'PUBLISH' }}
+    # Trusted Publishing binds to this environment; the PyPI project mapping and
+    # the distribution name are finalized when the publication pause is lifted.
     environment:
       name: pypi
-      url: https://pypi.org/p/trace-mcp
     permissions:
       id-token: write # OIDC for PyPI Trusted Publishing
     steps:

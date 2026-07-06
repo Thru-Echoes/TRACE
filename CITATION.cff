@@ -11,8 +11,9 @@ type: software
 authors:
   - given-names: Oliver
     family-names: Muellerklein
+    email: omuellerklein@berkeley.edu
     affiliation: "Department of Environmental Science, Policy, and Management, University of California, Berkeley"
-    # orcid: "https://orcid.org/<ORCID-TBD>"   # TODO(PI): add ORCID before release/JOSS
+    orcid: "https://orcid.org/0000-0002-5967-1314"
 license: Apache-2.0
 repository-code: "https://github.com/Thru-Echoes/TRACE"
 version: 0.4.2
@@ -22,5 +23,8 @@ keywords:
   - reproducibility
   - Model Context Protocol
   - research integrity
+  - human-AI collaboration
+  - audit trail
+  - W3C PROV
 # DOI is minted on archival (Zenodo) at release; add here once available:
 # doi: "10.5281/zenodo.<TBD>"
