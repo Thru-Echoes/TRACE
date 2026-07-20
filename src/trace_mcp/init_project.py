@@ -22,6 +22,15 @@ class TraceSourceUnresolvedError(RuntimeError):
     """No safe ``uvx --from <X>`` source could be determined for `.mcp.json`."""
 
 
+class TraceInitError(RuntimeError):
+    """`.mcp.json` cannot be safely updated (e.g. the existing file is not valid JSON).
+
+    Raised instead of silently discarding and replacing a file we could not
+    parse — overwriting it would destroy sibling MCP servers and any hand-added
+    configuration the user could not have intended to lose.
+    """
+
+
 def _resolve_trace_source() -> str:
     """Pick the value to write into `.mcp.json`'s `uvx --from <X>` argument.
 
@@ -71,20 +80,102 @@ def _mcp_server_config() -> dict:
     }
 
 
+def _extract_with_packages(args: object) -> list[str]:
+    """Return the ordered, de-duplicated ``--with <pkg>`` names present in *args*.
+
+    Tolerant of malformed input: a non-list ``args``, a trailing ``--with`` with
+    no value, or a non-string value are all skipped rather than raising.
+    """
+    if not isinstance(args, list):
+        return []
+    packages: list[str] = []
+    i = 0
+    while i < len(args):
+        if args[i] == "--with" and i + 1 < len(args) and isinstance(args[i + 1], str):
+            if args[i + 1] not in packages:
+                packages.append(args[i + 1])
+            i += 2
+        else:
+            i += 1
+    return packages
+
+
+def _rebuild_args(fresh_args: list[str], with_packages: list[str]) -> list[str]:
+    """Canonical fresh ``args`` with preserved ``--with`` pairs inserted before the command.
+
+    ``fresh_args`` ends with the tool name (the uvx command); preserved
+    ``--with`` flags are inserted just before it so uvx option order stays valid.
+    """
+    if not with_packages:
+        return list(fresh_args)
+    with_flags: list[str] = []
+    for pkg in with_packages:
+        with_flags += ["--with", pkg]
+    return fresh_args[:-1] + with_flags + fresh_args[-1:]
+
+
+def _merge_trace_entry(existing: object, fresh: dict) -> dict:
+    """Merge the freshly-built ``trace`` entry over an existing one.
+
+    Preserves hand-added ``--with`` extras, any ``env`` block, and unknown keys
+    from *existing* while adopting the freshly-resolved ``command`` and
+    ``--from``/``--refresh-package`` source. If *existing* is not a dict (a
+    malformed entry), the fresh entry replaces it wholesale.
+    """
+    if not isinstance(existing, dict):
+        return fresh
+    merged = dict(existing)
+    merged["command"] = fresh["command"]
+    merged["args"] = _rebuild_args(fresh["args"], _extract_with_packages(existing.get("args")))
+    env: dict = {}
+    if isinstance(existing.get("env"), dict):
+        env.update(existing["env"])
+    if isinstance(fresh.get("env"), dict):
+        env.update(fresh["env"])
+    if env:
+        merged["env"] = env
+    return merged
+
+
 def _write_mcp_json(project_dir: Path) -> str:
-    """Write or merge the TRACE entry into ``.mcp.json``. Returns a one-line status."""
+    """Write or merge the TRACE entry into ``.mcp.json``. Returns a one-line status.
+
+    Re-running is non-destructive: an existing ``trace`` entry's ``--with``
+    extras, ``env`` block, and unknown keys are preserved, and sibling servers
+    are left untouched. A pre-existing ``.mcp.json`` that is not valid JSON (or
+    not a JSON object) is left on disk and raises ``TraceInitError`` (fail
+    closed) rather than being silently discarded and replaced.
+    """
     mcp_path = project_dir / ".mcp.json"
     if mcp_path.exists():
         try:
             config = json.loads(mcp_path.read_text())
-        except json.JSONDecodeError:
-            config = {"mcpServers": {}}
+        except json.JSONDecodeError as exc:
+            raise TraceInitError(
+                f"{mcp_path} is not valid JSON ({exc}); refusing to overwrite it. "
+                "Fix or remove the file and re-run."
+            ) from exc
+        if not isinstance(config, dict):
+            raise TraceInitError(
+                f"{mcp_path} does not contain a JSON object; refusing to overwrite it. "
+                "Fix or remove the file and re-run."
+            )
+        servers = config.get("mcpServers")
+        if servers is None:
+            servers = {}
+            config["mcpServers"] = servers
+        elif not isinstance(servers, dict):
+            raise TraceInitError(
+                f"{mcp_path} has a non-object 'mcpServers'; refusing to overwrite it. "
+                "Fix or remove the file and re-run."
+            )
     else:
         config = {"mcpServers": {}}
+        servers = config["mcpServers"]
 
-    config.setdefault("mcpServers", {})
-    was_present = "trace" in config["mcpServers"]
-    config["mcpServers"]["trace"] = _mcp_server_config()["trace"]
+    was_present = "trace" in servers
+    fresh_entry = _mcp_server_config()["trace"]
+    servers["trace"] = _merge_trace_entry(servers.get("trace"), fresh_entry) if was_present else fresh_entry
 
     mcp_path.write_text(json.dumps(config, indent=2) + "\n")
     return f"  {'updated' if was_present else 'wrote'}: {mcp_path}"
@@ -131,7 +222,7 @@ def init_project(
         else:
             entry = _mcp_server_config()["trace"]
             print(f"  [dry-run] would write: {project_dir / '.mcp.json'} (uvx --from {entry['args'][1]})")
-    except TraceSourceUnresolvedError as exc:
+    except (TraceSourceUnresolvedError, TraceInitError) as exc:
         print(f"Error: {exc}")
         sys.exit(1)
 
