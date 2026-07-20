@@ -131,6 +131,32 @@ unwritable).
 
 ---
 
+## INV-7 — Every project-registry write is fail-closed, locked, and atomic  · ENFORCED
+
+**Statement.** All mutations of the project registry (`~/.trace/projects.json`,
+override `TRACE_REGISTRY_PATH`) go through `project_identity.locked_registry`,
+which acquires the fail-closed exclusive lock (`O_EXCL` + PID-liveness steal,
+raising `TimeoutError` rather than writing unlocked), yields the freshest
+disk-truth registry, validates alias uniqueness, and persists atomically
+(temp + `os.replace`) only on clean exit. A corrupt or unknown-major registry
+raises `RegistryUnavailableError` on load and is **never** overwritten — an
+unreadable registry is fail-closed, not silently reset (the same reasoning as
+INV-1). The single serializer is `project_identity._atomic_write_registry`.
+
+**Sites:** writer `src/trace_mcp/project_identity.py` (`_atomic_write_registry`,
+called only by `locked_registry`).
+
+**Guard:** `tests/test_invariants.py :: test_inv7_registry_write_only_via_locked_registry`
+(AST enumeration — a new caller of `_atomic_write_registry` outside
+`locked_registry` fails until registered, with a positive control against
+pattern rot). Behavior pinned by `tests/test_project_identity.py` (lock timeout
+raises, dead-holder steal, corrupt/unknown-major refusal, atomic write leaves no
+temp file, a caller exception writes nothing).
+
+**Status.** ENFORCED.
+
+---
+
 *To add an invariant: give it the next `INV-N`, state it, enumerate the
 exhaustive site-set, name the guard + test, and add a check to
 `tests/test_invariants.py` that fails when a new site violates it.*

@@ -192,3 +192,30 @@ def test_inv5_every_egress_site_attests_first() -> None:
         f"INV-5 violation: egress call sites that never call attest_egress(): {sorted(missing)} — "
         "cloud content would leave the machine with no ledger record."
     )
+
+
+# ── INV-7: every project-registry WRITE routes through locked_registry ────
+# The registry's sole serializer is project_identity._atomic_write_registry; it
+# must be called ONLY from locked_registry, which holds the fail-closed lock and
+# writes atomically (temp + os.replace). A new caller elsewhere is an
+# unlocked/non-atomic registry write — the lost-update/drift failure the lock
+# exists to prevent.
+INV7_REGISTRY_WRITE_SITES = {
+    ("project_identity.py", "locked_registry"),
+}
+
+
+def test_inv7_registry_write_only_via_locked_registry() -> None:
+    callers = _functions_calling("_atomic_write_registry")
+    assert callers, (
+        "INV-7 positive control failed: no caller of _atomic_write_registry found — "
+        "the guard is blind (was it renamed?)."
+    )
+    unregistered = callers - INV7_REGISTRY_WRITE_SITES
+    assert not unregistered, (
+        "INV-7 violation (docs/INVARIANTS.md): these functions write the project registry "
+        f"outside locked_registry: {sorted(unregistered)}. Route the write through "
+        "project_identity.locked_registry (fail-closed lock + atomic write)."
+    )
+    stale = INV7_REGISTRY_WRITE_SITES - callers
+    assert not stale, f"INV-7 registry is stale — registered writers with no call anymore: {sorted(stale)}."
