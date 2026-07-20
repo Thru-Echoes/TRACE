@@ -225,3 +225,52 @@ def test_inv7_registry_write_only_via_locked_registry() -> None:
     )
     stale = INV7_REGISTRY_WRITE_SITES - callers
     assert not stale, f"INV-7 registry is stale — registered writers with no call anymore: {sorted(stale)}."
+
+
+# ── INV-6: (project, session) coherence for learn extraction ──────────────
+# Every function in extensions/learn whose signature carries BOTH `project` and
+# `session_id` (i.e. it extracts a session into a project's store) MUST call
+# project_identity.validate_project_session first — else project B's store is
+# written from project A's session and shipped to the cloud as dedup context.
+def _project_session_functions() -> set[tuple[str, str]]:
+    found: set[tuple[str, str]] = set()
+    learn = SRC / "extensions" / "learn"
+    for path in sorted(learn.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                params = {a.arg for a in node.args.args}
+                if "project" in params and "session_id" in params:
+                    found.add((_rel(path), node.name))
+    return found
+
+
+def test_inv6_project_session_sites_validate_coherence() -> None:
+    sites = _project_session_functions()
+    assert sites, (
+        "INV-6 positive control failed: no (project, session_id) functions found in "
+        "extensions/learn — the AST pattern no longer matches; the guard is blind."
+    )
+    validators = _functions_calling("validate_project_session")
+    missing = sites - validators
+    assert not missing, (
+        "INV-6 violation (docs/INVARIANTS.md): these learn functions take both a project "
+        f"and a session_id but never call validate_project_session: {sorted(missing)}. "
+        "A session could be extracted into another project's store."
+    )
+
+
+# ── INV-8: the knowledge-store lock is fail-closed and dependency-free ────
+# project_lock must use the O_EXCL + PID-liveness lock (raises on timeout, no
+# optional filelock dependency, no warn-and-proceed) — the same fail-closed
+# standard as the session lock (INV-1).
+def test_inv8_knowledge_lock_is_fail_closed_and_dependency_free() -> None:
+    source = (SRC / "extensions" / "learn" / "store.py").read_text(encoding="utf-8")
+    assert "import filelock" not in source and "from filelock" not in source, (
+        "INV-8 regression: store.py imports the optional 'filelock' package again — the "
+        "knowledge-store lock must be the dependency-free fail-closed exclusive_file_lock."
+    )
+    assert "exclusive_file_lock" in source, (
+        "INV-8: project_lock must acquire project_identity.exclusive_file_lock (fail-closed, "
+        "raises TimeoutError rather than proceeding unlocked)."
+    )

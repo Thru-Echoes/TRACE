@@ -14,6 +14,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, cast, get_args
 
+from trace_mcp import project_identity as pident
 from trace_mcp.extension_hooks import register_extract_hook, register_recall_hook
 from trace_mcp.extensions.learn import extraction, matching, store
 from trace_mcp.extensions.learn.config import load_config
@@ -125,6 +126,10 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             return results
 
     async def _extract_hook(project: str, session_id: str) -> list[str]:
+        # INV-6: refuse to extract a session into a DIFFERENT project's store
+        # (closes the cross-wired-extract bleed, which would also send one
+        # project's store to the cloud as another's dedup context).
+        await pident.validate_project_session(storage, project, session_id)
         with store.project_lock(project):  # lock the full read-modify-write span
             ks = store.load_store(project)
             sess = await storage.get_session(session_id)
@@ -336,6 +341,14 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         Otherwise, extracts from all sessions for the project.
         """
         try:
+            # Reserved keys (auto/shared) are not usable projects (ADR-006 D14).
+            if pident.canonical_project_key(project) in pident.RESERVED_KEYS:
+                return json.dumps({"error": f"'{project}' is a reserved project key", "project": project})
+            # INV-6: when extracting a specific session, refuse if it belongs to a
+            # different project — the cross-wired-extract bleed (would send this
+            # project's whole store to the cloud alongside another's events).
+            if session_id:
+                await pident.validate_project_session(storage, project, session_id)
             # Lock the full multi-session extract→embed→save span.
             with store.project_lock(project):
                 ks = store.load_store(project)
@@ -370,6 +383,10 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                         "total_learnings": len(ks.learnings),
                     }
                 )
+        except (pident.ProjectMismatchError, pident.ProjectKeyError) as exc:
+            return json.dumps(
+                {"error": "project/session coherence check failed", "detail": str(exc), "project": project}
+            )
         except Exception as exc:
             from trace_mcp.extensions.learn.config import LLMFallbackError
 

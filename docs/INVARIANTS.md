@@ -136,6 +136,49 @@ unwritable).
 
 ---
 
+## INV-6 — (project, session) coherence before a learn extraction  · ENFORCED
+
+**Statement.** Every function in `extensions/learn` whose signature carries both
+a `project` and a `session_id` (it extracts a session into a project's store)
+MUST call `project_identity.validate_project_session` first. Otherwise a session
+belonging to project A can be extracted into project B's knowledge store — and,
+under a cloud backend, project B's entire store leaves the machine as
+de-duplication context alongside project A's events (the worst cross-project
+bleed). The check fails closed (`ProjectMismatchError` / `ProjectKeyError`).
+
+**Sites:** `src/trace_mcp/extensions/learn/__init__.py` (`_extract_hook`,
+`trace_learn_extract`).
+
+**Guard:** `tests/test_invariants.py :: test_inv6_project_session_sites_validate_coherence`
+(AST enumeration — a new `(project, session_id)` learn function that does not
+call `validate_project_session` fails, with a positive control against pattern
+rot). Behavior pinned by `tests/test_learn_containment.py`.
+
+**Status.** ENFORCED.
+
+---
+
+## INV-8 — The knowledge-store lock is fail-closed and dependency-free  · ENFORCED
+
+**Statement.** `extensions/learn/store.py :: project_lock` acquires the
+dependency-free O_EXCL + PID-liveness lock (`project_identity.exclusive_file_lock`),
+keyed by the canonical store path, and raises `TimeoutError` rather than
+proceeding unlocked. The previous behavior — a silent no-op when the optional
+`filelock` package was absent, and proceed-on-timeout — reopened the lost-update
+window the lock exists to close, violating the same fail-closed standard as the
+session lock (INV-1).
+
+**Sites:** `src/trace_mcp/extensions/learn/store.py` (`project_lock`, keyed by
+`_store_path`, the canonical store path).
+
+**Guard:** `tests/test_invariants.py :: test_inv8_knowledge_lock_is_fail_closed_and_dependency_free`
+(no `filelock` import; `project_lock` uses `exclusive_file_lock`). Behavior
+pinned by `tests/test_learn_containment.py` (lock timeout raises).
+
+**Status.** ENFORCED.
+
+---
+
 ## INV-7 — Every project-registry write is fail-closed, locked, and atomic  · ENFORCED
 
 **Statement.** All mutations of the project registry (`~/.trace/projects.json`,
