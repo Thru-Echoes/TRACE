@@ -493,17 +493,15 @@ def _meta_get(meta: Any, name: str) -> Any:
     return value
 
 
-def session_project_key(meta: Any) -> str:
-    """The canonical key a session record belongs to.
+def key_for_label(label: str) -> str:
+    """Resolve a plain project *label* to a canonical key for read-side matching.
 
-    Uses ``project_key`` when present (authoritative), else resolves the
-    display ``project`` label through the registry, else canonicalizes it.
-    Returns ``""`` for a degenerate/empty label (which then matches no real key).
+    Registry alias/canonical resolution when a registry exists, else the bare
+    canonical key. **Non-raising**: returns ``""`` for a degenerate/empty label
+    (which then matches no real key). Unlike ``resolve_project_key`` this never
+    enrolls and never raises on an unknown label — it is for query filtering,
+    not project creation.
     """
-    project_key = _meta_get(meta, "project_key")
-    if isinstance(project_key, str) and project_key:
-        return project_key
-    label = _meta_get(meta, "project")
     if not isinstance(label, str) or not label.strip():
         return ""
     registry = get_registry_cached()
@@ -515,6 +513,20 @@ def session_project_key(meta: Any) -> str:
         return canonical_project_key(label)
     except ProjectKeyError:
         return ""
+
+
+def session_project_key(meta: Any) -> str:
+    """The canonical key a session record belongs to.
+
+    Uses ``project_key`` when present (authoritative), else resolves the
+    display ``project`` label through the registry / canonicalization.
+    Returns ``""`` for a degenerate/empty label (which then matches no real key).
+    """
+    project_key = _meta_get(meta, "project_key")
+    if isinstance(project_key, str) and project_key:
+        return project_key
+    label = _meta_get(meta, "project")
+    return key_for_label(label if isinstance(label, str) else "")
 
 
 def session_matches_project(meta: Any, key: str) -> bool:

@@ -102,23 +102,29 @@ def test_inv3_resolve_decision_validates_before_write() -> None:
     )
 
 
-# ── INV-4: project scoping uses ONE (exact) predicate across core + hooks ──
-# The core query filters (list_sessions, session_brief) must match projects
-# EXACTLY (metadata.project == project) — the same predicate the adapter hooks
-# use — never a case-insensitive SUBSTRING match, which silently merged distinct
-# projects (e.g. "trace" pulling in "trace-mcp" and "TRACE-research"). See INV-4.
+# ── INV-4: project scoping matches by CANONICAL KEY across core query filters ──
+# The core query filters (list_sessions, session_brief) must match projects by
+# canonical key (project_identity.session_project_key), never a case-insensitive
+# SUBSTRING match (which merged distinct projects) and never raw case-sensitive
+# label equality (which SPLITS one project across drifted labels — TRACE vs
+# trace-mcp, coeqwal vs COEQWAL). See INV-4 and ADR-006.
 
 
-def test_inv4_project_filter_is_exact_not_substring() -> None:
+def test_inv4_project_filter_uses_canonical_key() -> None:
     source = (SRC / "storage" / "json_file.py").read_text(encoding="utf-8")
     assert "not in proj.lower()" not in source, (
         "INV-4 regression: json_file.py filters projects by case-insensitive "
-        "SUBSTRING again — core must match projects EXACTLY (proj != project), "
-        "the same predicate the adapter hooks use, or distinct projects merge."
+        "SUBSTRING again — match by canonical key, or distinct projects merge."
     )
-    assert source.count("proj != project") >= 2, (
-        "INV-4: both list_sessions and session_brief must filter by exact project "
-        "match (proj != project) so core and hooks resolve one session set."
+    assert "proj != project" not in source, (
+        "INV-4 regression: json_file.py compares RAW project labels again — a "
+        "display-label variant would split one project. Match by canonical key "
+        "(session_project_key(meta) != query_key)."
+    )
+    assert source.count("session_project_key(meta) != query_key") >= 2, (
+        "INV-4: both list_sessions and session_brief must filter by canonical "
+        "project key (session_project_key(meta) != query_key) so drifted labels "
+        "resolve to one project."
     )
 
 
