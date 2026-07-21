@@ -29,8 +29,38 @@ import trace_mcp
 
 TRACE_ROOT = Path(__file__).parent.parent
 
+# Cold-starting the server subprocess (interpreter boot, importing trace_mcp and
+# its mcp/pydantic dependency tree, extension discovery) costs far more than any
+# request made once it is warm. Budgeting both from one 15s allowance made the
+# handshake the first thing to break whenever the machine was loaded — a busy CI
+# runner or a concurrent build — surfacing as an unattributable TimeoutError in
+# whichever e2e test happened to run first. The two budgets are therefore
+# separate, and the startup one is overridable for pathologically slow hosts.
+_REQUEST_TIMEOUT = 15.0
+_HANDSHAKE_TIMEOUT = float(os.environ.get("TRACE_E2E_HANDSHAKE_TIMEOUT", "90"))
+
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
+
+
+async def _drain_server_stderr(proc: asyncio.subprocess.Process, limit: int = 4000) -> str:
+    """Return the tail of *proc*'s stderr, killing it first so the read can end.
+
+    Side effects: kills the subprocess if still running, and consumes its stderr
+    pipe. Only call this on a failure path — a live server never closes stderr,
+    so the read would otherwise block forever.
+
+    Returns the last *limit* characters, or "" if nothing could be recovered.
+    """
+    if proc.stderr is None:
+        return ""
+    if proc.returncode is None:
+        proc.kill()  # force EOF; draining a live process's stderr would hang
+    try:
+        data = await asyncio.wait_for(proc.stderr.read(), timeout=5.0)
+    except (TimeoutError, ProcessLookupError):
+        return ""
+    return data.decode("utf-8", errors="replace").strip()[-limit:]
 
 
 def _make_jsonrpc_request(method: str, params: dict[str, Any] | None = None, id: int = 1) -> str:
@@ -59,7 +89,7 @@ def _make_jsonrpc_notification(method: str, params: dict[str, Any] | None = None
 async def _send_and_receive(
     proc: asyncio.subprocess.Process,
     message: str,
-    timeout: float = 15.0,
+    timeout: float = _REQUEST_TIMEOUT,
 ) -> dict[str, Any]:
     """Send a JSON-RPC message and read the response.
 
@@ -81,9 +111,26 @@ async def _send_and_receive(
 
     # Read lines until we get a response (skip notifications)
     while True:
-        line = await asyncio.wait_for(proc.stdout.readline(), timeout=timeout)
+        try:
+            line = await asyncio.wait_for(proc.stdout.readline(), timeout=timeout)
+        except TimeoutError as exc:
+            # A bare TimeoutError reports only that no line arrived. The server's
+            # own stderr — an import error, a failed extension registration, a
+            # traceback — is what distinguishes "crashed" from "still too slow",
+            # and it is otherwise discarded when the pipe is garbage-collected.
+            stderr_tail = await _drain_server_stderr(proc)
+            raise TimeoutError(
+                f"No JSON-RPC response for request id {expected_id} within {timeout}s. "
+                + (f"Server stderr:\n{stderr_tail}" if stderr_tail else "Server wrote nothing to stderr.")
+            ) from exc
         if not line:
-            raise ConnectionError("Server closed stdout")
+            # EOF: the server exited. Its stderr carries the reason.
+            stderr_tail = await _drain_server_stderr(proc)
+            raise ConnectionError(
+                "Server closed stdout before answering request "
+                f"id {expected_id}. "
+                + (f"Server stderr:\n{stderr_tail}" if stderr_tail else "Server wrote nothing to stderr.")
+            )
         line_str = line.decode("utf-8").strip()
         if not line_str:
             continue
@@ -148,7 +195,7 @@ async def _initialize_server(proc: asyncio.subprocess.Process) -> dict[str, Any]
             "clientInfo": {"name": "trace-test", "version": "1.0.0"},
         },
     )
-    response = await _send_and_receive(proc, init_request)
+    response = await _send_and_receive(proc, init_request, timeout=_HANDSHAKE_TIMEOUT)
 
     # Send initialized notification
     notif = _make_jsonrpc_notification("notifications/initialized")
