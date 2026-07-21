@@ -34,62 +34,60 @@ def _get_directory(directory: str | None = None) -> Path:
 
 
 def _store_path(project: str, directory: str | None = None) -> Path:
-    from trace_mcp.storage.json_file import sanitize_name
+    # Key the store file by the CANONICAL project key, so case/separator variants
+    # (TRACE vs trace, proj a vs proj_a) resolve to ONE file and a case-insensitive
+    # filesystem cannot silently merge two distinct projects (ADR-006). Extensions
+    # may import core (ADR-003); core never imports back.
+    from trace_mcp.project_identity import canonical_project_key
 
-    return _get_directory(directory) / f"{sanitize_name(project)}.json"
-
-
-_warned_no_filelock = False
+    return _get_directory(directory) / f"{canonical_project_key(project)}.json"
 
 
 @contextmanager
 def project_lock(project: str, directory: str | None = None) -> Iterator[None]:
-    """Per-project cross-process lock around a load→mutate→save span.
+    """Fail-closed per-project cross-process lock around a load→mutate→save span.
 
-    The shared knowledge store is
-    read-modify-write; without a lock, two TRACE sessions mutating the
-    SAME project concurrently silently lose one update (last-writer-wins).
-    The lock is keyed per-project (not whole-directory) so unrelated
-    projects never contend — important with many concurrent sessions.
+    The shared knowledge store is read-modify-write; without a lock, two TRACE
+    sessions mutating the SAME project concurrently silently lose one update
+    (last-writer-wins). The lock is keyed by the canonical store path so
+    case/separator variants of a project contend on ONE lock (matching the one
+    store file), and unrelated projects never contend.
 
-    Degrades gracefully: if the optional ``filelock`` dependency is not
-    installed, this is a no-op (with a one-time warning) rather than a
-    hard failure — a missing lock lib must not break the extension. On
-    lock-acquire timeout it proceeds (warned) rather than blocking an
-    interactive tool indefinitely.
+    **Fail closed** (INV-8): uses the dependency-free O_EXCL + PID-liveness lock
+    (``project_identity.exclusive_file_lock``), which raises ``TimeoutError``
+    rather than proceeding unlocked. The previous behavior — a no-op when the
+    optional ``filelock`` package was absent, and proceed-on-timeout — silently
+    reopened the lost-update window the lock exists to close, violating the
+    repo's own fail-closed standard.
     """
-    global _warned_no_filelock
-    try:
-        from filelock import FileLock, Timeout
-    except Exception:
-        if not _warned_no_filelock:
-            logger.warning(
-                "filelock not installed — knowledge-store writes are not "
-                "cross-process locked; concurrent multi-session writes to the "
-                "same project can lose updates. Install the trace-mcp 'all' or "
-                "'embeddings' extra (or `pip install filelock`) to enable."
-            )
-            _warned_no_filelock = True
-        yield
-        return
+    from trace_mcp.project_identity import exclusive_file_lock
 
     timeout = float(os.environ.get("TRACE_LOCK_TIMEOUT", "15"))
     lock_path = str(_store_path(project, directory)) + ".lock"
-    try:
-        with FileLock(lock_path, timeout=timeout):
-            yield
-    except Timeout:
-        logger.warning(
-            "Timed out after %.0fs acquiring knowledge-store lock for "
-            "project %r; proceeding without the lock to avoid blocking.",
-            timeout,
-            project,
-        )
+    with exclusive_file_lock(lock_path, timeout=timeout):
         yield
 
 
 class StoreLoadError(Exception):
     """Raised when a knowledge store file exists but cannot be parsed."""
+
+
+def _assert_store_identity(ks: KnowledgeStore, project: str, path: Path) -> None:
+    """Fail closed if a store's own project disagrees with the key it loaded as.
+
+    With canonical store paths a file should only ever be reached by a label that
+    canonicalizes to the same key. A mismatch means the file is misplaced or
+    tampered — it must not silently answer for another project.
+    """
+    from trace_mcp.project_identity import StoreIdentityError, canonical_project_key
+
+    if not ks.project:
+        return
+    if canonical_project_key(ks.project) != canonical_project_key(project):
+        raise StoreIdentityError(
+            f"knowledge store {path} declares project {ks.project!r} but was loaded as {project!r} "
+            "(different canonical keys) — refusing to answer for another project."
+        )
 
 
 def load_store(
@@ -108,7 +106,7 @@ def load_store(
         return KnowledgeStore(project=project)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        return KnowledgeStore.model_validate(raw)
+        ks = KnowledgeStore.model_validate(raw)
     except json.JSONDecodeError as exc:
         msg = f"Corrupt JSON in knowledge store {path}: {exc}"
         logger.warning(msg)
@@ -121,6 +119,8 @@ def load_store(
         if strict:
             raise StoreLoadError(msg) from exc
         return KnowledgeStore(project=project)
+    _assert_store_identity(ks, project, path)
+    return ks
 
 
 def save_store(store: KnowledgeStore, directory: str | None = None) -> Path:

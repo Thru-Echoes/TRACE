@@ -17,6 +17,7 @@ from mcp.server.fastmcp import FastMCP
 
 from trace_mcp import __version__
 from trace_mcp import extension_hooks as hooks
+from trace_mcp import project_identity as pident
 from trace_mcp.schema import (
     ActorType,
     AnnotationCategory,
@@ -48,6 +49,7 @@ mcp = FastMCP("trace")
 storage = JsonFileStorage()
 active_sessions: dict[str, Session] = {}
 _current_session_id: str | None = None
+_unpinned_warned = False
 
 
 def _compact(obj: Any) -> str:
@@ -59,6 +61,91 @@ def _compact(obj: Any) -> str:
     (``trace_export``) uses pretty JSON instead.
     """
     return json.dumps(obj, separators=(",", ":"), default=str)
+
+
+# ── Project-Pin Enforcement (ADR-006) ──────────────────────────────────────
+
+
+def _bound_project() -> pident.BoundProject | None:
+    """The process's ``TRACE_PROJECT`` pin (None if unpinned).
+
+    Warns once per process when unpinned so an operator running without
+    isolation sees it, without spamming every call.
+    """
+    global _unpinned_warned
+    bound = pident.get_bound_project()
+    if bound is None and not _unpinned_warned:
+        _unpinned_warned = True
+        logger.warning(
+            "TRACE_PROJECT is not set — this server is UNPINNED and cross-project isolation is "
+            "NOT enforced. Set TRACE_PROJECT in the server's .mcp.json env to enforce it."
+        )
+    return bound
+
+
+def _require_pin_error() -> str | None:
+    """Return an error string when ``TRACE_REQUIRE_PIN=1`` but the process is unpinned, else None.
+
+    Default off; flipped on fleet-wide only after the migration sweep (ADR-006 S9).
+    """
+    if os.environ.get("TRACE_REQUIRE_PIN") == "1" and pident.get_bound_project() is None:
+        return (
+            "Error: TRACE_REQUIRE_PIN=1 but this server is not pinned (TRACE_PROJECT unset). "
+            "Set TRACE_PROJECT in the server's .mcp.json env, or unset TRACE_REQUIRE_PIN."
+        )
+    return None
+
+
+def _resolve_start_project(project: str | None, bound: pident.BoundProject | None) -> str:
+    """Return the display label to record as ``metadata.project`` for a new session.
+
+    Pinned: ``None`` resolves to the pin's display label; a supplied label MUST
+    resolve to the pinned key. Unpinned: a non-empty label is required. A label
+    resolving to a reserved key (``auto``/``shared``) is rejected.
+
+    Raises ``ProjectKeyError`` on any violation (the caller surfaces it).
+    """
+    if bound is not None:
+        if bound.key in pident.RESERVED_KEYS:
+            raise pident.ProjectKeyError(f"server is pinned to reserved key '{bound.key}' — fix TRACE_PROJECT.")
+        if project is None:
+            return bound.display_label
+        supplied = pident.key_for_label(project)
+        if supplied != bound.key:
+            raise pident.ProjectKeyError(
+                f"this server is pinned to project '{bound.key}', but trace_start_session named "
+                f"{project!r} (key '{supplied or '<invalid>'}'). Omit the project argument to use the pin."
+            )
+        return project
+    if not project or not project.strip():
+        raise pident.ProjectKeyError(
+            "no project given and this server is not pinned (TRACE_PROJECT unset). "
+            'Pass project="<name>", or set TRACE_PROJECT in the server\'s .mcp.json env.'
+        )
+    if pident.canonical_project_key(project) in pident.RESERVED_KEYS:
+        raise pident.ProjectKeyError(f"{project!r} resolves to a reserved project key and cannot be used.")
+    return project
+
+
+def check_read_scope(session: Session) -> None:
+    """Fail-closed cross-project read guard for the id-only read/export tools.
+
+    When the process is pinned and *session* belongs to a different project,
+    raise ``ProjectMismatchError`` — unless ``TRACE_ALLOW_CROSS_PROJECT_READS=1``
+    (operator escape hatch). Cross-project WRITES are blocked separately (pointer
+    promotion + learn coherence), so a permitted read cannot be re-persisted into
+    the pinned store.
+    """
+    bound = pident.get_bound_project()
+    if bound is None or pident.session_matches_project(session.metadata, bound.key):
+        return
+    if os.environ.get("TRACE_ALLOW_CROSS_PROJECT_READS") == "1":
+        return
+    other = pident.session_project_key(session.metadata) or "<unknown>"
+    raise pident.ProjectMismatchError(
+        f"session belongs to project '{other}' but this server is pinned to '{bound.key}'. "
+        "Cross-project reads are denied; set TRACE_ALLOW_CROSS_PROJECT_READS=1 to override."
+    )
 
 
 # ── Auto-Session Infrastructure ────────────────────────────────────────────
@@ -74,7 +161,14 @@ async def _infer_project() -> str:
     the auto-created session (and any learnings later extracted from it) into
     that unrelated project's knowledge store. A stable sentinel keeps
     unattributed sessions out of a real project's provenance.
+
+    Precedence (ADR-006): the ``TRACE_PROJECT`` pin (its display label) >
+    ``TRACE_DEFAULT_PROJECT`` > the stable ``"auto"`` sentinel. A pinned process
+    therefore never falls into the ``"auto"`` pool.
     """
+    bound = pident.get_bound_project()
+    if bound is not None and bound.key not in pident.RESERVED_KEYS:
+        return bound.display_label
     return os.environ.get("TRACE_DEFAULT_PROJECT") or "auto"
 
 
@@ -93,6 +187,16 @@ async def _ensure_session(session_id: str | None) -> tuple[Session, str]:
     # 1. Explicit session_id provided — look it up (may raise)
     if session_id:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+        # Pointer-capture guard (ADR-006 bleed path 1): a pinned process must
+        # never use another project's session — otherwise pointer-less events
+        # would append into it. Denied regardless of status (fail closed).
+        bound = _bound_project()
+        if bound is not None and not pident.session_matches_project(session.metadata, bound.key):
+            other = pident.session_project_key(session.metadata) or "<unknown>"
+            raise pident.ProjectMismatchError(
+                f"session '{session_id}' belongs to project '{other}' but this server is pinned to "
+                f"'{bound.key}'. Refusing to use another project's session."
+            )
         # Only an ACTIVE session may become the new current session. An
         # explicit session_id targeting a completed session (e.g. resolving
         # a decision proposed in a prior, now-closed session) must not move
@@ -140,10 +244,12 @@ async def _ensure_session(session_id: str | None) -> tuple[Session, str]:
         f"Call trace_start_session with a proper description for better provenance."
     )
 
-    # Try to recall learnings for the auto-session
-    recalled = await hooks.recall_if_available(project, "", None, 3)
-    if recalled:
-        auto_msg += hooks.format_recalled_learnings(recalled)
+    # Recall learnings for the auto-session — but NOT for the reserved 'auto'
+    # quarantine pool, whose store commingles projects (ADR-006 D14).
+    if pident.key_for_label(project) not in pident.RESERVED_KEYS:
+        recalled = await hooks.recall_if_available(project, "", None, 3)
+        if recalled:
+            auto_msg += hooks.format_recalled_learnings(recalled)
 
     return session, auto_msg
 
@@ -153,7 +259,7 @@ async def _ensure_session(session_id: str | None) -> tuple[Session, str]:
 
 @mcp.tool()
 async def trace_start_session(
-    project: str,
+    project: str | None = None,
     experiment_id: str | None = None,
     description: str | None = None,
     participants: list[dict[str, Any]] | None = None,
@@ -173,19 +279,30 @@ async def trace_start_session(
     recall_learnings defaults to False to keep session start cheap and quiet.
     Set recall_learnings=True only when past learnings are likely relevant; it
     surfaces up to recall_limit (default 5) learnings based on description/tags.
+
+    project is OPTIONAL when the server is pinned (TRACE_PROJECT set): omit it to
+    use the pin. When unpinned, project is required. A supplied label must
+    resolve to the pinned project, and reserved keys (auto/shared) are rejected.
     """
     global _current_session_id
+    pin_error = _require_pin_error()
+    if pin_error:
+        return pin_error
+    try:
+        resolved = _resolve_start_project(project, _bound_project())
+    except pident.ProjectKeyError as e:
+        return f"Error: {e}"
     try:
         # Bounded orientation (reads <=25 files) on PRIOR state, computed before
         # creating the new session so it never counts the session being started.
         # This gives the model its bearings so it need not fan out to the query
         # tools in the opening interleaved-thinking turn.
-        brief = await storage.session_brief(project)
+        brief = await storage.session_brief(resolved)
 
         session = await session_tools.create_session(
             storage,
             active_sessions,
-            project=project,
+            project=resolved,
             experiment_id=experiment_id,
             description=description,
             participants=participants,
@@ -198,13 +315,13 @@ async def trace_start_session(
         # Recall is OFF by default (v0.4.2): opt-in only, rendered once.
         recalled_block = ""
         if recall_learnings and description:
-            recalled = await hooks.recall_if_available(project, description, tags, recall_limit)
+            recalled = await hooks.recall_if_available(resolved, description, tags, recall_limit)
             if recalled:
                 recalled_block = hooks.format_recalled_learnings(recalled)
 
         return session_tools.format_bootstrap_message(
             session_id=session.id,
-            project=project,
+            project=resolved,
             path=str(path),
             brief=brief,
             recalled_block=recalled_block,
@@ -241,7 +358,11 @@ async def trace_end_session(
         if extract_learnings:
             try:
                 session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
-                project = session.metadata.project
+                # Do NOT extract from the reserved 'auto' quarantine pool — its
+                # store commingles projects (ADR-006 D14). Leaving project None
+                # skips extraction below.
+                if pident.session_project_key(session.metadata) not in pident.RESERVED_KEYS:
+                    project = session.metadata.project
             except FileNotFoundError:
                 pass
 
@@ -326,6 +447,8 @@ async def trace_log_tool_call(
         session, auto_msg = await _ensure_session(session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
+    except pident.ProjectMismatchError as e:
+        return f"Error: {e}"
 
     prefix = f"{auto_msg}\n" if auto_msg else ""
     try:
@@ -379,6 +502,8 @@ async def trace_log_annotation(
         session, auto_msg = await _ensure_session(session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
+    except pident.ProjectMismatchError as e:
+        return f"Error: {e}"
 
     prefix = f"{auto_msg}\n" if auto_msg else ""
     try:
@@ -426,6 +551,8 @@ async def trace_log_contribution(
         session, auto_msg = await _ensure_session(session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
+    except pident.ProjectMismatchError as e:
+        return f"Error: {e}"
 
     prefix = f"{auto_msg}\n" if auto_msg else ""
     try:
@@ -471,6 +598,8 @@ async def trace_log_state_change(
         session, auto_msg = await _ensure_session(session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
+    except pident.ProjectMismatchError as e:
+        return f"Error: {e}"
 
     prefix = f"{auto_msg}\n" if auto_msg else ""
     try:
@@ -523,6 +652,8 @@ async def trace_propose_decision(
         session, auto_msg = await _ensure_session(session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
+    except pident.ProjectMismatchError as e:
+        return f"Error: {e}"
 
     prefix = f"{auto_msg}\n" if auto_msg else ""
     try:
@@ -573,6 +704,8 @@ async def trace_resolve_decision(
         session, auto_msg = await _ensure_session(session_id)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
+    except pident.ProjectMismatchError as e:
+        return f"Error: {e}"
 
     prefix = f"{auto_msg}\n" if auto_msg else ""
     try:
@@ -599,8 +732,11 @@ async def trace_get_session(session_id: str) -> str:
     """Get the full data for a TRACE session (excluding event details)."""
     try:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+        check_read_scope(session)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
+    except pident.ProjectMismatchError as e:
+        return f"Error: {e}"
 
     summary = query_tools.get_session_summary(session)
     return _compact(summary)
@@ -615,8 +751,11 @@ async def trace_get_events(
     """List events in a session, optionally filtered by type."""
     try:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+        check_read_scope(session)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
+    except pident.ProjectMismatchError as e:
+        return f"Error: {e}"
 
     events = query_tools.get_events(session, type_filter=type, limit=limit)
     return _compact(events)
@@ -631,8 +770,11 @@ async def trace_get_decisions(
     """List all decisions in a session, optionally filtered by disposition status and/or proposer type."""
     try:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+        check_read_scope(session)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
+    except pident.ProjectMismatchError as e:
+        return f"Error: {e}"
 
     decisions = query_tools.get_decisions(session, disposition=disposition, proposed_by_type=proposed_by_type)
     return _compact(decisions)
@@ -649,8 +791,11 @@ async def trace_get_decision_chain(
     """
     try:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+        check_read_scope(session)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
+    except pident.ProjectMismatchError as e:
+        return f"Error: {e}"
 
     chain = query_tools.get_decision_chain(session, event_id=event_id)
     if not chain:
@@ -672,8 +817,11 @@ async def trace_search(
     """
     try:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+        check_read_scope(session)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
+    except pident.ProjectMismatchError as e:
+        return f"Error: {e}"
 
     all_results = query_tools.search_events(session, query=query)
     cap = max(1, min(limit, query_tools.MAX_SEARCH_LIMIT))
@@ -744,8 +892,11 @@ async def trace_export(
     """
     try:
         session = await session_tools.get_or_load_session(storage, active_sessions, session_id)
+        check_read_scope(session)
     except FileNotFoundError:
         return f"Error: Session '{session_id}' not found."
+    except pident.ProjectMismatchError as e:
+        return f"Error: {e}"
 
     try:
         return export_tools.export_session(session, format=format, pretty=pretty)

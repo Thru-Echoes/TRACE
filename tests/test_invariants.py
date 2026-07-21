@@ -102,23 +102,29 @@ def test_inv3_resolve_decision_validates_before_write() -> None:
     )
 
 
-# ── INV-4: project scoping uses ONE (exact) predicate across core + hooks ──
-# The core query filters (list_sessions, session_brief) must match projects
-# EXACTLY (metadata.project == project) — the same predicate the adapter hooks
-# use — never a case-insensitive SUBSTRING match, which silently merged distinct
-# projects (e.g. "trace" pulling in "trace-mcp" and "TRACE-research"). See INV-4.
+# ── INV-4: project scoping matches by CANONICAL KEY across core query filters ──
+# The core query filters (list_sessions, session_brief) must match projects by
+# canonical key (project_identity.session_project_key), never a case-insensitive
+# SUBSTRING match (which merged distinct projects) and never raw case-sensitive
+# label equality (which SPLITS one project across drifted labels — TRACE vs
+# trace-mcp, coeqwal vs COEQWAL). See INV-4 and ADR-006.
 
 
-def test_inv4_project_filter_is_exact_not_substring() -> None:
+def test_inv4_project_filter_uses_canonical_key() -> None:
     source = (SRC / "storage" / "json_file.py").read_text(encoding="utf-8")
     assert "not in proj.lower()" not in source, (
         "INV-4 regression: json_file.py filters projects by case-insensitive "
-        "SUBSTRING again — core must match projects EXACTLY (proj != project), "
-        "the same predicate the adapter hooks use, or distinct projects merge."
+        "SUBSTRING again — match by canonical key, or distinct projects merge."
     )
-    assert source.count("proj != project") >= 2, (
-        "INV-4: both list_sessions and session_brief must filter by exact project "
-        "match (proj != project) so core and hooks resolve one session set."
+    assert "proj != project" not in source, (
+        "INV-4 regression: json_file.py compares RAW project labels again — a "
+        "display-label variant would split one project. Match by canonical key "
+        "(session_project_key(meta) != query_key)."
+    )
+    assert source.count("session_project_key(meta) != query_key") >= 2, (
+        "INV-4: both list_sessions and session_brief must filter by canonical "
+        "project key (session_project_key(meta) != query_key) so drifted labels "
+        "resolve to one project."
     )
 
 
@@ -191,4 +197,111 @@ def test_inv5_every_egress_site_attests_first() -> None:
     assert not missing, (
         f"INV-5 violation: egress call sites that never call attest_egress(): {sorted(missing)} — "
         "cloud content would leave the machine with no ledger record."
+    )
+
+
+# ── INV-7: every project-registry WRITE routes through locked_registry ────
+# The registry's sole serializer is project_identity._atomic_write_registry; it
+# must be called ONLY from locked_registry, which holds the fail-closed lock and
+# writes atomically (temp + os.replace). A new caller elsewhere is an
+# unlocked/non-atomic registry write — the lost-update/drift failure the lock
+# exists to prevent.
+INV7_REGISTRY_WRITE_SITES = {
+    ("project_identity.py", "locked_registry"),
+}
+
+
+def test_inv7_registry_write_only_via_locked_registry() -> None:
+    callers = _functions_calling("_atomic_write_registry")
+    assert callers, (
+        "INV-7 positive control failed: no caller of _atomic_write_registry found — "
+        "the guard is blind (was it renamed?)."
+    )
+    unregistered = callers - INV7_REGISTRY_WRITE_SITES
+    assert not unregistered, (
+        "INV-7 violation (docs/INVARIANTS.md): these functions write the project registry "
+        f"outside locked_registry: {sorted(unregistered)}. Route the write through "
+        "project_identity.locked_registry (fail-closed lock + atomic write)."
+    )
+    stale = INV7_REGISTRY_WRITE_SITES - callers
+    assert not stale, f"INV-7 registry is stale — registered writers with no call anymore: {sorted(stale)}."
+
+
+# ── INV-6: (project, session) coherence for learn extraction ──────────────
+# Every function in extensions/learn whose signature carries BOTH `project` and
+# `session_id` (i.e. it extracts a session into a project's store) MUST call
+# project_identity.validate_project_session first — else project B's store is
+# written from project A's session and shipped to the cloud as dedup context.
+def _project_session_functions() -> set[tuple[str, str]]:
+    found: set[tuple[str, str]] = set()
+    learn = SRC / "extensions" / "learn"
+    for path in sorted(learn.rglob("*.py")):
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                params = {a.arg for a in node.args.args}
+                if "project" in params and "session_id" in params:
+                    found.add((_rel(path), node.name))
+    return found
+
+
+def test_inv6_project_session_sites_validate_coherence() -> None:
+    sites = _project_session_functions()
+    assert sites, (
+        "INV-6 positive control failed: no (project, session_id) functions found in "
+        "extensions/learn — the AST pattern no longer matches; the guard is blind."
+    )
+    validators = _functions_calling("validate_project_session")
+    missing = sites - validators
+    assert not missing, (
+        "INV-6 violation (docs/INVARIANTS.md): these learn functions take both a project "
+        f"and a session_id but never call validate_project_session: {sorted(missing)}. "
+        "A session could be extracted into another project's store."
+    )
+
+
+# ── INV-8: the knowledge-store lock is fail-closed and dependency-free ────
+# project_lock must use the O_EXCL + PID-liveness lock (raises on timeout, no
+# optional filelock dependency, no warn-and-proceed) — the same fail-closed
+# standard as the session lock (INV-1).
+def test_inv8_knowledge_lock_is_fail_closed_and_dependency_free() -> None:
+    source = (SRC / "extensions" / "learn" / "store.py").read_text(encoding="utf-8")
+    assert "import filelock" not in source and "from filelock" not in source, (
+        "INV-8 regression: store.py imports the optional 'filelock' package again — the "
+        "knowledge-store lock must be the dependency-free fail-closed exclusive_file_lock."
+    )
+    assert "exclusive_file_lock" in source, (
+        "INV-8: project_lock must acquire project_identity.exclusive_file_lock (fail-closed, "
+        "raises TimeoutError rather than proceeding unlocked)."
+    )
+
+
+# ── INV-9: every learn tool guards its free-form project label ────────────
+# Each @mcp.tool in extensions/learn taking a `project` param MUST call
+# _reserved_project_error at entry, so a reserved-key (auto/shared) or degenerate
+# label cannot reach a knowledge store through a tool.
+def _learn_tool_functions_with_project() -> set[tuple[str, str]]:
+    found: set[tuple[str, str]] = set()
+    path = SRC / "extensions" / "learn" / "__init__.py"
+    tree = ast.parse(path.read_text(), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            is_tool = any(
+                isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "tool"
+                for d in node.decorator_list
+            )
+            params = {a.arg for a in node.args.args}
+            if is_tool and "project" in params:
+                found.add((_rel(path), node.name))
+    return found
+
+
+def test_inv9_learn_tools_guard_reserved_projects() -> None:
+    tools = _learn_tool_functions_with_project()
+    assert tools, "INV-9 positive control: no @mcp.tool with a project param found — pattern rot."
+    guards = _functions_calling("_reserved_project_error")
+    missing = tools - guards
+    assert not missing, (
+        "INV-9 violation (docs/INVARIANTS.md): these learn tools take a free-form project but do not "
+        f"call _reserved_project_error at entry: {sorted(missing)}. A reserved-key label could reach a store."
     )

@@ -60,16 +60,18 @@ class TestLoadStore:
 
     def test_invalid_schema_returns_empty(self, tmp_path):
         """Valid JSON but wrong schema → fresh store."""
-        path = tmp_path / "bad_schema.json"
+        # File name must be the canonical store path (ADR-006: stores are
+        # keyed by canonical project key; 'bad-schema' is already canonical).
+        path = tmp_path / "bad-schema.json"
         path.write_text('{"not_a_valid_field": 42}', encoding="utf-8")
-        ks = load_store("bad_schema", directory=str(tmp_path))
+        ks = load_store("bad-schema", directory=str(tmp_path))
         assert ks.learnings == []
 
     def test_invalid_schema_strict_raises(self, tmp_path):
-        path = tmp_path / "bad_schema.json"
+        path = tmp_path / "bad-schema.json"
         path.write_text('{"not_a_valid_field": 42}', encoding="utf-8")
         with pytest.raises(StoreLoadError, match="Failed to validate"):
-            load_store("bad_schema", directory=str(tmp_path), strict=True)
+            load_store("bad-schema", directory=str(tmp_path), strict=True)
 
 
 class TestSaveStore:
@@ -269,7 +271,9 @@ class TestEnvironmentVariable:
         add_learning(ks, content="env override")
         # Pass directory=None so it reads from env var
         save_store(ks, directory=None)
-        assert (custom_dir / "env_test.json").exists()
+        # 'env_test' canonicalizes to 'env-test' (underscore folds), so the
+        # store file is env-test.json (ADR-006 canonical keying).
+        assert (custom_dir / "env-test.json").exists()
         loaded = load_store("env_test", directory=None)
         assert len(loaded.learnings) == 1
 
