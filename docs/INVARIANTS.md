@@ -205,6 +205,26 @@ temp file, a caller exception writes nothing).
 
 ---
 
+## INV-9 — Every learn tool guards its free-form project label  · ENFORCED
+
+**Statement.** Each `@mcp.tool` in `extensions/learn` that takes a `project`
+parameter calls `_reserved_project_error` at entry, so a reserved-key
+(`auto`/`shared`) or degenerate label returns an error and never reaches a
+knowledge store. Combined with the canonical `_store_path`, a free-form label
+can neither open a quarantine store nor create a mis-keyed one.
+
+**Sites:** `src/trace_mcp/extensions/learn/__init__.py` (`trace_learn_recall`,
+`trace_learn_add`, `trace_learn_list`, `trace_learn_forget`,
+`trace_learn_extract`).
+
+**Guard:** `tests/test_invariants.py :: test_inv9_learn_tools_guard_reserved_projects`
+(AST enumeration — a new learn tool with a `project` param that does not call
+`_reserved_project_error` fails, with a positive control against pattern rot).
+
+**Status.** ENFORCED.
+
+---
+
 *To add an invariant: give it the next `INV-N`, state it, enumerate the
 exhaustive site-set, name the guard + test, and add a check to
 `tests/test_invariants.py` that fails when a new site violates it.*

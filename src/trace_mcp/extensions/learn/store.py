@@ -72,6 +72,24 @@ class StoreLoadError(Exception):
     """Raised when a knowledge store file exists but cannot be parsed."""
 
 
+def _assert_store_identity(ks: KnowledgeStore, project: str, path: Path) -> None:
+    """Fail closed if a store's own project disagrees with the key it loaded as.
+
+    With canonical store paths a file should only ever be reached by a label that
+    canonicalizes to the same key. A mismatch means the file is misplaced or
+    tampered — it must not silently answer for another project.
+    """
+    from trace_mcp.project_identity import StoreIdentityError, canonical_project_key
+
+    if not ks.project:
+        return
+    if canonical_project_key(ks.project) != canonical_project_key(project):
+        raise StoreIdentityError(
+            f"knowledge store {path} declares project {ks.project!r} but was loaded as {project!r} "
+            "(different canonical keys) — refusing to answer for another project."
+        )
+
+
 def load_store(
     project: str,
     directory: str | None = None,
@@ -88,7 +106,7 @@ def load_store(
         return KnowledgeStore(project=project)
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
-        return KnowledgeStore.model_validate(raw)
+        ks = KnowledgeStore.model_validate(raw)
     except json.JSONDecodeError as exc:
         msg = f"Corrupt JSON in knowledge store {path}: {exc}"
         logger.warning(msg)
@@ -101,6 +119,8 @@ def load_store(
         if strict:
             raise StoreLoadError(msg) from exc
         return KnowledgeStore(project=project)
+    _assert_store_identity(ks, project, path)
+    return ks
 
 
 def save_store(store: KnowledgeStore, directory: str | None = None) -> Path:

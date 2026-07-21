@@ -274,3 +274,34 @@ def test_inv8_knowledge_lock_is_fail_closed_and_dependency_free() -> None:
         "INV-8: project_lock must acquire project_identity.exclusive_file_lock (fail-closed, "
         "raises TimeoutError rather than proceeding unlocked)."
     )
+
+
+# ── INV-9: every learn tool guards its free-form project label ────────────
+# Each @mcp.tool in extensions/learn taking a `project` param MUST call
+# _reserved_project_error at entry, so a reserved-key (auto/shared) or degenerate
+# label cannot reach a knowledge store through a tool.
+def _learn_tool_functions_with_project() -> set[tuple[str, str]]:
+    found: set[tuple[str, str]] = set()
+    path = SRC / "extensions" / "learn" / "__init__.py"
+    tree = ast.parse(path.read_text(), filename=str(path))
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            is_tool = any(
+                isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "tool"
+                for d in node.decorator_list
+            )
+            params = {a.arg for a in node.args.args}
+            if is_tool and "project" in params:
+                found.add((_rel(path), node.name))
+    return found
+
+
+def test_inv9_learn_tools_guard_reserved_projects() -> None:
+    tools = _learn_tool_functions_with_project()
+    assert tools, "INV-9 positive control: no @mcp.tool with a project param found — pattern rot."
+    guards = _functions_calling("_reserved_project_error")
+    missing = tools - guards
+    assert not missing, (
+        "INV-9 violation (docs/INVARIANTS.md): these learn tools take a free-form project but do not "
+        f"call _reserved_project_error at entry: {sorted(missing)}. A reserved-key label could reach a store."
+    )
