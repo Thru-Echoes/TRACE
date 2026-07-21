@@ -78,24 +78,29 @@ the parameter as a `Literal`.
 
 ---
 
-## INV-4 — Project scoping uses ONE comparison rule across core and hooks  · CLOSED
+## INV-4 — Project scoping matches by canonical key in the core query filters  · ENFORCED
 
-**Statement.** A project name must resolve to the **same** session set in the
-core query layer and in the adapter hooks. The single shared predicate is
-**exact, case-sensitive** match (`metadata.project == project`). A
-case-insensitive **substring** match must never be used, as it silently merges
-distinct projects (e.g. `trace_project_summary("trace")` pulling in `trace-mcp`
-and `TRACE-research`).
+**Statement.** The core query filters (`list_sessions`, `session_brief`) resolve
+a project by **canonical key** (`project_identity.session_project_key`), so
+drifted display labels resolve to one project: case variants
+(`coeqwal`/`COEQWAL`) merge via `canonical_project_key`, and rename aliases
+(`TRACE`→`trace-mcp`) merge via the registry alias table. Two predicates are
+forbidden — a case-insensitive **substring** match (merges distinct projects)
+and **raw case-sensitive label equality** (splits one project across drifted
+labels). The adapter hooks are aligned to the same canonical rule in the
+surfaces step (ADR-006 S5); until then they still match the raw label (a
+narrower pre-migration session set, not a core-tool correctness gap).
 
 **Sites:** `src/trace_mcp/storage/json_file.py` (`list_sessions`,
-`session_brief`); `src/trace_mcp/adapters/claude_code/assets/hooks/*.sh`.
+`session_brief`); `src/trace_mcp/adapters/claude_code/assets/hooks/*.sh`
+(aligned in S5).
 
-**Guard:** `tests/test_invariants.py :: test_inv4_project_filter_is_exact_not_substring`
-fails if the substring idiom reappears at either core filter site; the exact
-semantics are pinned by `tests/test_storage.py :: test_list_filter_by_project`.
+**Guard:** `tests/test_invariants.py :: test_inv4_project_filter_uses_canonical_key`
+fails if the substring idiom or raw-label equality reappears at either core
+filter site, and requires the canonical predicate. Behavior pinned by
+`tests/test_storage.py`.
 
-**Status.** CLOSED — core (`list_sessions`, `session_brief`) now uses the same
-exact-match predicate as the hooks, so both layers resolve one session set.
+**Status.** ENFORCED (core query filters; hooks aligned in S5).
 
 ---
 
@@ -126,6 +131,95 @@ control against pattern rot) and `:: test_inv5_every_egress_site_attests_first`
 (each registered site must call `attest_egress`). Behavior pinned by
 `tests/test_egress_ledger.py` (pre-call ordering; no egress when the ledger is
 unwritable).
+
+**Status.** ENFORCED.
+
+---
+
+## INV-6 — (project, session) coherence before a learn extraction  · ENFORCED
+
+**Statement.** Every function in `extensions/learn` whose signature carries both
+a `project` and a `session_id` (it extracts a session into a project's store)
+MUST call `project_identity.validate_project_session` first. Otherwise a session
+belonging to project A can be extracted into project B's knowledge store — and,
+under a cloud backend, project B's entire store leaves the machine as
+de-duplication context alongside project A's events (the worst cross-project
+bleed). The check fails closed (`ProjectMismatchError` / `ProjectKeyError`).
+
+**Sites:** `src/trace_mcp/extensions/learn/__init__.py` (`_extract_hook`,
+`trace_learn_extract`).
+
+**Guard:** `tests/test_invariants.py :: test_inv6_project_session_sites_validate_coherence`
+(AST enumeration — a new `(project, session_id)` learn function that does not
+call `validate_project_session` fails, with a positive control against pattern
+rot). Behavior pinned by `tests/test_learn_containment.py`.
+
+**Status.** ENFORCED.
+
+---
+
+## INV-8 — The knowledge-store lock is fail-closed and dependency-free  · ENFORCED
+
+**Statement.** `extensions/learn/store.py :: project_lock` acquires the
+dependency-free O_EXCL + PID-liveness lock (`project_identity.exclusive_file_lock`),
+keyed by the canonical store path, and raises `TimeoutError` rather than
+proceeding unlocked. The previous behavior — a silent no-op when the optional
+`filelock` package was absent, and proceed-on-timeout — reopened the lost-update
+window the lock exists to close, violating the same fail-closed standard as the
+session lock (INV-1).
+
+**Sites:** `src/trace_mcp/extensions/learn/store.py` (`project_lock`, keyed by
+`_store_path`, the canonical store path).
+
+**Guard:** `tests/test_invariants.py :: test_inv8_knowledge_lock_is_fail_closed_and_dependency_free`
+(no `filelock` import; `project_lock` uses `exclusive_file_lock`). Behavior
+pinned by `tests/test_learn_containment.py` (lock timeout raises).
+
+**Status.** ENFORCED.
+
+---
+
+## INV-7 — Every project-registry write is fail-closed, locked, and atomic  · ENFORCED
+
+**Statement.** All mutations of the project registry (`~/.trace/projects.json`,
+override `TRACE_REGISTRY_PATH`) go through `project_identity.locked_registry`,
+which acquires the fail-closed exclusive lock (`O_EXCL` + PID-liveness steal,
+raising `TimeoutError` rather than writing unlocked), yields the freshest
+disk-truth registry, validates alias uniqueness, and persists atomically
+(temp + `os.replace`) only on clean exit. A corrupt or unknown-major registry
+raises `RegistryUnavailableError` on load and is **never** overwritten — an
+unreadable registry is fail-closed, not silently reset (the same reasoning as
+INV-1). The single serializer is `project_identity._atomic_write_registry`.
+
+**Sites:** writer `src/trace_mcp/project_identity.py` (`_atomic_write_registry`,
+called only by `locked_registry`).
+
+**Guard:** `tests/test_invariants.py :: test_inv7_registry_write_only_via_locked_registry`
+(AST enumeration — a new caller of `_atomic_write_registry` outside
+`locked_registry` fails until registered, with a positive control against
+pattern rot). Behavior pinned by `tests/test_project_identity.py` (lock timeout
+raises, dead-holder steal, corrupt/unknown-major refusal, atomic write leaves no
+temp file, a caller exception writes nothing).
+
+**Status.** ENFORCED.
+
+---
+
+## INV-9 — Every learn tool guards its free-form project label  · ENFORCED
+
+**Statement.** Each `@mcp.tool` in `extensions/learn` that takes a `project`
+parameter calls `_reserved_project_error` at entry, so a reserved-key
+(`auto`/`shared`) or degenerate label returns an error and never reaches a
+knowledge store. Combined with the canonical `_store_path`, a free-form label
+can neither open a quarantine store nor create a mis-keyed one.
+
+**Sites:** `src/trace_mcp/extensions/learn/__init__.py` (`trace_learn_recall`,
+`trace_learn_add`, `trace_learn_list`, `trace_learn_forget`,
+`trace_learn_extract`).
+
+**Guard:** `tests/test_invariants.py :: test_inv9_learn_tools_guard_reserved_projects`
+(AST enumeration — a new learn tool with a `project` param that does not call
+`_reserved_project_error` fails, with a positive control against pattern rot).
 
 **Status.** ENFORCED.
 

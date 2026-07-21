@@ -227,3 +227,43 @@ class TestCorruptSessionJson:
         path.write_text('{"id": "trace_20260205_abc', encoding="utf-8")
         with pytest.raises(json.JSONDecodeError):
             await storage.get_session("trace_20260205_abc123")
+
+
+class TestCanonicalProjectMatching:
+    """INV-4: query filters resolve drifted display labels to one canonical project."""
+
+    async def test_case_variant_labels_merge(self, storage: JsonFileStorage) -> None:
+        await storage.create_session(Session(id="trace_20260720_c1", metadata=SessionMetadata(project="COEQWAL")))
+        await storage.create_session(Session(id="trace_20260720_c2", metadata=SessionMetadata(project="coeqwal")))
+        # Both case variants resolve to the one key "coeqwal" (canonical merge).
+        assert len(await storage.list_sessions(project="coeqwal")) == 2
+        assert len(await storage.list_sessions(project="COEQWAL")) == 2
+        brief = await storage.session_brief(project="Coeqwal")
+        assert brief["matched"] == 2
+
+    async def test_distinct_canonical_keys_do_not_merge(self, storage: JsonFileStorage) -> None:
+        await storage.create_session(
+            Session(id="trace_20260720_d1", metadata=SessionMetadata(project="climate-analysis"))
+        )
+        await storage.create_session(
+            Session(id="trace_20260720_d2", metadata=SessionMetadata(project="materials-science"))
+        )
+        assert len(await storage.list_sessions(project="climate-analysis")) == 1
+        assert await storage.list_sessions(project="climate") == []  # not a substring match
+
+    async def test_registry_alias_merges_rename_drift(
+        self, storage: JsonFileStorage, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import trace_mcp.project_identity as pi
+
+        monkeypatch.setenv("TRACE_REGISTRY_PATH", str(tmp_path / "reg.json"))
+        pi._reset_registry_cache()
+        with pi.locked_registry() as reg:
+            reg.projects["trace-mcp"] = pi.ProjectEntry(key="trace-mcp", display_label="trace-mcp", aliases=["TRACE"])
+        pi._reset_registry_cache()
+
+        await storage.create_session(Session(id="trace_20260720_t1", metadata=SessionMetadata(project="TRACE")))
+        await storage.create_session(Session(id="trace_20260720_t2", metadata=SessionMetadata(project="trace-mcp")))
+        # The alias table merges the rename pair (TRACE -> trace-mcp) into one project.
+        assert len(await storage.list_sessions(project="trace-mcp")) == 2
+        pi._reset_registry_cache()

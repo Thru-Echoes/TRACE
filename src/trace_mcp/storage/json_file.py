@@ -253,7 +253,14 @@ class JsonFileStorage(TraceStorage):
         return Session.model_validate(raw)
 
     async def list_sessions(self, project: str | None = None, limit: int = 50) -> list[dict[str, Any]]:
+        # INV-4: filter by CANONICAL project key (not raw case-sensitive label),
+        # so display-label drift (TRACE vs trace-mcp, coeqwal vs COEQWAL) resolves
+        # to ONE project and cannot split one project or merge two. Lazy import
+        # avoids a json_file <-> project_identity module cycle.
+        from trace_mcp.project_identity import key_for_label, session_project_key
+
         self._ensure_dir()
+        query_key = key_for_label(project) if project else None
         summaries: list[dict[str, Any]] = []
         files = sorted(self._dir.glob("trace_*.json"), reverse=True)
         for path in files:
@@ -262,13 +269,10 @@ class JsonFileStorage(TraceStorage):
             try:
                 with open(path) as f:
                     raw = json.load(f)
-                proj = raw.get("metadata", {}).get("project", "")
-                # INV-4: EXACT (case-sensitive) project match — the same predicate
-                # the adapter hooks use (metadata.project == project). A substring
-                # match here silently merged distinct projects (e.g. "trace" pulling
-                # in "trace-mcp" and "TRACE-research").
-                if project and proj != project:
+                meta = raw.get("metadata", {})
+                if query_key is not None and session_project_key(meta) != query_key:
                     continue
+                proj = meta.get("project", "")
                 summaries.append(
                     {
                         "id": raw.get("id", path.stem),
@@ -297,7 +301,12 @@ class JsonFileStorage(TraceStorage):
 
         Side effects: reads up to ``scan_cap`` files from the sessions directory.
         """
+        # INV-4: canonical-key match, same as list_sessions (lazy import breaks
+        # the json_file <-> project_identity cycle).
+        from trace_mcp.project_identity import key_for_label, session_project_key
+
         self._ensure_dir()
+        query_key = key_for_label(project) if project else None
         files = sorted(self._dir.glob("trace_*.json"), reverse=True)
         total = len(files)
         scanned = 0
@@ -310,11 +319,10 @@ class JsonFileStorage(TraceStorage):
                     raw = json.load(f)
             except (json.JSONDecodeError, OSError):
                 continue
-            proj = raw.get("metadata", {}).get("project", "")
-            # INV-4: EXACT (case-sensitive) project match — same predicate as the
-            # adapter hooks and list_sessions above (no substring merging).
-            if project and proj != project:
+            meta = raw.get("metadata", {})
+            if query_key is not None and session_project_key(meta) != query_key:
                 continue
+            proj = meta.get("project", "")
             matched += 1
             if most_recent is None:
                 most_recent = {

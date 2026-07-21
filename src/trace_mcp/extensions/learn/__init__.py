@@ -14,6 +14,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, cast, get_args
 
+from trace_mcp import project_identity as pident
 from trace_mcp.extension_hooks import register_extract_hook, register_recall_hook
 from trace_mcp.extensions.learn import extraction, matching, store
 from trace_mcp.extensions.learn.config import load_config
@@ -29,6 +30,22 @@ if TYPE_CHECKING:
     from trace_mcp.storage.base import TraceStorage
 
 logger = logging.getLogger(__name__)
+
+
+def _reserved_project_error(project: str) -> str | None:
+    """JSON error if *project* is degenerate or resolves to a reserved key, else None.
+
+    The usage-ban half of ADR-006 (INV-9): reserved keys (auto/shared) are
+    quarantine stores, not projects a learn tool may operate on. Every learn
+    tool calls this at entry so a free-form label cannot reach a reserved store.
+    """
+    try:
+        key = pident.canonical_project_key(project)
+    except pident.ProjectKeyError as exc:
+        return json.dumps({"error": str(exc), "project": project})
+    if key in pident.RESERVED_KEYS:
+        return json.dumps({"error": f"'{project}' is a reserved project key and cannot be used", "project": project})
+    return None
 
 
 def register(mcp: FastMCP, storage: TraceStorage) -> None:
@@ -125,6 +142,10 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             return results
 
     async def _extract_hook(project: str, session_id: str) -> list[str]:
+        # INV-6: refuse to extract a session into a DIFFERENT project's store
+        # (closes the cross-wired-extract bleed, which would also send one
+        # project's store to the cloud as another's dedup context).
+        await pident.validate_project_session(storage, project, session_id)
         with store.project_lock(project):  # lock the full read-modify-write span
             ks = store.load_store(project)
             sess = await storage.get_session(session_id)
@@ -159,6 +180,9 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         keep recall fully local.
         """
         try:
+            guard = _reserved_project_error(project)
+            if guard:
+                return guard
             # Lock the full span (recall may backfill
             # embeddings and save — a read-modify-write).
             with store.project_lock(project):
@@ -216,6 +240,9 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         content is embedded via OpenAI. Set ``TRACE_LOCAL_ONLY=1`` for local-only.
         """
         try:
+            guard = _reserved_project_error(project)
+            if guard:
+                return guard
             if category not in _VALID_CATEGORIES:
                 return json.dumps(
                     {
@@ -285,6 +312,9 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         Optionally filter by category (learning, correction, gotcha, decision).
         """
         try:
+            guard = _reserved_project_error(project)
+            if guard:
+                return guard
             ks = store.load_store(project)
             results = store.list_learnings(ks, category=category)
             return json.dumps({"project": project, "learnings": results, "total": len(results)})
@@ -302,6 +332,9 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         Use this when a learning is outdated, wrong, or no longer relevant.
         """
         try:
+            guard = _reserved_project_error(project)
+            if guard:
+                return guard
             with store.project_lock(project):  # lock the full read-modify-write span
                 ks = store.load_store(project)
                 removed = store.remove_learning(ks, learning_id)
@@ -336,6 +369,14 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         Otherwise, extracts from all sessions for the project.
         """
         try:
+            guard = _reserved_project_error(project)
+            if guard:
+                return guard
+            # INV-6: when extracting a specific session, refuse if it belongs to a
+            # different project — the cross-wired-extract bleed (would send this
+            # project's whole store to the cloud alongside another's events).
+            if session_id:
+                await pident.validate_project_session(storage, project, session_id)
             # Lock the full multi-session extract→embed→save span.
             with store.project_lock(project):
                 ks = store.load_store(project)
@@ -370,6 +411,10 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                         "total_learnings": len(ks.learnings),
                     }
                 )
+        except (pident.ProjectMismatchError, pident.ProjectKeyError) as exc:
+            return json.dumps(
+                {"error": "project/session coherence check failed", "detail": str(exc), "project": project}
+            )
         except Exception as exc:
             from trace_mcp.extensions.learn.config import LLMFallbackError
 
