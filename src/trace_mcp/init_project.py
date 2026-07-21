@@ -152,8 +152,7 @@ def _write_mcp_json(project_dir: Path) -> str:
             config = json.loads(mcp_path.read_text())
         except json.JSONDecodeError as exc:
             raise TraceInitError(
-                f"{mcp_path} is not valid JSON ({exc}); refusing to overwrite it. "
-                "Fix or remove the file and re-run."
+                f"{mcp_path} is not valid JSON ({exc}); refusing to overwrite it. Fix or remove the file and re-run."
             ) from exc
         if not isinstance(config, dict):
             raise TraceInitError(

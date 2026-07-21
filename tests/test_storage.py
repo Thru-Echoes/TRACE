@@ -242,8 +242,12 @@ class TestCanonicalProjectMatching:
         assert brief["matched"] == 2
 
     async def test_distinct_canonical_keys_do_not_merge(self, storage: JsonFileStorage) -> None:
-        await storage.create_session(Session(id="trace_20260720_d1", metadata=SessionMetadata(project="climate-analysis")))
-        await storage.create_session(Session(id="trace_20260720_d2", metadata=SessionMetadata(project="materials-science")))
+        await storage.create_session(
+            Session(id="trace_20260720_d1", metadata=SessionMetadata(project="climate-analysis"))
+        )
+        await storage.create_session(
+            Session(id="trace_20260720_d2", metadata=SessionMetadata(project="materials-science"))
+        )
         assert len(await storage.list_sessions(project="climate-analysis")) == 1
         assert await storage.list_sessions(project="climate") == []  # not a substring match
 
@@ -255,9 +259,7 @@ class TestCanonicalProjectMatching:
         monkeypatch.setenv("TRACE_REGISTRY_PATH", str(tmp_path / "reg.json"))
         pi._reset_registry_cache()
         with pi.locked_registry() as reg:
-            reg.projects["trace-mcp"] = pi.ProjectEntry(
-                key="trace-mcp", display_label="trace-mcp", aliases=["TRACE"]
-            )
+            reg.projects["trace-mcp"] = pi.ProjectEntry(key="trace-mcp", display_label="trace-mcp", aliases=["TRACE"])
         pi._reset_registry_cache()
 
         await storage.create_session(Session(id="trace_20260720_t1", metadata=SessionMetadata(project="TRACE")))

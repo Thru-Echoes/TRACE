@@ -114,9 +114,7 @@ async def test_pointer_capture_denied_in_logging(monkeypatch: pytest.MonkeyPatch
     _enroll("waggle", "chemmasters")
     await _make_foreign_session("trace_20260720_p1", "chemmasters")
     monkeypatch.setenv("TRACE_PROJECT", "waggle")
-    result = await server.trace_log_annotation(
-        category="observation", content="x", session_id="trace_20260720_p1"
-    )
+    result = await server.trace_log_annotation(category="observation", content="x", session_id="trace_20260720_p1")
     assert "Error" in result and "another project" in result
     # The foreign session must NOT have become the current pointer.
     assert server._current_session_id is None
@@ -139,9 +137,7 @@ async def test_end_auto_session_skips_extraction(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(server.hooks, "extract_if_available", _spy_extract)
     # An unpinned auto session (project == "auto").
-    await server.storage.create_session(
-        Session(id="trace_20260720_a1", metadata=SessionMetadata(project="auto"))
-    )
+    await server.storage.create_session(Session(id="trace_20260720_a1", metadata=SessionMetadata(project="auto")))
     result = await server.trace_end_session("trace_20260720_a1", summary="done", write_scratchpad=False)
     assert "Error" not in result
     assert called == []  # extraction gated off for the reserved quarantine pool
@@ -160,9 +156,7 @@ async def test_end_real_session_still_extracts(monkeypatch: pytest.MonkeyPatch) 
         return _R()
 
     monkeypatch.setattr(server.hooks, "extract_if_available", _spy_extract)
-    await server.storage.create_session(
-        Session(id="trace_20260720_a2", metadata=SessionMetadata(project="waggle"))
-    )
+    await server.storage.create_session(Session(id="trace_20260720_a2", metadata=SessionMetadata(project="waggle")))
     result = await server.trace_end_session("trace_20260720_a2", summary="done", write_scratchpad=False)
     assert "Error" not in result
     assert called == [("waggle", "trace_20260720_a2")]

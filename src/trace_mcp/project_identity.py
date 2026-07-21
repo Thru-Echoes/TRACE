@@ -236,8 +236,7 @@ class ProjectRegistry(BaseModel):
                 owner = seen.get(ident)
                 if owner is not None and owner != key:
                     raise ValueError(
-                        f"registry inconsistency: identifier {ident!r} resolves to both "
-                        f"'{owner}' and '{key}'"
+                        f"registry inconsistency: identifier {ident!r} resolves to both '{owner}' and '{key}'"
                     )
                 seen[ident] = key
 

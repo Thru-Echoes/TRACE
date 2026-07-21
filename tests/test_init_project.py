@@ -60,11 +60,16 @@ def test_reinit_preserves_with_extras(tmp_path: Path) -> None:
             "trace": {
                 "command": "uvx",
                 "args": [
-                    "--from", "/old/TRACE",
-                    "--with", "openai",
-                    "--with", "numpy",
-                    "--with", "model2vec",
-                    "--refresh", "trace-mcp",
+                    "--from",
+                    "/old/TRACE",
+                    "--with",
+                    "openai",
+                    "--with",
+                    "numpy",
+                    "--with",
+                    "model2vec",
+                    "--refresh",
+                    "trace-mcp",
                 ],
             }
         }
