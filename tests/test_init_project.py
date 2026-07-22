@@ -20,12 +20,21 @@ from pathlib import Path
 
 import pytest
 
+from trace_mcp import project_identity as pident
 from trace_mcp.init_project import (
     TraceInitError,
+    TraceSourceUnresolvedError,
+    _enroll_project,
     _extract_with_packages,
     _mcp_server_config,
     _merge_trace_entry,
+    _write_claude_pin_line,
     _write_mcp_json,
+    _write_pin_file,
+    get_project_key,
+    get_project_label,
+    init_project,
+    print_project_key,
 )
 
 _SOURCE = "/abs/path/to/TRACE"
@@ -214,3 +223,272 @@ def test_merge_non_dict_existing_returns_fresh() -> None:
     fresh = _mcp_server_config()["trace"]
     assert _merge_trace_entry("garbage", fresh) == fresh
     assert _merge_trace_entry(None, fresh) == fresh
+
+
+# ── project identity: derivation, enrollment, and the three pin locations ──
+
+
+def test_label_prefers_pin_file_then_claude_md(tmp_path: Path) -> None:
+    (tmp_path / "CLAUDE.md").write_text('TRACE project name: "md-name"\n')
+    assert get_project_label(tmp_path) == "md-name"
+
+    (tmp_path / ".claude").mkdir()
+    (tmp_path / ".claude" / "trace.project").write_text("pin-name\n")
+    assert get_project_label(tmp_path) == "pin-name"
+
+
+def test_label_reads_a_bolded_pin_line(tmp_path: Path) -> None:
+    """A bolded marker must be readable; missing it is what minted drift pairs."""
+    (tmp_path / "CLAUDE.md").write_text('> **TRACE project name**: "bolded-name"\n')
+    assert get_project_label(tmp_path) == "bolded-name"
+
+
+def test_label_falls_back_to_directory_name(tmp_path: Path) -> None:
+    project_dir = tmp_path / "some-project"
+    project_dir.mkdir()
+    assert get_project_label(project_dir) == "some-project"
+
+
+def test_key_is_canonical_and_explicit_label_wins(tmp_path: Path) -> None:
+    (tmp_path / "CLAUDE.md").write_text('TRACE project name: "Ignored Name"\n')
+    assert get_project_key(tmp_path, "My Project") == "my-project"
+    assert get_project_key(tmp_path) == "ignored-name"
+
+
+def test_key_rejects_reserved_names(tmp_path: Path) -> None:
+    for reserved in ("auto", "AUTO", "shared"):
+        with pytest.raises(TraceInitError, match="reserved"):
+            get_project_key(tmp_path, reserved)
+
+
+def test_key_rejects_a_degenerate_label(tmp_path: Path) -> None:
+    with pytest.raises(TraceInitError, match="cannot derive"):
+        get_project_key(tmp_path, "---")
+
+
+def test_key_resolves_through_an_existing_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A registered alias wins over bare canonicalization.
+
+    Without this, re-initializing a renamed project would mint a second key
+    for it — precisely the split the registry exists to prevent.
+    """
+    monkeypatch.setenv("TRACE_REGISTRY_PATH", str(tmp_path / "projects.json"))
+    pident._reset_registry_cache()
+    with pident.locked_registry() as registry:
+        registry.projects["trace-mcp"] = pident.ProjectEntry(
+            key="trace-mcp", display_label="trace-mcp", aliases=["TRACE"]
+        )
+    pident._reset_registry_cache()
+
+    assert get_project_key(tmp_path, "TRACE") == "trace-mcp"
+
+
+def test_enroll_is_idempotent_and_records_history(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TRACE_REGISTRY_PATH", str(tmp_path / "projects.json"))
+    pident._reset_registry_cache()
+
+    assert "enrolled" in _enroll_project("my-project", "My Project")
+    pident._reset_registry_cache()
+    assert "already enrolled" in _enroll_project("my-project", "My Project")
+
+    pident._reset_registry_cache()
+    registry = pident.load_registry(required=False)
+    assert registry is not None
+    entry = registry.projects["my-project"]
+    assert entry.display_label == "My Project"
+    assert [h.action for h in registry.history] == ["enroll"]
+
+
+def test_enroll_fails_closed_on_an_unreadable_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A damaged registry must never be silently replaced."""
+    registry_file = tmp_path / "projects.json"
+    registry_file.write_text("{not valid json")
+    monkeypatch.setenv("TRACE_REGISTRY_PATH", str(registry_file))
+    pident._reset_registry_cache()
+
+    with pytest.raises(TraceInitError, match="unreadable"):
+        _enroll_project("my-project", "My Project")
+    assert registry_file.read_text() == "{not valid json", "the damaged registry was overwritten"
+
+
+def test_write_pin_file_creates_and_is_idempotent(tmp_path: Path) -> None:
+    assert "wrote" in _write_pin_file(tmp_path, "my-project")
+    pin = tmp_path / ".claude" / "trace.project"
+    assert pin.read_text() == "my-project\n"
+    assert "skipped" in _write_pin_file(tmp_path, "my-project")
+    assert "updated" in _write_pin_file(tmp_path, "other-project")
+    assert pin.read_text() == "other-project\n"
+
+
+def test_claude_pin_line_written_once(tmp_path: Path) -> None:
+    claude_md = tmp_path / "CLAUDE.md"
+    claude_md.write_text("# Project Instructions\n\nSome guidance.\n")
+
+    assert "updated" in _write_claude_pin_line(tmp_path, "my-project")
+    text = claude_md.read_text()
+    assert 'TRACE project name: "my-project"' in text
+    assert text.startswith("# Project Instructions")
+
+    assert "skipped" in _write_claude_pin_line(tmp_path, "my-project")
+    assert claude_md.read_text() == text, "a second pin line was appended"
+
+
+def test_claude_pin_line_respects_an_existing_bolded_line(tmp_path: Path) -> None:
+    """The absence check is bold-tolerant, so a bolded declaration is not duplicated."""
+    claude_md = tmp_path / "CLAUDE.md"
+    claude_md.write_text('# Project\n\n> **TRACE project name**: "already-named"\n')
+    before = claude_md.read_text()
+
+    status = _write_claude_pin_line(tmp_path, "my-project")
+    assert "skipped" in status
+    assert "already-named" in status
+    assert claude_md.read_text() == before
+
+
+def test_mcp_json_carries_the_env_pin(tmp_path: Path) -> None:
+    _write_mcp_json(tmp_path, "my-project")
+    entry = _read(tmp_path)["mcpServers"]["trace"]
+    assert entry["env"] == {"TRACE_PROJECT": "my-project"}
+
+
+def test_mcp_json_pin_updates_but_preserves_sibling_env(tmp_path: Path) -> None:
+    (tmp_path / ".mcp.json").write_text(
+        json.dumps(
+            {
+                "mcpServers": {
+                    "trace": {
+                        "command": "uvx",
+                        "args": ["--from", "/old", "trace-mcp"],
+                        "env": {"TRACE_PROJECT": "stale-name", "OTHER_VAR": "keep-me"},
+                    }
+                }
+            }
+        )
+    )
+    _write_mcp_json(tmp_path, "fresh-name")
+    env = _read(tmp_path)["mcpServers"]["trace"]["env"]
+    assert env["TRACE_PROJECT"] == "fresh-name", "init must own the pin it wrote"
+    assert env["OTHER_VAR"] == "keep-me", "a hand-added env var was dropped"
+
+
+def test_no_pin_leaves_env_absent(tmp_path: Path) -> None:
+    _write_mcp_json(tmp_path)
+    assert "env" not in _read(tmp_path)["mcpServers"]["trace"]
+
+
+def test_init_writes_pin_file_env_and_claude_line(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """End-to-end: one init makes all three pin locations agree."""
+    monkeypatch.setenv("TRACE_REGISTRY_PATH", str(tmp_path / "projects.json"))
+    pident._reset_registry_cache()
+    project_dir = tmp_path / "My Project"
+    project_dir.mkdir()
+
+    init_project(str(project_dir), client="none")
+
+    assert (project_dir / ".claude" / "trace.project").read_text() == "my-project\n"
+    entry = json.loads((project_dir / ".mcp.json").read_text())["mcpServers"]["trace"]
+    assert entry["env"] == {"TRACE_PROJECT": "my-project"}
+    assert 'TRACE project name: "my-project"' in (project_dir / "CLAUDE.md").read_text()
+
+    pident._reset_registry_cache()
+    registry = pident.load_registry(required=False)
+    assert registry is not None
+    assert "my-project" in registry.projects
+
+
+def test_init_project_flag_overrides_derivation(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TRACE_REGISTRY_PATH", str(tmp_path / "projects.json"))
+    pident._reset_registry_cache()
+    project_dir = tmp_path / "dirname-would-be-this"
+    project_dir.mkdir()
+
+    init_project(str(project_dir), client="none", project="Chosen Name")
+
+    assert (project_dir / ".claude" / "trace.project").read_text() == "chosen-name\n"
+
+
+def test_init_is_idempotent_for_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Re-running init must not mint a second key or a second pin line."""
+    monkeypatch.setenv("TRACE_REGISTRY_PATH", str(tmp_path / "projects.json"))
+    pident._reset_registry_cache()
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+
+    init_project(str(project_dir), client="none")
+    first_md = (project_dir / "CLAUDE.md").read_text()
+    first_mcp = (project_dir / ".mcp.json").read_text()
+
+    pident._reset_registry_cache()
+    init_project(str(project_dir), client="none")
+
+    assert (project_dir / "CLAUDE.md").read_text() == first_md
+    assert (project_dir / ".mcp.json").read_text() == first_mcp
+    pident._reset_registry_cache()
+    registry = pident.load_registry(required=False)
+    assert registry is not None
+    assert list(registry.projects) == ["proj"]
+    assert [h.action for h in registry.history] == ["enroll"]
+
+
+def test_init_dry_run_touches_nothing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    registry_file = tmp_path / "projects.json"
+    monkeypatch.setenv("TRACE_REGISTRY_PATH", str(registry_file))
+    pident._reset_registry_cache()
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+
+    init_project(str(project_dir), client="none", dry_run=True)
+
+    assert not (project_dir / ".claude" / "trace.project").exists()
+    assert not (project_dir / ".mcp.json").exists()
+    assert not registry_file.exists()
+
+
+def test_project_key_cli_prints_key(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+    (project_dir / "CLAUDE.md").write_text('> **TRACE project name**: "My Project"\n')
+
+    assert print_project_key(str(project_dir)) == 0
+    assert capsys.readouterr().out.strip() == "my-project"
+
+
+def test_project_key_cli_reports_a_bad_directory(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert print_project_key(str(tmp_path / "nope")) == 1
+    assert "not a directory" in capsys.readouterr().err
+
+
+def test_key_lookup_fails_closed_on_an_unreadable_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Reading identity must fail closed too, not just writing it.
+
+    A corrupt registry cannot be distinguished from "this project has no
+    aliases", so guessing the bare canonical key here would silently split a
+    renamed project off from its own history.
+    """
+    registry_file = tmp_path / "projects.json"
+    registry_file.write_text("{not valid json")
+    monkeypatch.setenv("TRACE_REGISTRY_PATH", str(registry_file))
+    pident._reset_registry_cache()
+
+    with pytest.raises(TraceInitError, match="unreadable"):
+        get_project_key(tmp_path, "My Project")
+
+
+def test_init_preflights_the_source_before_writing_anything(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An unresolvable `--from` source must not leave a half-initialized project."""
+    monkeypatch.setenv("TRACE_REGISTRY_PATH", str(tmp_path / "projects.json"))
+    monkeypatch.delenv("TRACE_SOURCE_PATH", raising=False)
+    monkeypatch.setattr(
+        "trace_mcp.init_project._resolve_trace_source",
+        lambda: (_ for _ in ()).throw(TraceSourceUnresolvedError("no safe source")),
+    )
+    pident._reset_registry_cache()
+    project_dir = tmp_path / "proj"
+    project_dir.mkdir()
+
+    with pytest.raises(SystemExit):
+        init_project(str(project_dir), client="none")
+
+    assert not (project_dir / ".claude" / "trace.project").exists()
+    assert not (project_dir / "CLAUDE.md").exists()
+    assert not (tmp_path / "projects.json").exists()
