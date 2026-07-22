@@ -117,8 +117,8 @@ class TestWheelContainsRequiredFiles:
         """`trace-mcp validate` loads the schema as package data; a wheel
         without it makes the subcommand crash on installed packages."""
         members = get_wheel_members(built_dist["wheel"])
-        assert "trace_mcp/schemas/trace-v0.4.json" in members, (
-            "trace_mcp/schemas/trace-v0.4.json missing from the wheel — "
+        assert "trace_mcp/schemas/trace-v0.5.json" in members, (
+            "trace_mcp/schemas/trace-v0.5.json missing from the wheel — "
             "trace-mcp validate would crash on any installed package"
         )
 

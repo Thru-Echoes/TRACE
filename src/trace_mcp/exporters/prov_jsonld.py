@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from trace_mcp import project_identity as pident
 from trace_mcp.schema import Session
 from trace_mcp.schema.prov_mapping import PROV_CONTEXT
 from trace_mcp.tools.session_tools import is_uri_form_reference
@@ -37,6 +38,32 @@ def _dt(dt: Any) -> dict[str, str] | None:
     """xsd:dateTime typed literal node (or None)."""
     iso = _iso(dt)
     return {"@value": iso, "@type": "xsd:dateTime"} if iso is not None else None
+
+
+def _project_entity(node: Any, project_key: str) -> None:
+    """Reify the project as an Entity carrying its historical alias labels.
+
+    Optional per spec §6: it is what lets a consumer holding an artifact stamped
+    with a drifted display label discover that the label and the key name the
+    same project, without needing the registry file itself. Silent no-op when no
+    registry is available or the key is unenrolled — an export must never fail
+    because identity metadata is missing.
+    """
+    try:
+        registry = pident.get_registry_cached()
+    except pident.RegistryUnavailableError:
+        return
+    if registry is None:
+        return
+    entry = registry.projects.get(project_key)
+    if entry is None:
+        return
+    pn = node(f"trace:project_{project_key}", "prov:Entity")
+    pn["trace:kind"] = "Project"
+    pn["trace:projectKey"] = project_key
+    pn["trace:project"] = entry.display_label
+    if entry.aliases:
+        pn["trace:aliasLabel"] = list(entry.aliases)
 
 
 def _lit(value: Any) -> Any:
@@ -83,7 +110,18 @@ def export_prov_jsonld(session: Session) -> str:
         sn["prov:startedAtTime"] = _dt(session.created)
     if _dt(session.ended):
         sn["prov:endedAtTime"] = _dt(session.ended)
+    # `trace:project` keeps its display-label meaning FOREVER: the already-exported
+    # corpus carries drifted labels under it, and re-meaning the predicate would
+    # silently reinterpret those artifacts. `trace:projectKey` is the additive
+    # sibling that carries identity. Resolution goes through the registry-aware
+    # helper rather than bare canonicalization, so a session whose label is a
+    # registered alias of a renamed project exports the project's real key
+    # instead of a key derived from the old label.
     sn["trace:project"] = session.metadata.project
+    project_key = pident.session_project_key(session.metadata)
+    if project_key:
+        sn["trace:projectKey"] = project_key
+        _project_entity(node, project_key)
     sn["trace:status"] = session.status
 
     for evt in session.events:

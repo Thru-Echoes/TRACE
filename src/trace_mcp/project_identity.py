@@ -191,14 +191,21 @@ class ProjectRegistry(BaseModel):
     def resolve(self, label: str) -> str | None:
         """Return the canonical key *label* belongs to, or None if unknown.
 
-        Match order: verbatim key → verbatim alias → canonical-key equality →
-        canonicalized-alias equality. Tolerant of a *label* that cannot form a
-        key (treated as no match).
+        Match order: verbatim key → verbatim alias or display label → canonical-key
+        equality → canonicalized alias/display-label equality. Tolerant of a *label*
+        that cannot form a key (treated as no match).
+
+        An entry's own ``display_label`` resolves to it even when the label does not
+        canonicalize to the key. That case is not reachable through enrollment (which
+        derives the key from the label) but is reachable through the migration CLI,
+        where a human-signed plan may pair any display label with a key — and a
+        display label that did not resolve to its own entry would leave every legacy
+        session bearing that label unattributable.
         """
         if label in self.projects:
             return label
         for key, entry in self.projects.items():
-            if label in entry.aliases:
+            if label in entry.aliases or label == entry.display_label:
                 return key
         try:
             canon = canonical_project_key(label)
@@ -209,7 +216,7 @@ class ProjectRegistry(BaseModel):
         for key, entry in self.projects.items():
             if canon == key:
                 return key
-            for alias in entry.aliases:
+            for alias in (*entry.aliases, entry.display_label):
                 try:
                     if canonical_project_key(alias) == canon:
                         return key
@@ -218,7 +225,12 @@ class ProjectRegistry(BaseModel):
         return None
 
     def assert_unique_aliases(self) -> None:
-        """Raise if any identifier (key or alias, verbatim or canonical) maps to two entries.
+        """Raise if any identifier maps to two entries.
+
+        An identifier is a key, an alias, or a display label — verbatim or
+        canonicalized. Display labels are included because ``resolve`` matches them:
+        an identifier that resolves must also be checked for uniqueness, or the
+        registry could hold two entries that one label resolves to ambiguously.
 
         Enforced before every persist so the registry cannot drift into an
         ambiguous state where one label resolves to two projects.
@@ -226,7 +238,7 @@ class ProjectRegistry(BaseModel):
         seen: dict[str, str] = {}
         for key, entry in self.projects.items():
             idents: set[str] = {key}
-            for raw in (key, *entry.aliases):
+            for raw in (key, entry.display_label, *entry.aliases):
                 idents.add(raw)
                 try:
                     idents.add(canonical_project_key(raw))
