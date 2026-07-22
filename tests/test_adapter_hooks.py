@@ -31,12 +31,16 @@ def _make_session(
     session_id: str,
     project: str,
     status: str = "active",
+    project_key: str | None = None,
 ) -> Path:
+    metadata: dict[str, object] = {"project": project}
+    if project_key is not None:
+        metadata["project_key"] = project_key
     data = {
         "id": session_id,
         "created": f"{datetime.now(UTC).isoformat()}",
         "status": status,
-        "metadata": {"project": project},
+        "metadata": metadata,
         "events": [],
     }
     path = sessions_dir / f"{session_id}.json"
@@ -383,6 +387,153 @@ class TestPreToolGuard:
             stdin=stdin_payload,
         )
         assert result.returncode == 0
+
+
+# ── canonical project identity (shared detection block) ───────────────────
+
+
+class TestCanonicalProjectIdentity:
+    """Identity is a canonical key, so labels that differ only cosmetically match.
+
+    Each test drives a real hook end to end: what is asserted is what the
+    shipped asset does, not a re-implementation of it.
+    """
+
+    def test_bolded_claude_md_pin_line_is_detected(self, tmp_path: Path) -> None:
+        """The verified root cause of a live drift pair.
+
+        A plain-only regex skipped the bolded marker, so the hooks fell through
+        to the git basename while a model reading the same file saw the marker's
+        value — deterministically minting two labels for one repository.
+        """
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        subprocess.run(["git", "init"], cwd=project_dir, capture_output=True, check=True)
+        (project_dir / "CLAUDE.md").write_text('> **TRACE project name**: "pinned-name"\n')
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        _make_session(sessions, session_id=f"trace_{_today()}_aaaaaa", project="pinned-name")
+
+        result = _run_hook(SESSION_REMINDER, project_dir=project_dir, sessions_dir=sessions)
+        assert result.stdout.strip() == "", (
+            "bolded pin line was not detected; the hook fell through to the git basename"
+        )
+
+    def test_hooks_prefer_pin_file_over_claude_md(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "proj"
+        (project_dir / ".claude").mkdir(parents=True)
+        (project_dir / "CLAUDE.md").write_text('TRACE project name: "md-name"\n')
+        (project_dir / ".claude" / "trace.project").write_text("pin-name\n")
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        # An active session for the CLAUDE.md name must NOT satisfy the pin.
+        _make_session(sessions, session_id=f"trace_{_today()}_aaaaaa", project="md-name")
+
+        result = _run_hook(SESSION_REMINDER, project_dir=project_dir, sessions_dir=sessions)
+        assert "no active session" in result.stdout
+        assert "pin-name" in result.stdout
+
+        # ...and one for the pin name does.
+        _make_session(sessions, session_id=f"trace_{_today()}_bbbbbb", project="pin-name")
+        result = _run_hook(SESSION_REMINDER, project_dir=project_dir, sessions_dir=sessions)
+        assert result.stdout.strip() == ""
+
+    def test_hooks_match_project_key_sessions(self, tmp_path: Path) -> None:
+        """A stamped project_key is authoritative over the display label."""
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        (project_dir / "CLAUDE.md").write_text('TRACE project name: "my-proj"\n')
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        _make_session(
+            sessions,
+            session_id=f"trace_{_today()}_aaaaaa",
+            project="Some Legacy Display Label",
+            project_key="my-proj",
+        )
+
+        result = _run_hook(SESSION_REMINDER, project_dir=project_dir, sessions_dir=sessions)
+        assert result.stdout.strip() == "", "session with a matching project_key was not matched"
+
+    def test_hooks_fall_back_to_canonicalized_label_for_legacy_sessions(self, tmp_path: Path) -> None:
+        """Legacy sessions carry no key, so the label is canonicalized to match."""
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        (project_dir / "CLAUDE.md").write_text('TRACE project name: "my-proj"\n')
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        # Case and separator variants of the same project.
+        _make_session(sessions, session_id=f"trace_{_today()}_aaaaaa", project="My_Proj")
+
+        result = _run_hook(SESSION_REMINDER, project_dir=project_dir, sessions_dir=sessions)
+        assert result.stdout.strip() == "", "a display-label variant split one project in two"
+
+    def test_distinct_projects_still_do_not_match(self, tmp_path: Path) -> None:
+        """Canonicalization must not over-merge: a different project is still different."""
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        (project_dir / "CLAUDE.md").write_text('TRACE project name: "my-proj"\n')
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        _make_session(sessions, session_id=f"trace_{_today()}_aaaaaa", project="my-proj-two")
+
+        result = _run_hook(SESSION_REMINDER, project_dir=project_dir, sessions_dir=sessions)
+        assert "no active session" in result.stdout
+
+    def test_pretool_guard_strict_mode_still_finds_sessions_post_change(self, tmp_path: Path) -> None:
+        """Regression: strict mode must not hard-block on a session it should match.
+
+        Strict mode exits 2, which blocks the edit outright — a detection change
+        that stopped matching valid sessions would turn this guard into a wall.
+        """
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        (project_dir / "CLAUDE.md").write_text('> **TRACE project name**: "my-proj"\n')
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        _make_session(sessions, session_id=f"trace_{_today()}_aaaaaa", project="My-Proj")
+
+        result = _run_hook(
+            PRETOOL_GUARD,
+            project_dir=project_dir,
+            sessions_dir=sessions,
+            env_overrides={"TRACE_GUARD": "strict"},
+        )
+        assert result.returncode == 0, f"strict mode blocked despite an active session: {result.stderr!r}"
+        assert result.stdout.strip() == ""
+
+    def test_prompt_reminder_state_file_is_named_by_canonical_key(self, tmp_path: Path) -> None:
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        (project_dir / "CLAUDE.md").write_text('TRACE project name: "My Weird/Name"\n')
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+        runtime = tmp_path / "runtime"
+
+        _run_hook(PROMPT_REMINDER, project_dir=project_dir, sessions_dir=sessions, runtime_dir=runtime)
+
+        assert [p.name for p in runtime.glob("*.state.json")] == ["my-weird-name.state.json"]
+
+    @pytest.mark.parametrize(
+        ("script", "needs_runtime"),
+        [(SESSION_REMINDER, False), (PROMPT_REMINDER, True), (PRETOOL_GUARD, False)],
+    )
+    def test_hooks_emit_version_stamp(self, tmp_path: Path, script: Path, needs_runtime: bool) -> None:
+        """A stale fleet copy self-identifies by the absence of this stamp."""
+        project_dir = tmp_path / "proj"
+        project_dir.mkdir()
+        (project_dir / "CLAUDE.md").write_text('TRACE project name: "my-proj"\n')
+        sessions = tmp_path / "sessions"
+        sessions.mkdir()
+
+        result = _run_hook(
+            script,
+            project_dir=project_dir,
+            sessions_dir=sessions,
+            runtime_dir=tmp_path / "runtime" if needs_runtime else None,
+            env_overrides={"TRACE_PROMPT_MIN_TURNS": "1"} if needs_runtime else None,
+        )
+        assert "[trace-hooks v0.5]" in result.stdout
 
 
 @pytest.fixture(autouse=True)

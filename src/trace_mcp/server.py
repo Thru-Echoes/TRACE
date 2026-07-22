@@ -948,11 +948,19 @@ def _load_extensions() -> None:
 def main() -> None:
     """Run the TRACE MCP server (or handle subcommands like 'init' or 'validate')."""
     if len(sys.argv) > 1 and sys.argv[1] == "init":
-        from trace_mcp.init_project import init_project
+        # Delegate to init's own argument parser rather than re-deriving one
+        # here: the previous hand-rolled dispatch read argv[2] as the directory,
+        # so every flag (`--project`, `--dry-run`, `--client`) was silently
+        # swallowed as a path. init's parser already strips the leading "init".
+        from trace_mcp.init_project import main as init_main
 
-        directory = sys.argv[2] if len(sys.argv) > 2 else None
-        init_project(directory)
+        init_main()
         return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "project-key":
+        from trace_mcp.init_project import print_project_key
+
+        raise SystemExit(print_project_key(sys.argv[2] if len(sys.argv) > 2 else None))
 
     if len(sys.argv) > 1 and sys.argv[1] == "validate":
         # In-package validator (schema ships as package data) — the previous

@@ -35,16 +35,34 @@ def _write_session(dir_path: Path, name: str, session: dict) -> Path:
     return path
 
 
-def _run_hook(sessions_dir: Path, bash_path: str = "/bin/bash") -> subprocess.CompletedProcess:
+def _run_hook(
+    sessions_dir: Path,
+    bash_path: str = "/bin/bash",
+    project: str = "smoke",
+) -> subprocess.CompletedProcess:
     """Invoke the hook against the given sessions dir using a specific bash.
 
     Defaults to /bin/bash, which on macOS is bash 3.2 — the minimum
     bash version we support. If the test passes on /bin/bash, it
     passes on every Linux bash 4+ trivially.
+
+    The hook selects the newest session *for its own project*, so the run needs
+    a project directory whose identity matches the fixture sessions. A
+    `.claude/trace.project` pin file is the highest-precedence source, which
+    keeps these tests independent of the repository's own CLAUDE.md. The env
+    stays otherwise minimal — that minimalism is what exercises the bash 3.2
+    path.
     """
+    project_dir = sessions_dir / "_projectdir"
+    (project_dir / ".claude").mkdir(parents=True, exist_ok=True)
+    (project_dir / ".claude" / "trace.project").write_text(f"{project}\n")
     return subprocess.run(
         [bash_path, str(HOOK_PATH)],
-        env={"TRACE_SESSIONS_DIR": str(sessions_dir), "PATH": "/usr/bin:/bin"},
+        env={
+            "TRACE_SESSIONS_DIR": str(sessions_dir),
+            "CLAUDE_PROJECT_DIR": str(project_dir),
+            "PATH": "/usr/bin:/bin",
+        },
         capture_output=True,
         text=True,
         timeout=15,
@@ -303,7 +321,7 @@ class TestHookExecutesUnderMacOSBash:
         }
         _write_session(tmp_path, "trace_v3", session)
 
-        result = _run_hook(tmp_path)
+        result = _run_hook(tmp_path, project="old")
         assert result.returncode == 0
         # ai→ai self-resolution under both v0.3 (ai-only check) and v0.4.1
         # (same-instance check) — backward-compat message preserves the v0.3 text
@@ -332,7 +350,7 @@ class TestHookExecutesUnderMacOSBash:
         }
         _write_session(tmp_path, "trace_clean", session)
 
-        result = _run_hook(tmp_path)
+        result = _run_hook(tmp_path, project="clean")
         assert result.returncode == 0
         # No TRACE Decision Audit prefix → no warnings to report
         assert "TRACE Decision Audit" not in result.stdout
@@ -352,3 +370,116 @@ class TestHookExecutesUnderMacOSBash:
         assert result.returncode == 0
         # Failed parse → zero metrics → no audit output
         assert "TRACE Decision Audit" not in result.stdout
+
+
+def _decision_session(project: str, *, unresolved: bool) -> dict:
+    """A session for *project* carrying exactly one decision, resolved or not."""
+    decision: dict = {
+        "description": "x",
+        "proposed_by": {"type": "human", "id": "r"},
+        "disposition": "proposed" if unresolved else "accepted",
+    }
+    if not unresolved:
+        decision["resolved_by"] = {"type": "human", "id": "r"}
+    return {
+        "id": f"trace_{project}",
+        "trace_version": "0.4.1",
+        "metadata": {"project": project},
+        "events": [
+            {
+                "id": "evt_001",
+                "type": "decision",
+                "actor": {"type": "human", "id": "r"},
+                "decision": decision,
+            },
+        ],
+    }
+
+
+class TestProjectScoping:
+    """The audit must report THIS project's session, never a neighbour's.
+
+    Before the project filter, the hook read whichever session file was newest
+    across the whole flat store — so two servers running side by side made each
+    one report the other's findings.
+    """
+
+    def test_ignores_a_newer_session_from_another_project(self, tmp_path: Path) -> None:
+        # Ours is clean; the foreign one is dirty and written LAST (so it is
+        # newest by mtime — what the old `ls -t` selection would have picked).
+        _write_session(tmp_path, "trace_20260722_ours00", _decision_session("mine", unresolved=False))
+        _write_session(tmp_path, "trace_20260722_theirs", _decision_session("theirs", unresolved=True))
+
+        result = _run_hook(tmp_path, project="mine")
+        assert result.returncode == 0
+        assert "unresolved decision" not in result.stdout.lower(), (
+            f"reported another project's findings: {result.stdout!r}"
+        )
+
+    def test_reports_our_session_when_a_foreign_one_is_newer(self, tmp_path: Path) -> None:
+        # Mirror image: ours is the dirty one, and it must still be found.
+        _write_session(tmp_path, "trace_20260722_ours00", _decision_session("mine", unresolved=True))
+        _write_session(tmp_path, "trace_20260722_theirs", _decision_session("theirs", unresolved=False))
+
+        result = _run_hook(tmp_path, project="mine")
+        assert result.returncode == 0
+        assert "unresolved decision" in result.stdout.lower()
+
+    def test_silent_when_no_session_belongs_to_this_project(self, tmp_path: Path) -> None:
+        _write_session(tmp_path, "trace_20260722_theirs", _decision_session("theirs", unresolved=True))
+
+        result = _run_hook(tmp_path, project="mine")
+        assert result.returncode == 0
+        assert result.stdout.strip() == ""
+
+    def test_matches_a_display_label_variant_of_the_same_project(self, tmp_path: Path) -> None:
+        """Case and separator variants are one project, so the audit still fires."""
+        _write_session(tmp_path, "trace_20260722_ours00", _decision_session("My_Project", unresolved=True))
+
+        result = _run_hook(tmp_path, project="my-project")
+        assert result.returncode == 0
+        assert "unresolved decision" in result.stdout.lower()
+
+    def test_prefers_project_key_over_display_label(self, tmp_path: Path) -> None:
+        """A session stamped with project_key is matched on the key, not the label."""
+        session = _decision_session("Some Legacy Display Label", unresolved=True)
+        session["metadata"]["project_key"] = "mine"
+
+        _write_session(tmp_path, "trace_20260722_ours00", session)
+
+        result = _run_hook(tmp_path, project="mine")
+        assert result.returncode == 0
+        assert "unresolved decision" in result.stdout.lower()
+
+    def test_newest_dated_session_wins_within_a_project(self, tmp_path: Path) -> None:
+        """Selection is by filename date first; an older dated file must not win."""
+        _write_session(tmp_path, "trace_20260722_newer0", _decision_session("mine", unresolved=False))
+        # Written last (newest mtime) but an older filename date — must lose.
+        _write_session(tmp_path, "trace_20200101_older0", _decision_session("mine", unresolved=True))
+
+        result = _run_hook(tmp_path, project="mine")
+        assert result.returncode == 0
+        assert "unresolved decision" not in result.stdout.lower(), (
+            f"an older dated session won the selection: {result.stdout!r}"
+        )
+
+    def test_a_dated_session_beats_an_undated_one(self, tmp_path: Path) -> None:
+        """Undated filenames sort oldest, whichever way the names compare.
+
+        Lexically `trace_smoke` sorts ABOVE `trace_20260722_...`, so ordering on
+        the raw filename would let an undated file win and mask the real
+        session's findings.
+        """
+        _write_session(tmp_path, "trace_smoke", _decision_session("mine", unresolved=False))
+        _write_session(tmp_path, "trace_20260722_real00", _decision_session("mine", unresolved=True))
+
+        result = _run_hook(tmp_path, project="mine")
+        assert result.returncode == 0
+        assert "unresolved decision" in result.stdout.lower()
+
+    def test_emits_version_stamp_with_findings(self, tmp_path: Path) -> None:
+        """A stale fleet copy self-identifies by the absence of this stamp."""
+        _write_session(tmp_path, "trace_20260722_ours00", _decision_session("mine", unresolved=True))
+
+        result = _run_hook(tmp_path, project="mine")
+        assert "[trace-hooks v0.5]" in result.stdout
