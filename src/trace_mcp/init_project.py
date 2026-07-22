@@ -4,6 +4,14 @@ Writes ``.mcp.json`` and dispatches to a host adapter (Claude Code, Codex, ...)
 to install hook scripts, merge settings, and append the minimal CLAUDE.md
 block. Adapters live in ``trace_mcp.adapters`` and contain no runtime code
 imported by the MCP server.
+
+Init is also the sanctioned place where a project's canonical identity is
+minted: it enrolls the project in the alias registry and writes the three
+artifacts that make every consumer agree on that identity — the
+``TRACE_PROJECT`` env pin in ``.mcp.json`` (the server), a
+``.claude/trace.project`` pin file (the hooks), and a machine-parseable
+CLAUDE.md pin line (a model reading the repository). A running server never
+mints identity; only this command does.
 """
 
 from __future__ import annotations
@@ -11,11 +19,22 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
+from trace_mcp import project_identity as pident
 from trace_mcp.adapters import detect_adapter, get_adapter, list_adapters
 from trace_mcp.adapters.base import Adapter
+
+# Bold-tolerant, and byte-identical in intent to the hooks' shared block: the
+# absence check MUST accept the bolded form, or init appends a second pin line
+# to a file that already has one.
+_PIN_LINE_RE = re.compile(r'TRACE project name\**\s*:\s*"([^"]+)"')
+
+_PIN_FILE = Path(".claude") / "trace.project"
+
+_INIT_ACTOR = "trace-mcp init"
 
 
 class TraceSourceUnresolvedError(RuntimeError):
@@ -63,21 +82,173 @@ def _resolve_trace_source() -> str:
     )
 
 
-def _mcp_server_config() -> dict:
+def _mcp_server_config(project_key: str | None = None) -> dict:
     """Build the `.mcp.json` ``mcpServers`` entry for TRACE.
 
     Resolves the ``--from`` source lazily, at write time — not at import
     time — so importing this module (tests, ``--help``) never raises;
     only actually writing `.mcp.json` can surface
     ``TraceSourceUnresolvedError``.
+
+    When *project_key* is given the entry carries ``env.TRACE_PROJECT``, which
+    pins the server process to one project: with a pin, cross-project reads and
+    writes are refused rather than silently accepted.
     """
     source = _resolve_trace_source()
-    return {
-        "trace": {
-            "command": "uvx",
-            "args": ["--from", source, "--refresh-package", "trace-mcp", "trace-mcp"],
-        }
+    entry: dict = {
+        "command": "uvx",
+        "args": ["--from", source, "--refresh-package", "trace-mcp", "trace-mcp"],
     }
+    if project_key:
+        entry["env"] = {"TRACE_PROJECT": project_key}
+    return {"trace": entry}
+
+
+# ── Project identity ──────────────────────────────────────────────────────
+
+
+def _read_pin_line(claude_md: Path) -> str | None:
+    """Return the project name declared in *claude_md*, or None."""
+    if not claude_md.is_file():
+        return None
+    match = _PIN_LINE_RE.search(claude_md.read_text(errors="replace"))
+    return match.group(1) if match else None
+
+
+def get_project_label(project_dir: Path) -> str:
+    """Return the best-effort display label for *project_dir*.
+
+    Order — the same precedence the hooks use, so init and the hooks cannot
+    disagree about which project a directory is: the ``.claude/trace.project``
+    pin file (which makes re-running init idempotent), then a CLAUDE.md pin
+    line, then the git toplevel basename, then the directory name.
+
+    Side effects: reads files under *project_dir* and may run ``git``.
+    """
+    pin_file = project_dir / _PIN_FILE
+    if pin_file.is_file():
+        pinned = pin_file.read_text(errors="replace").strip()
+        if pinned:
+            return pinned
+    declared = _read_pin_line(project_dir / "CLAUDE.md")
+    if declared:
+        return declared
+    try:
+        import subprocess
+
+        top = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=project_dir,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=5,
+        ).stdout.strip()
+        if top:
+            return Path(top).name
+    except Exception:
+        pass
+    return project_dir.name
+
+
+def get_project_key(project_dir: Path, explicit: str | None = None) -> str:
+    """Resolve *project_dir* (or *explicit*) to a canonical project key.
+
+    Pure: consults the registry for an existing alias/key match but never
+    enrolls and never writes. Raises ``TraceInitError`` when the label cannot
+    form a usable key or names a reserved one.
+    """
+    label = explicit or get_project_label(project_dir)
+    try:
+        key = pident.canonical_project_key(label)
+    except pident.ProjectKeyError as exc:
+        raise TraceInitError(f"cannot derive a project key: {exc}") from exc
+    if key in pident.RESERVED_KEYS:
+        raise TraceInitError(
+            f"'{label}' resolves to the reserved key '{key}', which is not a project. "
+            "Pass --project <name> with a real project name."
+        )
+    try:
+        registry = pident.get_registry_cached()
+    except pident.RegistryUnavailableError as exc:
+        raise TraceInitError(
+            f"the project registry at {pident.registry_path()} is unreadable ({exc}); "
+            "refusing to guess this project's identity. Repair or move the file and re-run."
+        ) from exc
+    if registry is not None:
+        hit = registry.resolve(label)
+        if hit is not None:
+            return hit
+    return key
+
+
+def _enroll_project(key: str, label: str) -> str:
+    """Enroll *key* in the alias registry if absent. Returns a one-line status.
+
+    Side effects: writes ``~/.trace/projects.json`` under the fail-closed
+    registry lock. Enrolling here — rather than in a running server — is what
+    keeps identity minting a deliberate, human-initiated act.
+    """
+    try:
+        with pident.locked_registry() as registry:
+            hit = registry.resolve(label) or registry.resolve(key)
+            if hit is not None:
+                return f"  registry: '{hit}' already enrolled"
+            registry.projects[key] = pident.ProjectEntry(
+                key=key,
+                display_label=label,
+                enrolled_by=_INIT_ACTOR,
+            )
+            registry.history.append(
+                pident.RegistryChange(
+                    actor=_INIT_ACTOR,
+                    action="enroll",
+                    details={"key": key, "label": label},
+                )
+            )
+            return f"  registry: enrolled '{key}'"
+    except pident.RegistryUnavailableError as exc:
+        raise TraceInitError(
+            f"the project registry at {pident.registry_path()} is unreadable ({exc}); "
+            "refusing to overwrite it. Repair or move the file and re-run."
+        ) from exc
+    except TimeoutError as exc:
+        raise TraceInitError(
+            f"could not acquire the project registry lock ({exc}). Another process is "
+            "writing it; retry once that finishes."
+        ) from exc
+
+
+def _write_pin_file(project_dir: Path, key: str) -> str:
+    """Write ``.claude/trace.project`` — the hooks' highest-precedence source."""
+    path = project_dir / _PIN_FILE
+    existing = path.read_text(errors="replace").strip() if path.is_file() else None
+    if existing == key:
+        return f"  skipped: {path}"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(f"{key}\n")
+    return f"  {'updated' if existing is not None else 'wrote'}: {path}"
+
+
+def _write_claude_pin_line(project_dir: Path, key: str) -> str:
+    """Add the machine-parseable pin line to CLAUDE.md when none is present.
+
+    An existing line is left exactly as written — including a bolded one, which
+    the absence check accepts. Rewriting someone's declared project name is how
+    identity drifts; declaring it once when it is missing is the whole job.
+    """
+    path = project_dir / "CLAUDE.md"
+    declared = _read_pin_line(path)
+    if declared is not None:
+        return f"  skipped: {path} (already declares '{declared}')"
+    line = f'TRACE project name: "{key}"\n'
+    if path.is_file():
+        existing = path.read_text()
+        sep = "\n" if existing.endswith("\n") else "\n\n"
+        path.write_text(existing + sep + line)
+        return f"  updated: {path}"
+    path.write_text(f"# Project Instructions\n\n{line}")
+    return f"  wrote: {path}"
 
 
 def _extract_with_packages(args: object) -> list[str]:
@@ -137,14 +308,17 @@ def _merge_trace_entry(existing: object, fresh: dict) -> dict:
     return merged
 
 
-def _write_mcp_json(project_dir: Path) -> str:
+def _write_mcp_json(project_dir: Path, project_key: str | None = None) -> str:
     """Write or merge the TRACE entry into ``.mcp.json``. Returns a one-line status.
 
     Re-running is non-destructive: an existing ``trace`` entry's ``--with``
     extras, ``env`` block, and unknown keys are preserved, and sibling servers
-    are left untouched. A pre-existing ``.mcp.json`` that is not valid JSON (or
-    not a JSON object) is left on disk and raises ``TraceInitError`` (fail
-    closed) rather than being silently discarded and replaced.
+    are left untouched. When *project_key* is given, ``env.TRACE_PROJECT`` is
+    set to it — the fresh value wins over a stale one, since init is the
+    authority on a project's identity. A pre-existing ``.mcp.json`` that is not
+    valid JSON (or not a JSON object) is left on disk and raises
+    ``TraceInitError`` (fail closed) rather than being silently discarded and
+    replaced.
     """
     mcp_path = project_dir / ".mcp.json"
     if mcp_path.exists():
@@ -173,7 +347,7 @@ def _write_mcp_json(project_dir: Path) -> str:
         servers = config["mcpServers"]
 
     was_present = "trace" in servers
-    fresh_entry = _mcp_server_config()["trace"]
+    fresh_entry = _mcp_server_config(project_key)["trace"]
     servers["trace"] = _merge_trace_entry(servers.get("trace"), fresh_entry) if was_present else fresh_entry
 
     mcp_path.write_text(json.dumps(config, indent=2) + "\n")
@@ -203,8 +377,15 @@ def init_project(
     *,
     client: str | None = None,
     dry_run: bool = False,
+    project: str | None = None,
 ) -> None:
-    """Initialize TRACE in a project directory."""
+    """Initialize TRACE in a project directory.
+
+    *project* overrides the derived display label. Whatever the source, the
+    label is reduced to a canonical key, enrolled in the alias registry, and
+    written to all three pin locations so the server, the hooks, and a model
+    reading the repository resolve one identity.
+    """
     project_dir = Path(directory) if directory else Path.cwd()
 
     if not project_dir.is_dir():
@@ -213,19 +394,51 @@ def init_project(
 
     print(f"Initializing TRACE in {project_dir}")
 
-    # 1. .mcp.json (host-independent). A dry run resolves the source too, so
+    # Preflight the `.mcp.json` source before ANY write. It is the one step
+    # that can fail for reasons outside this directory, and discovering that
+    # after enrolling the project and writing pin files would leave it half
+    # initialized.
+    try:
+        _resolve_trace_source()
+    except TraceSourceUnresolvedError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+
+    # 1. Project identity, before anything that embeds it. Resolution is
+    # read-only, so an unusable name fails before a single file is touched.
+    try:
+        label = project or get_project_label(project_dir)
+        project_key = get_project_key(project_dir, project)
+    except TraceInitError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+    print(f"  project: '{project_key}'" + (f" (from label '{label}')" if label != project_key else ""))
+
+    try:
+        if not dry_run:
+            print(_enroll_project(project_key, label))
+            print(_write_pin_file(project_dir, project_key))
+            print(_write_claude_pin_line(project_dir, project_key))
+        else:
+            print(f"  [dry-run] would enroll '{project_key}' in {pident.registry_path()}")
+            print(f"  [dry-run] would write: {project_dir / _PIN_FILE}")
+    except TraceInitError as exc:
+        print(f"Error: {exc}")
+        sys.exit(1)
+
+    # 2. .mcp.json (host-independent). A dry run resolves the source too, so
     # an unresolvable source is discovered before a real run, not during it.
     try:
         if not dry_run:
-            print(_write_mcp_json(project_dir))
+            print(_write_mcp_json(project_dir, project_key))
         else:
-            entry = _mcp_server_config()["trace"]
+            entry = _mcp_server_config(project_key)["trace"]
             print(f"  [dry-run] would write: {project_dir / '.mcp.json'} (uvx --from {entry['args'][1]})")
     except (TraceSourceUnresolvedError, TraceInitError) as exc:
         print(f"Error: {exc}")
         sys.exit(1)
 
-    # 2. Host adapter
+    # 3. Host adapter
     adapter = _pick_adapter(project_dir, client)
     if adapter is None:
         print("Skipping host adapter installation.")
@@ -255,6 +468,24 @@ def init_project(
     print("TRACE tools will be available automatically.")
 
 
+def print_project_key(directory: str | None = None) -> int:
+    """Print the canonical project key for *directory*. Returns a process exit code.
+
+    The one command that answers "which project does this directory belong to?"
+    the same way the server and the hooks answer it.
+    """
+    project_dir = Path(directory) if directory else Path.cwd()
+    if not project_dir.is_dir():
+        print(f"Error: {project_dir} is not a directory", file=sys.stderr)
+        return 1
+    try:
+        print(get_project_key(project_dir))
+    except TraceInitError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main() -> None:
     """CLI entry point for trace-mcp init."""
     parser = argparse.ArgumentParser(
@@ -273,6 +504,12 @@ def main() -> None:
         action="store_true",
         help="show what would be written without touching files",
     )
+    parser.add_argument(
+        "--project",
+        default=None,
+        metavar="NAME",
+        help="project name to enrol and pin (default: derived from the pin file, CLAUDE.md, git, or the directory name)",
+    )
     # Allow legacy `trace-mcp init init .` invocation used by bare `trace-mcp-init`.
     args = sys.argv[1:]
     if args and args[0] == "init":
@@ -280,4 +517,4 @@ def main() -> None:
 
     ns = parser.parse_args()
     client = None if ns.client == "auto" else ns.client
-    init_project(ns.directory, client=client, dry_run=ns.dry_run)
+    init_project(ns.directory, client=client, dry_run=ns.dry_run, project=ns.project)
