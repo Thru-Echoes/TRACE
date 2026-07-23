@@ -370,6 +370,32 @@ async def project_summary(
     }
 
 
+def _identity_health() -> dict[str, Any]:
+    """Project-identity fields for the health report (ADR-006).
+
+    Shares its drift logic with the ``identity check`` CLI via
+    ``identity_report`` so a health probe and an explicit check can never
+    disagree about whether the store is clean. Core-only: the stray-store scan
+    globs the knowledge directory rather than importing the learn extension.
+    """
+    from trace_mcp import identity_report, project_identity
+
+    bound = project_identity.get_bound_project()
+    status = identity_report.registry_status()
+    registry = None
+    if status == "ok":
+        try:
+            registry = project_identity.get_registry_cached()
+        except project_identity.RegistryUnavailableError:
+            status = "unavailable"
+    return {
+        "pinned": bound is not None,
+        "bound_project_key": bound.key if bound is not None else None,
+        "registry": status,
+        "stray_knowledge_stores": identity_report.find_stray_stores(registry),
+    }
+
+
 async def health_check(
     storage: TraceStorage,
     *,
@@ -440,6 +466,7 @@ async def health_check(
             "knowledge_dir": knowledge_dir,
             "knowledge_dir_exists": knowledge_dir_exists,
         },
+        "identity": _identity_health(),
         "session_count": len(sessions),
         "sessions_scanned": len(sessions),
         "skipped_sessions": skipped_sessions,

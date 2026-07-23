@@ -979,6 +979,11 @@ def main() -> None:
 
         raise SystemExit(print_project_key(sys.argv[2] if len(sys.argv) > 2 else None))
 
+    if len(sys.argv) > 1 and sys.argv[1] == "identity":
+        from trace_mcp.identity_cli import main as identity_main
+
+        raise SystemExit(identity_main(sys.argv[2:]))
+
     if len(sys.argv) > 1 and sys.argv[1] == "validate":
         # In-package validator (schema ships as package data) — the previous
         # repo-relative load of scripts/validate_session.py crashed on any
