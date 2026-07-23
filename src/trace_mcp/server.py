@@ -194,7 +194,10 @@ async def _ensure_session(session_id: str | None) -> tuple[Session, str]:
     tool response.
 
     Raises ``FileNotFoundError`` when an explicit *session_id* is given
-    but does not exist (preserving existing error behaviour).
+    but does not exist (preserving existing error behaviour), and
+    ``ProjectMismatchError`` when the session belongs to another project's
+    pin OR when ``TRACE_REQUIRE_PIN=1`` on an unpinned process would force
+    auto-creation (every caller already surfaces this as its error string).
     """
     global _current_session_id
 
@@ -243,6 +246,15 @@ async def _ensure_session(session_id: str | None) -> tuple[Session, str]:
             _current_session_id = None
 
     # 3. Auto-create a new session
+    # TRACE_REQUIRE_PIN closes BOTH session-creation paths. It previously gated
+    # only trace_start_session, so on a require-pin fleet an unpinned stray
+    # process still auto-created quarantine sessions on its first logging call —
+    # the exact capture the operator opted to fail closed on. Capture-over-
+    # attribution is the DEFAULT posture; this flag is the explicit opt-out,
+    # and a hole in an explicit opt-out is a broken promise, not a kindness.
+    pin_error = _require_pin_error()
+    if pin_error:
+        raise pident.ProjectMismatchError(pin_error)
     project = await _infer_project()
     session = await session_tools.create_session(
         storage,

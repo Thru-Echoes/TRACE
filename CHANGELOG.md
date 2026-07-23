@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Honest bounded session orientation.** `session_brief` scans newest-first up
+  to a `read_ceiling` (default 200 files), stopping early at `scan_cap`
+  matches, and reports `window_exhausted` when the ceiling was hit with more
+  files beyond it. The previous single 25-file window made the session-start
+  orientation assert a false absolute — a project whose newest session sat 26
+  files back in a busy shared store read as "No prior TRACE sessions". The
+  bootstrap now says "no sessions found in the newest ~N (older history not
+  scanned)" in that case; the absolute claim survives only when the whole
+  store was actually seen. `session_brief` is also promoted onto the
+  `TraceStorage` contract with an honest generic default, so a non-file
+  backend cannot silently lack orientation.
+- **`TRACE_REQUIRE_PIN` closes the auto-create path.** The flag previously
+  gated only `trace_start_session`, so on a require-pin fleet an unpinned
+  stray process still auto-created quarantine sessions on its first logging
+  call — the exact capture the operator opted to fail closed on. Both
+  session-creation paths now refuse; using an *existing* session by explicit
+  id keeps working, and the flag remains default-off (capture-over-attribution
+  stays the default posture).
+- **Per-project scratchpad fallback.** The global fallback directory
+  (`~/.trace/scratchpads/`) is shared by every project, and the scratchpad is
+  most-recent-session-only — so whichever project ended a session last
+  silently clobbered another project's context-restoration buffer. Fallback
+  files are now named by canonical project key (registry-aware, so an aliased
+  legacy label lands in its real project's buffer). A project checkout's
+  `.claude/` and an explicit `TRACE_SCRATCHPAD_DIR` keep the stable
+  `SCRATCHPAD.md` name — those locations are per-project by construction.
 - **Egress ledger rows carry a `project_key` column (all three purposes).** The
   matching and embedding attest sites sit in layers that deliberately know
   nothing about projects, so their rows were unattributable; the canonical key

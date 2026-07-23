@@ -28,23 +28,35 @@ logger = logging.getLogger(__name__)
 _SCRATCHPAD_DIR_ENV = "TRACE_SCRATCHPAD_DIR"
 
 
-def _scratchpad_path() -> Path:
+def _scratchpad_path(project_key: str | None = None) -> Path:
     """Resolve the SCRATCHPAD.md path.
 
     Priority: $TRACE_SCRATCHPAD_DIR > cwd/.claude/ > ~/.trace/scratchpads/
+
+    The first two locations are per-project by construction (an explicit
+    operator choice; a project checkout). The global fallback directory is
+    shared by EVERY project on the machine, and the scratchpad is
+    most-recent-session-only — so a single shared filename there meant
+    whichever project ended a session last silently clobbered another
+    project's context-restoration buffer. In the fallback, the file is
+    therefore named by the canonical *project_key* when one is known.
     """
     env_dir = os.environ.get(_SCRATCHPAD_DIR_ENV)
     if env_dir:
         base = Path(env_dir)
+        name = "SCRATCHPAD.md"
     else:
         cwd_claude = Path.cwd() / ".claude"
         if cwd_claude.is_dir():
             base = cwd_claude
+            name = "SCRATCHPAD.md"
         else:
             base = Path(os.path.expanduser("~/.trace/scratchpads"))
+            # The canonical key is filesystem-safe by construction.
+            name = f"{project_key}.md" if project_key else "SCRATCHPAD.md"
 
     base.mkdir(parents=True, exist_ok=True)
-    return base / "SCRATCHPAD.md"
+    return base / name
 
 
 # ── Session Summary Builder ──────────────────────────────────────────────
@@ -200,7 +212,12 @@ def write_scratchpad(session: Session) -> Path:
 
     Returns the path to the SCRATCHPAD.md file.
     """
-    path = _scratchpad_path()
+    # Registry-aware key (a stamped project_key wins; an aliased legacy label
+    # resolves to its real project) — bare canonicalization would split a
+    # renamed project's buffer across two files in the shared fallback dir.
+    from trace_mcp.project_identity import session_project_key
+
+    path = _scratchpad_path(session_project_key(session.metadata) or None)
 
     section = _build_session_section(session)
     header = (

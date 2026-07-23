@@ -286,20 +286,31 @@ class JsonFileStorage(TraceStorage):
                 logger.warning("Skipping malformed session file: %s", path)
         return summaries
 
-    async def session_brief(self, project: str | None = None, scan_cap: int = 25) -> dict[str, Any]:
+    async def session_brief(
+        self, project: str | None = None, scan_cap: int = 25, read_ceiling: int = 200
+    ) -> dict[str, Any]:
         """Cheap, BOUNDED session orientation for the start_session bootstrap.
 
-        Scans at most ``scan_cap`` most-recent session files (never the whole
-        history) so the opening assistant turn is not tempted to fan out into
+        Newest-first scan that stops at ``scan_cap`` matches or after examining
+        ``read_ceiling`` files, whichever comes first — never the whole history,
+        so the opening assistant turn is not tempted to fan out into
         ``trace_list_sessions``/``trace_get_events``/``trace_health_check`` —
         the per-turn block-count inflation behind the Claude Code thinking-block
         400 (see docs/upstream-claude-code-thinking-block-400.md).
 
-        Returns: ``matched`` (matching sessions found within the scan window),
-        ``most_recent`` (brief of the newest match, or None), ``scanned`` (files
-        read), and ``capped`` (True when more files exist beyond the window).
+        The former single ``scan_cap``-file window made the brief assert a false
+        absolute: a project whose newest session sat 26 files back in a busy
+        shared store read as "no prior sessions". Matches are now sought through
+        a much deeper (still bounded) window, and when even that window ends
+        with more files beyond it, ``window_exhausted`` says so — the caller can
+        report "none found in the newest N" instead of "none exist".
 
-        Side effects: reads up to ``scan_cap`` files from the sessions directory.
+        Returns: ``matched``, ``most_recent`` (brief of the newest match, or
+        None), ``scanned`` (files read), ``capped`` (more files exist beyond
+        what was scanned), ``window_exhausted`` (the read ceiling was hit with
+        more files beyond it), and ``read_ceiling``.
+
+        Side effects: reads up to ``read_ceiling`` files from the sessions dir.
         """
         # INV-4: canonical-key match, same as list_sessions (lazy import breaks
         # the json_file <-> project_identity cycle).
@@ -312,7 +323,9 @@ class JsonFileStorage(TraceStorage):
         scanned = 0
         matched = 0
         most_recent: dict[str, Any] | None = None
-        for path in files[:scan_cap]:
+        for path in files[:read_ceiling]:
+            if matched >= scan_cap:
+                break
             scanned += 1
             try:
                 with open(path) as f:
@@ -336,7 +349,9 @@ class JsonFileStorage(TraceStorage):
             "matched": matched,
             "most_recent": most_recent,
             "scanned": scanned,
-            "capped": total > scan_cap,
+            "capped": total > scanned,
+            "window_exhausted": scanned >= read_ceiling and total > read_ceiling,
+            "read_ceiling": read_ceiling,
         }
 
     async def delete_session(self, session_id: str) -> None:
