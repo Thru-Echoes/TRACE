@@ -86,6 +86,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`identity apply` no longer logs mints that never happened.** Migration
+  records were appended to `migrations.jsonl` inside the registry transaction;
+  when the write failed (e.g. an alias-uniqueness violation), the registry
+  correctly persisted nothing while the append-only audit log already claimed
+  the mints occurred. Records are now buffered and written only after the
+  registry commit — a migration log that lies is worse than no log at all.
+- **`identity merge-stores` refuses a corrupt target store.** The non-strict
+  loader returned a fresh store on corruption, so the merged result silently
+  replaced the damaged-but-recoverable original — the one file the merge keeps
+  no premerge backup of. The target is now loaded strictly and corruption
+  aborts the merge with the original untouched.
+- **`identity check` and `identity scan` treat the `auto` quarantine as an
+  expected population, not drift.** `check` flagged every `auto` session as an
+  unregistered label, so a store holding any auto session could never reach the
+  exit-0 verification the migration runbook requires; `scan` proposed a plan
+  entry for the reserved key that `apply` then re-refused. Reserved-key labels
+  are now excluded from both.
+- **`identity adopt` no longer rewrites the captured display label.** It
+  stamped `project_key` and also overwrote `metadata.project` — an in-place
+  mutation of a captured field beyond what the alias-table-first rule
+  sanctions. Only the additive key is stamped now; every identity-aware
+  consumer resolves the session through it while the record keeps showing what
+  was originally captured.
+- **`identity scan` refuses to overwrite an existing plan file.** The plan is
+  where the operator's decisions live between `scan` and `apply`; a re-run
+  silently clobbered those edits.
+- **`identity snapshot` archives a relocated knowledge directory.** With
+  `TRACE_KNOWLEDGE_DIR` outside the TRACE home, stores were counted in the
+  manifest but absent from the archive — and the marker the snapshot writes is
+  what green-lights the destructive merge phase. The external directory is now
+  included and the manifest records its location.
+- **`identity merge-stores` holds the target store's lock** for the
+  load→union→save→rename span (the mtime/lock preflight is advisory and racy),
+  and `--key` now resolves aliases and display labels to the registered key
+  instead of skipping them.
 - **The project registry did not resolve an entry by its own display label.**
   `ProjectRegistry.resolve()` matched a label against an entry's key and aliases but
   not its display label, so an entry whose display label does not canonicalize to its
