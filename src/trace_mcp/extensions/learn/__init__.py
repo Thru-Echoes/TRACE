@@ -17,10 +17,16 @@ from typing import TYPE_CHECKING, cast, get_args
 from trace_mcp import project_identity as pident
 from trace_mcp.extension_hooks import register_extract_hook, register_recall_hook
 from trace_mcp.extensions.learn import extraction, matching, store
-from trace_mcp.extensions.learn.config import load_config
+from trace_mcp.extensions.learn.config import effective_learn_config, load_config
+from trace_mcp.extensions.learn.egress import egress_project
 from trace_mcp.extensions.learn.embeddings import get_embedding_provider
 from trace_mcp.extensions.learn.matching import DecayParams
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, LearningCategory
+
+if TYPE_CHECKING:
+    from trace_mcp.extensions.learn.config import LearnConfig
+    from trace_mcp.extensions.learn.embeddings import EmbeddingProvider
+    from trace_mcp.extensions.learn.matching import MatchingBackend
 
 _VALID_CATEGORIES = get_args(LearningCategory)
 
@@ -61,8 +67,44 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         evergreen_floor=_config.evergreen_floor,
     )
 
-    async def _embed_learnings(learnings: list[Learning]) -> bool:
+    # Per-project ratcheted (config, backend, provider) triples. Keyed by the
+    # canonical key PLUS the entry's posture fields, so an edited registry entry
+    # takes effect on its next call rather than serving a stale triple for the
+    # life of the process. Only ratcheted projects land here — the common
+    # unrestricted path returns the process-wide globals via `eff is _config`.
+    _ratchet_cache: dict[tuple, tuple[LearnConfig, MatchingBackend, EmbeddingProvider | None]] = {}
+
+    def _effective(project: str) -> tuple[LearnConfig, MatchingBackend, EmbeddingProvider | None]:
+        """The (config, matching backend, embedding provider) to use for *project*.
+
+        Applies the registry's restrict-only privacy ratchet (ADR-006 §6).
+        Raises ``RegistryUnavailableError`` when the registry exists but cannot
+        be read — the caller's knowledge/egress path must fail closed, because
+        the posture that would forbid the egress may live in the unreadable file.
+        """
+        eff = effective_learn_config(_config, project)
+        if eff is _config:
+            return _config, _backend, _embedding_provider
+        cache_key = (
+            pident.key_for_label(project),
+            eff.local_only,
+            eff.llm_enabled,
+            eff.embedding_backend,
+        )
+        cached = _ratchet_cache.get(cache_key)
+        if cached is None:
+            cached = (eff, matching.get_default_backend(eff), get_embedding_provider(eff))
+            _ratchet_cache[cache_key] = cached
+        return cached
+
+    async def _embed_learnings(
+        learnings: list[Learning],
+        provider: EmbeddingProvider | None = None,
+    ) -> bool:
         """Generate embeddings for learnings that need them.  Returns True if any were updated.
+
+        *provider* is the (possibly ratchet-downgraded) provider for the calling
+        project; ``None`` falls back to the process-wide one.
 
         Raises ``LLMFallbackError`` in strict mode when the embedding provider
         fails, rather than silently saving un-embedded learnings (which would
@@ -70,45 +112,78 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         """
         from trace_mcp.extensions.learn.config import LLMFallbackError
 
-        if _embedding_provider is None or not learnings:
+        active = provider if provider is not None else _embedding_provider
+        if active is None or not learnings:
             return False
         try:
             texts = [lrn.content for lrn in learnings]
-            vecs = await _embedding_provider.embed_texts(texts)
+            vecs = await active.embed_texts(texts)
             for lrn, vec in zip(learnings, vecs, strict=True):
                 lrn.embedding = vec
-                lrn.embedding_model = _embedding_provider.model_name
+                lrn.embedding_model = active.model_name
             return True
         except Exception as exc:
             if _config.strict_llm:
                 logger.error(
                     "Embedding generation failed in strict mode (provider=%s) — "
                     "refusing to silently save un-embedded learnings.",
-                    getattr(_embedding_provider, "model_name", "unknown"),
+                    getattr(active, "model_name", "unknown"),
                 )
                 raise LLMFallbackError(
                     f"Embedding generation failed "
-                    f"(provider={getattr(_embedding_provider, 'model_name', 'unknown')}): "
+                    f"(provider={getattr(active, 'model_name', 'unknown')}): "
                     f"{exc}. Strict mode is ON — set TRACE_STRICT_LLM=false to "
                     f"allow saving un-embedded learnings."
                 ) from exc
             logger.warning(
                 "Failed to generate embeddings (provider=%s) — "
                 "saving learnings without embeddings. Strict mode is OFF.",
-                getattr(_embedding_provider, "model_name", "unknown"),
+                getattr(active, "model_name", "unknown"),
                 exc_info=True,
             )
             return False
 
-    def _needs_embedding(ks: KnowledgeStore) -> list[Learning]:
-        """Return learnings that need (re-)embedding."""
-        if _embedding_provider is None:
+    def _needs_embedding(ks: KnowledgeStore, provider: EmbeddingProvider | None = None) -> list[Learning]:
+        """Return learnings that need (re-)embedding under *provider* (default: process-wide)."""
+        active = provider if provider is not None else _embedding_provider
+        if active is None:
             return []
-        return [
-            lrn
-            for lrn in ks.learnings
-            if lrn.embedding is None or lrn.embedding_model != _embedding_provider.model_name
-        ]
+        return [lrn for lrn in ks.learnings if lrn.embedding is None or lrn.embedding_model != active.model_name]
+
+    def _registry_unavailable_error(project: str, exc: Exception) -> str:
+        return json.dumps(
+            {
+                "error": "project registry unreadable — learn operations fail closed",
+                "detail": str(exc),
+                "project": project,
+            }
+        )
+
+    async def _project_session_ids(project: str) -> list[str]:
+        """Every session id belonging to *project*, by DIRECT GLOB of the store.
+
+        The query layer's ``list_sessions`` caps its scan (500 files) and its
+        result set, silently hiding the OLDEST sessions of a large store —
+        exactly the ones a project-wide extraction exists to mine. Enumerate
+        the directory instead and match by canonical key. Falls back to the
+        query path for storage backends that expose no filesystem location.
+        """
+        from pathlib import Path
+
+        loc = getattr(storage, "location", lambda: "unknown")()
+        if loc == "unknown" or not Path(loc).is_dir():
+            summaries = await storage.list_sessions(project=project, limit=1000)
+            return [s["id"] for s in summaries]
+        key = pident.key_for_label(project)
+        ids: list[str] = []
+        for path in sorted(Path(loc).glob("trace_*.json")):
+            try:
+                meta = json.loads(path.read_text(encoding="utf-8")).get("metadata") or {}
+            except (json.JSONDecodeError, OSError):
+                continue
+            if pident.session_matches_project(meta, key):
+                ids.append(path.stem)
+        return ids
 
     # ── Register hooks so core tools can auto-recall/extract ──
 
@@ -118,23 +193,32 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         tags: list[str] | None,
         limit: int,
     ) -> list[dict]:
+        # Fail loudly-but-open on registry damage: hooks run inside session
+        # capture (start/decision), and capture must never be blocked by a
+        # damaged registry (ADR-006 §6 split) — but with the posture unreadable
+        # no egress-capable backend may run, so recall is skipped entirely.
+        try:
+            _eff, backend, provider = _effective(project)
+        except pident.RegistryUnavailableError as exc:
+            logger.error("Registry unreadable — skipping auto-recall for %r (fail closed on egress): %s", project, exc)
+            return []
         # Lock the full load→embed→save read-modify-write span. This is
         # the highest-frequency knowledge-store mutator (core auto-recall);
         # leaving it unlocked allowed a concurrent locked add to be
         # clobbered (a lost update).
-        with store.project_lock(project):
+        with store.project_lock(project), egress_project(pident.key_for_label(project) or None):
             ks = store.load_store(project)
             if not ks.learnings:
                 return []
-            stale = _needs_embedding(ks)
-            embedded = await _embed_learnings(stale) if stale else False
+            stale = _needs_embedding(ks, provider)
+            embedded = await _embed_learnings(stale, provider) if stale else False
             results = await matching.recall_learnings(
                 ks.learnings,
                 context=context,
                 context_tags=tags,
                 threshold=None,  # Use backend's default_threshold
                 limit=limit,
-                backend=_backend,
+                backend=backend,
                 decay_config=_decay_params,
             )
             if results or embedded:
@@ -146,14 +230,22 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         # (closes the cross-wired-extract bleed, which would also send one
         # project's store to the cloud as another's dedup context).
         await pident.validate_project_session(storage, project, session_id)
-        with store.project_lock(project):  # lock the full read-modify-write span
+        try:
+            eff, _backend_unused, provider = _effective(project)
+        except pident.RegistryUnavailableError as exc:
+            # end_session must complete (capture over attribution); with the
+            # privacy posture unreadable, extraction — an egress-capable path —
+            # is skipped loudly instead of running on the global config.
+            logger.error("Registry unreadable — skipping extraction for %r (fail closed on egress): %s", project, exc)
+            return []
+        with store.project_lock(project), egress_project(pident.key_for_label(project) or None):
             ks = store.load_store(project)
             sess = await storage.get_session(session_id)
-            new_ids = await extraction.extract_from_session_auto(ks, sess, _config)
+            new_ids = await extraction.extract_from_session_auto(ks, sess, eff)
             if new_ids:
                 new_set = set(new_ids)
                 to_embed = [lrn for lrn in ks.learnings if lrn.id in new_set and lrn.embedding is None]
-                await _embed_learnings(to_embed)
+                await _embed_learnings(to_embed, provider)
                 store.save_store(ks)
         return new_ids
 
@@ -183,9 +275,10 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             guard = _reserved_project_error(project)
             if guard:
                 return guard
+            _eff, backend, provider = _effective(project)
             # Lock the full span (recall may backfill
             # embeddings and save — a read-modify-write).
-            with store.project_lock(project):
+            with store.project_lock(project), egress_project(pident.key_for_label(project) or None):
                 ks = store.load_store(project)
                 if not ks.learnings:
                     return json.dumps({"project": project, "results": [], "total": 0})
@@ -193,20 +286,22 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                     results = store.list_learnings(ks)
                     return json.dumps({"project": project, "results": results[:limit], "total": len(results)})
                 # Lazy-embed: generate (or regenerate) embeddings for learnings that need them
-                stale = _needs_embedding(ks)
-                embedded = await _embed_learnings(stale) if stale else False
+                stale = _needs_embedding(ks, provider)
+                embedded = await _embed_learnings(stale, provider) if stale else False
                 results = await matching.recall_learnings(
                     ks.learnings,
                     context=context or "",
                     context_tags=tags,
                     threshold=threshold,
                     limit=limit,
-                    backend=_backend,
+                    backend=backend,
                     decay_config=_decay_params,
                 )
                 if results or embedded:
                     store.save_store(ks)
                 return json.dumps({"project": project, "results": results, "total": len(results)})
+        except pident.RegistryUnavailableError as exc:
+            return _registry_unavailable_error(project, exc)
         except Exception as exc:
             from trace_mcp.extensions.learn.config import LLMFallbackError
 
@@ -249,10 +344,11 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                         "error": f"Invalid category '{category}'. Must be one of: {_VALID_CATEGORIES}",
                     }
                 )
+            _eff, _bk, provider = _effective(project)
             # Lock the full load->mutate->save span so concurrent
             # multi-session adds to the same project don't lose updates
             # (last-writer-wins on the shared store).
-            with store.project_lock(project):
+            with store.project_lock(project), egress_project(pident.key_for_label(project) or None):
                 ks = store.load_store(project)
                 if _config.dedup_enabled:
                     result = store.add_learning_dedup(
@@ -284,9 +380,11 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                         tags=tags,
                         extraction_method="manual",
                     )
-                await _embed_learnings([lrn])
+                await _embed_learnings([lrn], provider)
                 store.save_store(ks)
                 return json.dumps({"added": store.learning_to_dict(lrn)})
+        except pident.RegistryUnavailableError as exc:
+            return _registry_unavailable_error(project, exc)
         except Exception as exc:
             from trace_mcp.extensions.learn.config import LLMFallbackError
 
@@ -377,21 +475,21 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             # project's whole store to the cloud alongside another's events).
             if session_id:
                 await pident.validate_project_session(storage, project, session_id)
+            eff, _bk, provider = _effective(project)
             # Lock the full multi-session extract→embed→save span.
-            with store.project_lock(project):
+            with store.project_lock(project), egress_project(pident.key_for_label(project) or None):
                 ks = store.load_store(project)
                 all_new_ids: list[str] = []
 
                 if session_id:
                     session = await storage.get_session(session_id)
-                    new_ids = await extraction.extract_from_session_auto(ks, session, _config)
+                    new_ids = await extraction.extract_from_session_auto(ks, session, eff)
                     all_new_ids.extend(new_ids)
                 else:
-                    summaries = await storage.list_sessions(project=project, limit=1000)
-                    for s in summaries:
+                    for sid in await _project_session_ids(project):
                         try:
-                            session = await storage.get_session(s["id"])
-                            new_ids = await extraction.extract_from_session_auto(ks, session, _config)
+                            session = await storage.get_session(sid)
+                            new_ids = await extraction.extract_from_session_auto(ks, session, eff)
                             all_new_ids.extend(new_ids)
                         except FileNotFoundError:
                             continue
@@ -400,7 +498,7 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                 if all_new_ids:
                     new_set = set(all_new_ids)
                     to_embed = [lrn for lrn in ks.learnings if lrn.id in new_set and lrn.embedding is None]
-                    await _embed_learnings(to_embed)
+                    await _embed_learnings(to_embed, provider)
                     store.save_store(ks)
 
                 return json.dumps(
@@ -411,6 +509,8 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                         "total_learnings": len(ks.learnings),
                     }
                 )
+        except pident.RegistryUnavailableError as exc:
+            return _registry_unavailable_error(project, exc)
         except (pident.ProjectMismatchError, pident.ProjectKeyError) as exc:
             return json.dumps(
                 {"error": "project/session coherence check failed", "detail": str(exc), "project": project}

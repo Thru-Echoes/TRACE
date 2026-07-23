@@ -93,13 +93,17 @@ def _assert_store_identity(ks: KnowledgeStore, project: str, path: Path) -> None
 def load_store(
     project: str,
     directory: str | None = None,
-    *,
-    strict: bool = False,
 ) -> KnowledgeStore:
     """Load a project's knowledge store from disk.
 
-    If *strict* is True, raises StoreLoadError on parse failures instead
-    of silently returning a fresh store (useful for testing / diagnostics).
+    A missing file returns a fresh empty store — that is the normal first-use
+    state, not damage. A file that EXISTS but cannot be parsed or validated
+    raises ``StoreLoadError`` (fail closed): the previous silent fresh-store
+    fallback meant the next save atomically REPLACED the corrupt original with
+    the empty store — destroying a recoverable file and reading to the caller
+    as "this project has no learnings" when the truth was "this project's
+    learnings are unreadable". A missed integrity failure must be visible to
+    the caller, not buried in a log line.
     """
     path = _store_path(project, directory)
     if not path.exists():
@@ -108,17 +112,15 @@ def load_store(
         raw = json.loads(path.read_text(encoding="utf-8"))
         ks = KnowledgeStore.model_validate(raw)
     except json.JSONDecodeError as exc:
-        msg = f"Corrupt JSON in knowledge store {path}: {exc}"
-        logger.warning(msg)
-        if strict:
-            raise StoreLoadError(msg) from exc
-        return KnowledgeStore(project=project)
+        raise StoreLoadError(
+            f"Corrupt JSON in knowledge store {path}: {exc}. Repair or move the file — "
+            "proceeding would replace it with an empty store on the next save."
+        ) from exc
     except Exception as exc:
-        msg = f"Failed to validate knowledge store {path}: {exc}"
-        logger.warning(msg)
-        if strict:
-            raise StoreLoadError(msg) from exc
-        return KnowledgeStore(project=project)
+        raise StoreLoadError(
+            f"Failed to validate knowledge store {path}: {exc}. Repair or move the file — "
+            "proceeding would replace it with an empty store on the next save."
+        ) from exc
     _assert_store_identity(ks, project, path)
     return ks
 
