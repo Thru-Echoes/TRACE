@@ -1,6 +1,6 @@
 # ADR 006: Project identity and cross-project isolation
 
-**Status**: proposed
+**Status**: accepted
 **Date**: 2026-07-17
 
 ## Context

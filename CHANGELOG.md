@@ -7,6 +7,70 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Canonical project identity (spec v0.5.0, schema `trace-v0.5.json`).** A project
+  is now identified by a stable canonical key derived from its display label, rather
+  than by the label itself. Previously, storage identity and query identity were two
+  inconsistent equivalence relations over the same labels: session queries compared
+  labels with exact case-sensitive equality, so case variants of one project read as
+  separate projects, while the knowledge store's filename derivation on a
+  case-insensitive filesystem silently merged some of those same pairs. The canonical
+  key is casefolded and free of path separators, so filename identity equals semantic
+  identity and neither failure can occur.
+  - `metadata.project_key` (optional, spec §3.2.2) carries the key. It is
+    authoritative when present and is stamped only by a pinned server process, which
+    is the only configuration with an authoritative answer; an unpinned process
+    asserts nothing rather than guessing.
+  - Sessions written before v0.5 carry no key and resolve through the alias registry
+    or the canonical algorithm. **No capture record is rewritten to add the field** —
+    retroactively editing capture records is a larger provenance harm than the
+    missing field (spec §4.5, documented-divergence pattern).
+  - Spec §3.2.2 defines the key algorithm normatively and **independently of any
+    implementation's filename sanitization**, so a conforming producer cannot
+    accidentally define identity as "whatever my filesystem layer does".
+  - §4.5 forbids consumers from splitting one project across equal-key labels or
+    merging distinct keys.
+- **PROV export carries `trace:projectKey`** beside the untouched `trace:project`
+  display literal, plus an optional reified project entity carrying one
+  `trace:aliasLabel` per historical label. Both are new terms **within the frozen
+  `ns/v0.3#` namespace**, so no `@context` change is required and previously exported
+  documents are neither invalidated nor regenerated. `trace:project` keeps its
+  display-label meaning permanently — the exported corpus carries drifted labels
+  under it, and re-meaning the predicate would silently reinterpret those artifacts.
+  The key is resolved through the alias table, so a renamed project exports its real
+  key rather than one derived from its old label.
+- **Published project-registry interchange schema** (`schemas/trace-projects-v1.json`,
+  spec §7.2). Published rather than treated as private state because interpreting a
+  historical export depends on the alias table. Its `version` field is independent of
+  the session schema version — the two formats change on different cadences.
+- Markdown export gains a **Project key** line, shown only when the session actually
+  carries one.
+
+### Changed
+
+- `SCHEMA_VERSION` 0.4.1 → **0.5.0** (an on-disk format change), and the schema file
+  is renamed `trace-v0.4.json` → **`trace-v0.5.json`** with the `$id` cascade applied
+  across the generator, validator, docs, and conformance tests. Per ADR 002 D6 the
+  spec URL in `Session.context` and the PROV namespace URI **remain at v0.3** —
+  additive extensions are valid within the same namespace.
+- Backward and forward compatible in both directions: a v0.4 document validates
+  against the v0.5 schema (`project_key` is optional), and a v0.5 document validates
+  against the v0.4 schema (`additionalProperties` is permitted throughout).
+
+### Fixed
+
+- **The project registry did not resolve an entry by its own display label.**
+  `ProjectRegistry.resolve()` matched a label against an entry's key and aliases but
+  not its display label, so an entry whose display label does not canonicalize to its
+  key was unreachable by that label — leaving every session recorded under it
+  unattributable. Not reachable through enrollment (which derives the key from the
+  label) but reachable through a human-authored migration plan, which may pair any
+  label with any key. Display labels now participate in resolution and, necessarily,
+  in the alias-uniqueness check: an identifier that resolves must also be checked for
+  uniqueness, or the registry could hold two entries that one label resolves to
+  ambiguously.
+
 ### Security
 
 - **`trace-mcp init` no longer writes a dependency-confused `.mcp.json` from
