@@ -322,12 +322,17 @@ class TestAdopt:
 
         doc = json.loads((_isolated_home / "sessions" / "trace_20260101_x.json").read_text())
         assert doc["metadata"]["project_key"] == "real-project"
-        assert doc["metadata"]["project"] == "real-project"
+        # The captured display label is NEVER rewritten (ADR-006 §7 sanctions
+        # stamping the additive key + appending the event, nothing more) — the
+        # record keeps showing what was originally captured.
+        assert doc["metadata"]["project"] == "auto", "adopt rewrote the captured display label"
         # Append-shaped: exactly one new state_change event recording old→new.
         changes = [e for e in doc["events"] if e["type"] == "state_change"]
         assert len(changes) == 1
         assert changes[0]["state_change"]["old_value"] == "auto"
         assert changes[0]["state_change"]["new_value"] == "real-project"
+        # And every identity-aware consumer resolves the session to the target.
+        assert pident.session_project_key(doc["metadata"]) == "real-project"
 
     def test_refuses_a_real_project_session(self, _isolated_home: Path) -> None:
         _write_session(_isolated_home, "trace_20260101_y", "waggle", project_key="waggle")
@@ -434,3 +439,153 @@ def test_server_dispatches_identity(monkeypatch: pytest.MonkeyPatch) -> None:
         server.main()
     assert exc.value.code == 0
     assert called["argv"] == ["check"]
+
+
+# ── adversarial-review regression guards ───────────────────────────────────
+
+
+class TestReservedQuarantineHandling:
+    """The auto quarantine is an expected population, not drift.
+
+    Before these guards, scan proposed a plan entry for the reserved `auto` key
+    (which apply then re-refused, confusingly), and check flagged every auto
+    session as an unknown label — so a store holding ANY auto session could
+    never pass the migration runbook's `identity check` exit-0 criterion.
+    """
+
+    def test_scan_excludes_reserved_session_labels(self, _isolated_home: Path) -> None:
+        _write_session(_isolated_home, "trace_20260101_a", "auto")
+        _write_session(_isolated_home, "trace_20260101_b", "waggle")
+
+        _run("scan", "-o", str(_isolated_home / "plan.json"))
+        plan = json.loads((_isolated_home / "plan.json").read_text())
+        keys = [p["key"] for p in plan["projects"]]
+        assert keys == ["waggle"], f"reserved keys leaked into the plan: {keys}"
+
+    def test_check_passes_with_auto_sessions_present(self, _isolated_home: Path) -> None:
+        _enroll("waggle")
+        _write_session(_isolated_home, "trace_20260101_a", "auto")
+        _write_session(_isolated_home, "trace_20260101_b", "waggle")
+
+        code, out = _run("check")
+        assert code == 0, f"the auto quarantine was reported as drift: {out}"
+
+
+class TestApplyAuditAtomicity:
+    def test_failed_apply_logs_no_mint_records(self, _isolated_home: Path) -> None:
+        """The migration log must record what HAPPENED, not what was attempted.
+
+        An alias-collision plan makes the registry write fail atomically; a mint
+        record for an entry that never persisted would make the repair's own
+        audit trail lie.
+        """
+        _run("snapshot")
+        plan = _isolated_home / "plan.json"
+        plan.write_text(
+            json.dumps(
+                {
+                    "projects": [
+                        {"key": "alpha", "display_label": "Alpha", "aliases": ["SHARED-NAME"]},
+                        {"key": "beta", "display_label": "Beta", "aliases": ["shared-name"]},
+                    ]
+                }
+            )
+        )
+        code, out = _run("apply", "--plan", str(plan))
+        assert code == 1 and "could not apply" in out
+
+        pident._reset_registry_cache()
+        assert pident.load_registry(required=False) is None, "a partial registry was persisted"
+        lines = [json.loads(x) for x in (_isolated_home / "migrations.jsonl").read_text().splitlines()]
+        mints = [r for r in lines if r.get("op") == "mint"]
+        assert mints == [], f"the audit log recorded mints that never persisted: {mints}"
+
+
+class TestMergeTargetSafety:
+    def test_merge_refuses_a_corrupt_target(self, _isolated_home: Path) -> None:
+        """A corrupt target must abort the merge, not be silently replaced.
+
+        The non-strict loader hands back a fresh store on corruption; saving the
+        union over it would destroy the damaged-but-recoverable original — the
+        one file merge-stores keeps no premerge copy of.
+        """
+        _run("snapshot")
+        _enroll("trace-mcp", aliases=["TRACE"])
+        corrupt = _isolated_home / "knowledge" / "trace-mcp.json"
+        corrupt.write_text("{THIS IS NOT JSON")
+        _write_store(_isolated_home, "trace", learnings=["from source"], project="TRACE")
+
+        code, out = _run("merge-stores", "--key", "trace-mcp")
+        assert code == 1 and "unreadable" in out
+        assert corrupt.read_text() == "{THIS IS NOT JSON", "the corrupt target was overwritten"
+        assert (_isolated_home / "knowledge" / "trace.json").exists(), "a source was renamed despite the abort"
+
+    def test_merge_key_resolves_an_alias(self, _isolated_home: Path) -> None:
+        _run("snapshot")
+        _enroll("trace-mcp", aliases=["TRACE"])
+        _write_store(_isolated_home, "trace-mcp", learnings=["a"], project="trace-mcp")
+        _write_store(_isolated_home, "trace", learnings=["b"], project="TRACE")
+
+        code, out = _run("merge-stores", "--key", "TRACE")
+        assert code == 0, out
+        assert "resolved to registered key 'trace-mcp'" in out
+        merged = json.loads((_isolated_home / "knowledge" / "trace-mcp.json").read_text())
+        assert {lrn["content"] for lrn in merged["learnings"]} == {"a", "b"}
+
+    def test_merge_fails_closed_when_the_target_lock_appears_after_preflight(
+        self, _isolated_home: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The preflight is advisory; the store lock is the guarantee.
+
+        Simulates the race by disabling the preflight and pre-holding the
+        target's lock: the merge must abort without touching anything.
+        """
+        _run("snapshot")
+        _enroll("trace-mcp", aliases=["TRACE"])
+        _write_store(_isolated_home, "trace-mcp", learnings=["a"], project="trace-mcp")
+        source = _write_store(_isolated_home, "trace", learnings=["b"], project="TRACE")
+        monkeypatch.setattr(identity_cli, "_preflight_merge", lambda paths, out: True)
+        monkeypatch.setenv("TRACE_LOCK_TIMEOUT", "0.2")
+        # Pre-hold the target's lock as a live writer would.
+        (_isolated_home / "knowledge" / "trace-mcp.json.lock").write_text(f"{__import__('os').getpid()}:1")
+
+        code, out = _run("merge-stores", "--key", "trace-mcp")
+        assert code == 1 and "store lock" in out
+        assert source.exists(), "a source was renamed despite the held lock"
+        merged = json.loads((_isolated_home / "knowledge" / "trace-mcp.json").read_text())
+        assert {lrn["content"] for lrn in merged["learnings"]} == {"a"}, "the target was written under a held lock"
+
+
+class TestScanPlanPreservation:
+    def test_scan_refuses_to_overwrite_an_existing_plan(self, _isolated_home: Path) -> None:
+        """A plan file holds the human's decisions between scan and apply."""
+        _write_session(_isolated_home, "trace_20260101_a", "waggle")
+        plan = _isolated_home / "plan.json"
+        assert _run("scan", "-o", str(plan))[0] == 0
+        plan.write_text('{"projects": [], "HUMAN_EDITS": true}')
+
+        code, out = _run("scan", "-o", str(plan))
+        assert code == 1 and "refusing to overwrite" in out
+        assert "HUMAN_EDITS" in plan.read_text(), "the edited plan was clobbered"
+
+
+class TestSnapshotExternalKnowledge:
+    def test_external_knowledge_dir_is_archived(
+        self, _isolated_home: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The marker green-lights destructive merges; the backup it attests to
+        must actually contain the knowledge the merge will destroy."""
+        external = tmp_path / "external-knowledge"
+        external.mkdir()
+        monkeypatch.setenv("TRACE_KNOWLEDGE_DIR", str(external))
+        (external / "waggle.json").write_text(json.dumps({"project": "waggle", "learnings": []}))
+
+        code, _ = _run("snapshot")
+        assert code == 0
+        marker = json.loads((_isolated_home / "backups" / ".snapshot-marker.json").read_text())
+        assert marker["knowledge_dir_external"] is True
+        assert marker["counts"]["knowledge_stores"] == 1
+        with tarfile.open(marker["archive"]) as tar:
+            assert any("waggle.json" in n for n in tar.getnames()), (
+                "the external knowledge store was counted but not archived"
+            )
