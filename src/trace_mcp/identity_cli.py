@@ -542,12 +542,13 @@ def cmd_merge_stores(args: argparse.Namespace, out) -> int:
         # (fail closed) rather than merge under them.
         try:
             with learn_store.project_lock(key):
-                # Fail closed on a corrupt TARGET: the non-strict loader would
-                # hand back a fresh store, and saving the union over it would
-                # replace the damaged-but-recoverable original — the one file
-                # this command does not keep a premerge copy of.
+                # Fail closed on a corrupt TARGET: replacing the
+                # damaged-but-recoverable original — the one file this command
+                # keeps no premerge copy of — would be silent data loss.
+                # (load_store raises on corruption for every caller now; the
+                # explicit handling here turns it into operator guidance.)
                 try:
-                    target_store = learn_store.load_store(key, strict=True)
+                    target_store = learn_store.load_store(key)
                 except learn_store.StoreLoadError as exc:
                     print(f"Error: target store for '{key}' is unreadable ({exc}). Repair or move it first.", file=out)
                     return 1

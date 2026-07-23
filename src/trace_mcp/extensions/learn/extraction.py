@@ -323,6 +323,12 @@ async def extract_from_session_llm(
         # Egress-as-provenance: record the fact of the cloud call before making
         # it. Attestation failure is handled by this try's strict/permissive
         # logic like any LLM failure — and no content leaves the machine.
+        # This site knows the session, so the canonical key is passed explicitly
+        # (registry-aware: an aliased legacy label resolves to its real key).
+        # The matching/embedding sites can't do this and rely on the
+        # egress_project context set at the tool boundary instead.
+        from trace_mcp.project_identity import session_project_key
+
         attest_egress(
             provider="openai",
             endpoint="chat.completions",
@@ -332,6 +338,7 @@ async def extract_from_session_llm(
             item_count=len(session.events),
             project=session.metadata.project,
             session_id=session.id,
+            project_key=session_project_key(session.metadata) or None,
         )
         client = AsyncOpenAI(api_key=config.openai_api_key)
         response = await client.chat.completions.create(

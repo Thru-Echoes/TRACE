@@ -2,6 +2,14 @@
 
 Records the FACT of egress — provider, endpoint, model, purpose, item count,
 and project/session when known at the call site — never the content itself.
+
+Project attribution (v0.5): every ledger row carries a ``project_key`` column.
+The matching and embedding call sites sit in layers that deliberately know
+nothing about projects, so the key travels in a context variable set at the
+tool boundary (``egress_project``) rather than being threaded through every
+signature between the tool and the provider. Context variables propagate
+through ``await``, so the attribution survives the async call chain. Rows
+written before v0.5 carry no ``project_key`` and are never rewritten.
 One JSONL line is appended BEFORE each cloud call (an intent attestation):
 if the attestation cannot be written, the cloud call must not happen.
 Unrecorded egress is the exact failure mode this ledger exists to prevent, so
@@ -24,16 +32,37 @@ Exports: ``attest_egress`` (the pre-call writer), ``egress_log_path``
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+from collections.abc import Iterator
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from pathlib import Path
 
-__all__ = ["EgressAttestationError", "attest_egress", "egress_log_path"]
+__all__ = ["EgressAttestationError", "attest_egress", "egress_log_path", "egress_project"]
+
+_current_project_key: ContextVar[str | None] = ContextVar("trace_egress_project_key", default=None)
 
 
 class EgressAttestationError(RuntimeError):
     """The egress ledger could not be written; the cloud call must not proceed."""
+
+
+@contextlib.contextmanager
+def egress_project(project_key: str | None) -> Iterator[None]:
+    """Attribute every egress attested inside this context to *project_key*.
+
+    Set at the tool/hook boundary (the one layer that knows the project), read
+    by ``attest_egress`` in whatever provider layer the cloud call happens.
+    ``None`` — e.g. a degenerate label that yields no canonical key — leaves
+    rows unattributed rather than guessing.
+    """
+    token = _current_project_key.set(project_key)
+    try:
+        yield
+    finally:
+        _current_project_key.reset(token)
 
 
 def egress_log_path() -> Path:
@@ -59,8 +88,15 @@ def attest_egress(
     project: str | None = None,
     session_id: str | None = None,
     base_url: str | None = None,
+    project_key: str | None = None,
 ) -> None:
     """Append one intent record to the egress ledger, BEFORE the cloud call.
+
+    ``project_key`` is the canonical-key attribution column (additive, v0.5).
+    An explicit argument wins; otherwise the value set by the enclosing
+    ``egress_project`` context applies — which is how the matching/embedding
+    sites, whose layers know nothing about projects, still write attributed
+    rows. ``project`` remains the display label as before.
 
     Inputs describe the call about to be made: ``provider`` (e.g. "openai"),
     ``endpoint`` ("chat.completions" | "embeddings"), ``model``, ``purpose``
@@ -88,6 +124,7 @@ def attest_egress(
         "project": project,
         "session_id": session_id,
         "base_url": base_url,
+        "project_key": project_key if project_key is not None else _current_project_key.get(),
     }
     line = json.dumps(entry, separators=(",", ":")) + "\n"
     path = egress_log_path()

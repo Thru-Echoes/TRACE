@@ -101,11 +101,43 @@ strict config (`TRACE_STRICT_LLM=true`) it raises. This is INV-5 in
 OpenAI call site appears without an attestation, so the ledger stays complete
 by construction.
 
+**Project attribution (v0.5)**: every row also carries a `project_key` column —
+the canonical project key the call was made on behalf of. The matching and
+embedding rows were previously unattributable (their call sites sit in layers
+that know nothing about projects); the key now travels from the tool boundary
+in a context variable, so all three purposes write attributed rows. Rows
+written before v0.5 have no `project_key` and are never rewritten — resolve
+their `project` display label through the alias registry instead.
+
 To inspect your machine's egress history:
 
 ```bash
 cat ~/.trace/egress.jsonl | python3 -m json.tool --json-lines
 ```
+
+To audit one project's egress (joining old label-only rows via the registry is
+the consumer's job; for post-v0.5 rows the key column suffices):
+
+```bash
+python3 - <<'EOF'
+import json, pathlib
+key = "my-project"
+for line in pathlib.Path.home().joinpath(".trace/egress.jsonl").read_text().splitlines():
+    row = json.loads(line)
+    if row.get("project_key") == key:
+        print(row["ts"], row["purpose"], row["endpoint"], row["item_count"])
+EOF
+```
+
+**Per-project privacy ratchet (v0.5)**: a project's registry entry
+(`~/.trace/projects.json`) can carry `{"local_only": true}`,
+`{"llm_enabled": false}`, or `{"embedding_backend_max": "local"}` under its
+`config` key. These apply at all three egress decision points as a
+**restrict-only** ratchet: an entry can force a confidentiality-bound project
+fully local against a permissive machine-global config, but can never loosen a
+global restriction. If the registry exists but is unreadable, learn operations
+fail closed for every project — the posture that would forbid the egress may
+live in the unreadable file.
 
 ## Switching backends re-embeds your store
 

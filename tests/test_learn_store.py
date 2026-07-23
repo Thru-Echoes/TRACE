@@ -43,35 +43,27 @@ class TestLoadStore:
         assert loaded.learnings[0].content == "persisted insight"
         assert loaded.learnings[0].tags == ["test"]
 
-    def test_corrupt_json_returns_empty(self, tmp_path):
-        """Corrupt file → fresh store (default lenient mode)."""
-        path = tmp_path / "corrupt.json"
-        path.write_text("{invalid json!!!", encoding="utf-8")
-        ks = load_store("corrupt", directory=str(tmp_path))
-        assert ks.project == "corrupt"
-        assert ks.learnings == []
+    def test_corrupt_json_raises(self, tmp_path):
+        """Corrupt file → StoreLoadError, and the original stays on disk.
 
-    def test_corrupt_json_strict_raises(self, tmp_path):
-        """Corrupt file → StoreLoadError in strict mode."""
+        The former lenient fresh-store fallback meant the next save atomically
+        replaced the damaged-but-recoverable original with an empty store —
+        the last silent integrity degrade in the learn extension.
+        """
         path = tmp_path / "corrupt.json"
         path.write_text("{invalid json!!!", encoding="utf-8")
         with pytest.raises(StoreLoadError, match="Corrupt JSON"):
-            load_store("corrupt", directory=str(tmp_path), strict=True)
+            load_store("corrupt", directory=str(tmp_path))
+        assert path.read_text(encoding="utf-8") == "{invalid json!!!", "the corrupt file was touched"
 
-    def test_invalid_schema_returns_empty(self, tmp_path):
-        """Valid JSON but wrong schema → fresh store."""
+    def test_invalid_schema_raises(self, tmp_path):
+        """Valid JSON but wrong schema → StoreLoadError (fail closed)."""
         # File name must be the canonical store path (ADR-006: stores are
         # keyed by canonical project key; 'bad-schema' is already canonical).
         path = tmp_path / "bad-schema.json"
         path.write_text('{"not_a_valid_field": 42}', encoding="utf-8")
-        ks = load_store("bad-schema", directory=str(tmp_path))
-        assert ks.learnings == []
-
-    def test_invalid_schema_strict_raises(self, tmp_path):
-        path = tmp_path / "bad-schema.json"
-        path.write_text('{"not_a_valid_field": 42}', encoding="utf-8")
         with pytest.raises(StoreLoadError, match="Failed to validate"):
-            load_store("bad-schema", directory=str(tmp_path), strict=True)
+            load_store("bad-schema", directory=str(tmp_path))
 
 
 class TestSaveStore:
@@ -292,17 +284,9 @@ class TestStorePathSanitized:
         assert str(tmp_path) in str(path)
         assert ".." not in path.name
 
-    def test_load_corrupt_json_non_strict(self, tmp_path):
-        """Corrupt JSON returns fresh store in default mode."""
-        path = tmp_path / "corrupt.json"
-        path.write_text("{broken json!!!", encoding="utf-8")
-        ks = load_store("corrupt", directory=str(tmp_path))
-        assert ks.project == "corrupt"
-        assert ks.learnings == []
-
-    def test_load_corrupt_json_strict_raises(self, tmp_path):
-        """Corrupt JSON with strict=True raises StoreLoadError."""
+    def test_load_corrupt_json_raises(self, tmp_path):
+        """Corrupt JSON raises StoreLoadError — fail-closed is the only mode."""
         path = tmp_path / "corrupt.json"
         path.write_text("{broken json!!!", encoding="utf-8")
         with pytest.raises(StoreLoadError, match="Corrupt JSON"):
-            load_store("corrupt", directory=str(tmp_path), strict=True)
+            load_store("corrupt", directory=str(tmp_path))
