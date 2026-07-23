@@ -1,0 +1,165 @@
+{
+  "$defs": {
+    "ProjectConfig": {
+      "additionalProperties": true,
+      "description": "Per-project privacy posture \u2014 a RESTRICT-ONLY ratchet (ADR-006 \u00a76).\n\nA registry entry may *tighten* a global setting (force a client project\nlocal-only) but can never loosen a global restriction; the ratchet itself\nis applied by the learn extension in S4, this is only the carrier.",
+      "properties": {
+        "local_only": {
+          "default": false,
+          "title": "Local Only",
+          "type": "boolean"
+        },
+        "llm_enabled": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Llm Enabled"
+        },
+        "embedding_backend_max": {
+          "default": "any",
+          "enum": [
+            "local",
+            "any"
+          ],
+          "title": "Embedding Backend Max",
+          "type": "string"
+        }
+      },
+      "title": "ProjectConfig",
+      "type": "object"
+    },
+    "ProjectEntry": {
+      "additionalProperties": true,
+      "description": "One canonical project: its key, human label, and every historical alias.",
+      "properties": {
+        "key": {
+          "title": "Key",
+          "type": "string"
+        },
+        "display_label": {
+          "title": "Display Label",
+          "type": "string"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "status": {
+          "default": "active",
+          "enum": [
+            "active",
+            "retired",
+            "quarantined",
+            "merged"
+          ],
+          "title": "Status",
+          "type": "string"
+        },
+        "merged_into": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Merged Into"
+        },
+        "created_at": {
+          "format": "date-time",
+          "title": "Created At",
+          "type": "string"
+        },
+        "enrolled_by": {
+          "default": "",
+          "title": "Enrolled By",
+          "type": "string"
+        },
+        "config": {
+          "$ref": "#/$defs/ProjectConfig"
+        },
+        "notes": {
+          "default": "",
+          "title": "Notes",
+          "type": "string"
+        }
+      },
+      "required": [
+        "key",
+        "display_label"
+      ],
+      "title": "ProjectEntry",
+      "type": "object"
+    },
+    "RegistryChange": {
+      "additionalProperties": true,
+      "description": "An append-only audit entry for every registry mutation.",
+      "properties": {
+        "ts": {
+          "format": "date-time",
+          "title": "Ts",
+          "type": "string"
+        },
+        "actor": {
+          "default": "",
+          "title": "Actor",
+          "type": "string"
+        },
+        "action": {
+          "default": "",
+          "title": "Action",
+          "type": "string"
+        },
+        "details": {
+          "additionalProperties": true,
+          "title": "Details",
+          "type": "object"
+        }
+      },
+      "title": "RegistryChange",
+      "type": "object"
+    }
+  },
+  "additionalProperties": true,
+  "description": "JSON Schema for the TRACE project registry (~/.trace/projects.json): canonical project keys with their display labels and historical aliases. Published because interpreting a historical export depends on this alias table \u2014 an artifact stamped with a drifted display label resolves to its project only through it. The registry `version` field is independent of the session SCHEMA_VERSION.",
+  "properties": {
+    "version": {
+      "default": "1",
+      "title": "Version",
+      "type": "string"
+    },
+    "strict": {
+      "default": false,
+      "title": "Strict",
+      "type": "boolean"
+    },
+    "projects": {
+      "additionalProperties": {
+        "$ref": "#/$defs/ProjectEntry"
+      },
+      "title": "Projects",
+      "type": "object"
+    },
+    "history": {
+      "items": {
+        "$ref": "#/$defs/RegistryChange"
+      },
+      "title": "History",
+      "type": "array"
+    }
+  },
+  "title": "TRACE Project Registry v1",
+  "type": "object",
+  "$id": "https://trace-protocol.org/schemas/trace-projects-v1.json"
+}

@@ -364,6 +364,19 @@
           "title": "Project",
           "type": "string"
         },
+        "project_key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Canonical project key (spec v0.5 \u00a73.2.1) \u2014 authoritative when present. Consumers MUST fall back to resolving `project` through the alias table or the canonical-key algorithm when it is absent, which is the case for every session written before v0.5. Deliberately carries no schema pattern: constraining it would retroactively invalidate live documents. Consumers MUST NOT assume a rewriting intermediary maintains it \u2014 a version-skewed writer preserves the field but does not re-derive it.",
+          "title": "Project Key"
+        },
         "experiment_id": {
           "anyOf": [
             {
@@ -712,7 +725,7 @@
     }
   },
   "additionalProperties": true,
-  "description": "JSON Schema for a session document conforming to the Decision Provenance for AI-Assisted Workflows specification v0.4.1. See: https://trace-protocol.org/v0.3 (namespace URI kept at v0.3# per ADR 002 D6 \u2014 additive extensions are valid within the same namespace).",
+  "description": "JSON Schema for a session document conforming to the Decision Provenance for AI-Assisted Workflows specification v0.5.0. See: https://trace-protocol.org/v0.3 (namespace URI kept at v0.3# per ADR 002 D6 \u2014 additive extensions are valid within the same namespace).",
   "properties": {
     "context": {
       "default": "https://trace-protocol.org/v0.3",
@@ -720,7 +733,7 @@
       "type": "string"
     },
     "trace_version": {
-      "default": "0.4.1",
+      "default": "0.5.0",
       "description": "Wire/schema format version this record conforms to. Decoupled from the package version (trace_mcp.__version__): wire-compatible releases keep this at the schema version. See SCHEMA_VERSION.",
       "title": "Trace Version",
       "type": "string"
@@ -784,7 +797,7 @@
     "id",
     "metadata"
   ],
-  "title": "Decision Provenance Session Document v0.4.1",
+  "title": "Decision Provenance Session Document v0.5.0",
   "type": "object",
-  "$id": "https://trace-protocol.org/schemas/trace-v0.4.json"
+  "$id": "https://trace-protocol.org/schemas/trace-v0.5.json"
 }

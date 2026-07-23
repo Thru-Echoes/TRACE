@@ -1,10 +1,10 @@
 # Decision Provenance for AI-Assisted Workflows
 
-## Specification v0.4.1
+## Specification v0.5.0
 
-**Status**: Stable — additive within the v0.4 line (backward-compatible with v0.3.x / v0.4.0). The package version (currently 0.4.2) may run ahead of this spec/wire version (0.4.1) for hardening releases that change no schema fields.
-**Last Updated**: 2026-05-14
-**JSON Schema**: [`trace-v0.4.json`](../schemas/trace-v0.4.json)
+**Status**: Stable — additive (backward-compatible with v0.3.x / v0.4.x). The package version may run ahead of this spec/wire version for hardening releases that change no schema fields.
+**Last Updated**: 2026-07-22
+**JSON Schema**: [`trace-v0.5.json`](../schemas/trace-v0.5.json)
 **W3C PROV Namespace**: `https://trace-protocol.org/ns/v0.3#`
 
 ---
@@ -63,6 +63,10 @@ A **conforming consumer** is a system that reads conforming documents. It SHOULD
 | **Decision Chain** | A sequence of linked decisions where each revises a predecessor, forming a directed acyclic graph of methodological evolution. |
 | **Direction** | The intellectual origin of a contribution — who conceived the approach. |
 | **Execution** | The operational origin of a contribution — who performed the work. |
+| **Project** | A named stream of work whose sessions, knowledge, and exports form one provenance scope. |
+| **Canonical Project Key** | The stable, casefolded identifier that all consumers compare projects by (see 3.2.2). Immutable for the life of a project. |
+| **Display Label** | A human-facing project name. Many labels may resolve to one canonical key. |
+| **Alias** | A historical display label recorded as resolving to a canonical key, so documents written under an earlier name remain attributable. |
 
 ---
 
@@ -75,7 +79,7 @@ A session document is the top-level unit of this specification. Each document de
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `context` | string | SHOULD | URI identifying the specification version. Default: `"https://trace-protocol.org/v0.3"`. |
-| `trace_version` | string | SHOULD | Semantic version of the specification. Default: `"0.4.1"`. |
+| `trace_version` | string | SHOULD | Semantic version of the specification. Default: `"0.5.0"`. |
 | `id` | string | MUST | Unique identifier for this session. |
 | `created` | datetime | MUST | UTC ISO 8601 timestamp of session start. |
 | `ended` | datetime | MAY | UTC ISO 8601 timestamp of session end. Null while active. |
@@ -92,7 +96,8 @@ A session document is the top-level unit of this specification. Each document de
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `project` | string | MUST | Project name or identifier. |
+| `project` | string | MUST | Project **display label** (see 3.2.2). Unconstrained free text; consumers MUST NOT assume it is canonical. |
+| `project_key` | string | SHOULD | The **canonical project key** (see 3.2.2). Authoritative when present. |
 | `experiment_id` | string | MAY | Experiment or run identifier within the project. |
 | `description` | string | SHOULD | Human-readable description of the session's purpose. |
 | `participants` | Actor[] | SHOULD | Actors involved in this session (see 3.3). |
@@ -115,6 +120,54 @@ Records the computational context in which the session took place. All fields ar
 | `custom` | object | Extension point for domain-specific environment data. |
 
 > **Note on field naming**: The JSON Schema uses `mcp_servers` (for `tools`) and `python_version` (for `runtime_version`) for historical reasons. These names are retained for backward compatibility. Conforming producers SHOULD use the schema field names. This specification uses generic names to remain technology-neutral. **v0.4.1**: the `trace_version` field was removed from `Environment` to eliminate two-source-of-truth — the single canonical version lives on `Session.trace_version`. Conforming consumers MUST silently ignore an unrecognized `environment.trace_version` field when reading pre-v0.4.1 session files (no error, no warning), so that v0.3.x and v0.4.0 sessions remain readable without migration.
+
+#### 3.2.2 Project Identity
+
+A project has two identifiers: a human-facing **display label** (`project`) and a
+**canonical project key** (`project_key`). The label may change and may vary in
+case or punctuation; the key is the stable identity all consumers compare by.
+
+**Canonical key algorithm.** Given a display label, the canonical key is derived by:
+
+1. Normalizing to Unicode NFC.
+2. Trimming leading and trailing whitespace.
+3. Casefolding (Unicode full case folding, not ASCII lowercasing).
+4. Replacing every run of whitespace, `/`, or `_` with a single `-`.
+5. Replacing every run of characters outside `[\w.-]` (Unicode-aware `\w`) with a single `-`.
+6. Collapsing runs of `.` and runs of `-` to a single character.
+7. Stripping leading and trailing `.` and `-`.
+
+The result MUST be non-empty; a label that reduces to the empty string does not
+name a project. The algorithm is defined here, in the specification, and is
+deliberately **independent of any implementation's filename sanitization** — an
+implementation that derives storage paths from the key MUST ensure its own
+sanitizer leaves canonical keys unchanged, rather than expecting this algorithm
+to match whatever its filesystem layer does.
+
+**Properties.** The algorithm is idempotent: applying it to a key returns the same
+key. Because the key is casefolded and free of path separators, a
+case-insensitive filesystem can neither merge two distinct keys nor split one —
+the failure mode this section exists to prevent.
+
+**Immutability and aliases.** A project's key is fixed for its lifetime. Renaming
+a project changes its display label and records the previous label as an
+**alias** resolving to the unchanged key. Many labels therefore resolve to one
+key; one label MUST NOT resolve to two keys. Because historical documents and
+already-published exports carry whatever label was current when they were
+written, the alias table is required indefinitely for interpreting them.
+
+**Resolution order.** A consumer determining which project a session belongs to
+MUST use `project_key` when present. When it is absent — which is the case for
+every session written before v0.5 — the consumer MUST resolve `project` through
+the alias table if one is available, and otherwise apply the canonical key
+algorithm to it. A consumer MUST NOT assume that a rewriting intermediary
+maintains `project_key`: a version-skewed writer preserves the field but does
+not re-derive it, so a document may carry a label and key that were consistent
+when written and would resolve differently today.
+
+**Reserved keys.** `auto` and `shared` are reserved. `auto` is the sentinel for
+sessions created without an attributable project; `shared` is reserved against
+future use. A producer MUST NOT mint either from a user-supplied label.
 
 ### 3.3 Actor
 
@@ -383,6 +436,25 @@ Each event MUST populate exactly one type-specific data field, and it MUST match
 - Consumers MUST tolerate dangling references (the referenced event may have been removed or may exist in a different session).
 - **Implementation note (v0.4.x):** the reference implementation currently *hard-rejects* a relation reference (e.g. `revises_event_id`) that points outside the current session, at `append_event` time — stricter than the SHOULD above. Relaxing this to full spec-compliant dangling-tolerance is deferred to v1.1; producers should not rely on cross-session references in v0.4.x.
 
+### 4.5 Project Identity
+
+- Consumers MUST NOT treat two sessions as belonging to different projects when their
+  display labels differ but their canonical keys are equal (§3.2.2). Comparing raw
+  labels splits one project into several.
+- Consumers MUST NOT treat two sessions as belonging to the same project when their
+  canonical keys differ, however similar the labels look.
+- Producers SHOULD emit both `project` and `project_key`.
+- On ingest, a consumer SHOULD check that a present `project_key` equals the key
+  derived from `project` (or is a registered alias resolution of it), and SHOULD
+  report a mismatch rather than silently preferring one. A mismatch means either a
+  rename recorded in the alias table or a mislabeled document, and the two are worth
+  distinguishing.
+- **Documented divergence (interim).** Sessions written before v0.5 carry no
+  `project_key`. Following the §4.4 pattern, consumers MUST resolve those through the
+  alias table or the canonical algorithm rather than rejecting them, and MUST NOT
+  rewrite them to add the field: retroactively editing capture records is a larger
+  provenance harm than the missing field.
+
 ---
 
 ## 5. Decision Provenance
@@ -456,6 +528,14 @@ This specification maps to the [W3C PROV Data Model](https://www.w3.org/TR/prov-
 | Correction (URI-form target) | `prov:wasInfluencedBy` with qualified influence | The correction is connected to the externally-located artifact via `prov:wasInfluencedBy`, reified through `prov:qualifiedInfluence` pointing to a blank node of type `prov:Influence`. The URI is carried on that blank node as `prov:atLocation`. This is the W3C PROV-O qualified-influence pattern for influences that need annotation. (v0.4.1+) |
 | Tool-call dispatch parent | `prov:wasInformedBy` | A subagent dispatch activity (`tool_call` with `host="internal"`) was informed by the controller activity that issued it. Encoded via `tool_call.parent_event_id`. (v0.4.1+) |
 | Contribution | `prov:Activity` | A contribution is an activity that generates artifacts. |
+| Project display label | `trace:project` | A literal on the session activity. Retains its display-label meaning permanently: already-published exports carry drifted labels under this predicate, and re-meaning it would silently reinterpret them. |
+| Canonical project key | `trace:projectKey` | An additive sibling literal on the session activity carrying the canonical key (§3.2.2). (v0.5+) |
+| Project | `prov:Entity` (optional) | A project MAY be reified as an entity `trace:project_<key>` carrying `trace:projectKey`, its current `trace:project` display label, and one `trace:aliasLabel` per historical label — so a consumer holding an artifact stamped with an old label can discover that it names the same project. (v0.5+) |
+
+The v0.5 additions above are new terms **within the frozen `ns/v0.3#` namespace**: additive
+extensions are valid within an existing namespace, so no `@context` change is required and
+previously exported documents remain valid and unchanged. Exports are never regenerated to
+add `trace:projectKey`; historical artifacts resolve through the published alias table.
 
 The namespace `https://trace-protocol.org/ns/v0.3#` defines extension properties not covered by W3C PROV (e.g., `trace:disposition`, `trace:direction`, `trace:execution`, `trace:warnings`). These namespace URIs are identifiers, not resolvable URLs, following standard W3C practice.
 
@@ -470,7 +550,7 @@ A conforming consumer MAY export session documents as PROV JSON-LD using this ma
 The canonical interchange format is JSON. Each session MUST be representable as a single JSON object conforming to the JSON Schema at:
 
 ```
-https://trace-protocol.org/schemas/trace-v0.4.json
+https://trace-protocol.org/schemas/trace-v0.5.json
 ```
 
 A copy of this schema is distributed alongside this specification.
@@ -483,6 +563,21 @@ When stored as files, conforming producers SHOULD:
 - Pretty-print with 2-space indentation for human readability.
 - Use UTF-8 encoding.
 - Name files using the session ID (e.g., `trace_20260205_a1b2c3.json`).
+
+#### Project registry
+
+An implementation that maintains an alias table (§3.2.2) SHOULD store it as a single
+document mapping canonical keys to their display labels and historical aliases. The
+reference implementation writes `~/.trace/projects.json`, whose interchange schema is
+published as `trace-projects-v1.json` alongside this specification.
+
+The registry is published rather than treated as private implementation state because
+**interpreting historical exports depends on it**: an artifact stamped with a label that
+has since been renamed resolves to its project only through the alias table.
+
+The registry carries its own `version` field, independent of the session schema version —
+the two formats change on different cadences, and coupling them would force a session
+format bump for every registry change.
 
 ### 7.3 Extensibility
 
@@ -573,6 +668,32 @@ Conforming producers SHOULD follow the fail-open principle: provenance logging e
 
 When storing session documents to files, implementations SHOULD use atomic writes (write to a temporary file, then rename) to prevent corruption from interrupted writes.
 
+### 8.5 Repairing Project Labels
+
+An implementation that accumulated drifted project labels before adopting canonical
+keys (§3.2.2) will be tempted to normalize them by rewriting the affected session
+documents. It MUST NOT.
+
+Repair MUST be **alias-table-first**: record each historical label as an alias
+resolving to the canonical key, and leave every capture record byte-for-byte as it was
+written. A session document is a record of what happened; editing it to say something
+tidier is the same class of act as editing any other captured observation, and it
+destroys the ability to distinguish a later relabeling from a tampered record — which
+matters especially for an implementation that intends to hash or sign these documents.
+
+Where an in-place touch is genuinely unavoidable — for example adopting a session
+created under an unattributed sentinel into a real project — it MUST be
+**append-shaped**: record a new event capturing the old value, the new value, the
+actor, and the reason, rather than silently mutating the field. A repair pass SHOULD
+be preceded by a snapshot of the store and SHOULD record what it changed in an
+append-only log.
+
+Derived data is different. Caches, indexes, and knowledge stores are regenerable and
+MAY be consolidated when labels merge — but the consolidation SHOULD be logged, and
+where per-item attribution was already lost (for instance by a case-insensitive
+filesystem merging two stores), an implementation SHOULD record that the loss occurred
+rather than reconstructing an attribution it cannot know.
+
 ---
 
 ## Appendix A: Example Session Document
@@ -580,13 +701,14 @@ When storing session documents to files, implementations SHOULD use atomic write
 ```json
 {
   "context": "https://trace-protocol.org/v0.3",
-  "trace_version": "0.4.1",
+  "trace_version": "0.5.0",
   "id": "trace_20260205_a1b2c3",
   "created": "2026-02-05T14:30:00Z",
   "ended": "2026-02-05T15:45:00Z",
   "status": "completed",
   "metadata": {
     "project": "climate-nlp-analysis",
+    "project_key": "climate-nlp-analysis",
     "experiment_id": "exp-017",
     "description": "Analyzing adaptation language shifts in IPCC AR6",
     "participants": [
@@ -725,3 +847,4 @@ Contrast with evt_001 (`suggestion_type="proactive"` — AI volunteered) and evt
 | 0.2.0 | 2026-02-16 | Added: contribution events with direction/execution attribution, `suggestion_type` on decisions, `corrects_event_ids` on annotations, `retries_event_id` on tool calls, `conversation_snippet` on event context. |
 | 0.3.0 | 2026-03-05 | Added: `warnings` on decisions, attribution audit at session end, path sanitization for session IDs. Removed: deprecated `verification` field on events, `parent_event_id` from event context. |
 | 0.4.1 | 2026-05-14 | **Additive, fully backwards compatible with v0.3.x and v0.4.0.** Added: **Proposer Identity Rule** (§3.6) — `proposed_by` identifies the author of proposal content, not the speaker of the resolving directive; `discovery` annotation category (§3.7) — non-trivial findings from autonomous work; §3.7.1 **External References in `corrects_event_ids`** with URI-form scheme (`external:`, `jsonl:`, `subagent:`, `tool-result:`); `host` and `parent_event_id` fields on `tool_call` (§3.5) to cover MCP, external non-MCP, and host-internal tools; normative MUST clause on `conversation_snippet` for contributions and corrections with absence-marker convention (§3.4.1); real-time logging guidance + autonomous-execution-window detection (§8.1); question→AI-proposal→accept recognition rows (§8.2). Changed: PROV-LD correction mapping split — event-ID targets emit `prov:wasInvalidatedBy`, URI-form targets emit qualified `prov:wasInfluencedBy` with `prov:atLocation` (§6); dispatch chains emit `prov:wasInformedBy`. Schema additions are optional with defaults that preserve v0.3.0 / v0.4.0 semantics. |
+| 0.5.0 | 2026-07-22 | **Additive, fully backwards compatible with v0.3.x and v0.4.x.** Added: **canonical project identity** — §3.2.2 defines the canonical key algorithm (spec-defined and independent of any implementation's filename sanitization), key immutability, the many-labels-to-one-key alias relation, the resolution order for documents lacking a key, and the reserved `auto`/`shared` keys; optional `metadata.project_key` (§3.2), authoritative when present, with `project` unchanged and still unconstrained as the display label; §4.5 validation rules forbidding consumers from splitting one project across equal-key labels or merging distinct keys, with the documented-divergence pattern covering pre-v0.5 sessions; §6 PROV additions `trace:projectKey` and an optional reified project entity carrying `trace:aliasLabel`, both new terms within the **frozen** `ns/v0.3#` namespace so existing exports are neither invalidated nor regenerated; §7.2 documents the published project registry and its independently versioned `trace-projects-v1.json` interchange schema; §8 records that label repair MUST be alias-table-first, never a rewrite of capture records. Schema file renamed to `trace-v0.5.json` with the `$id` cascade; the `Session.context` spec URL and the PROV namespace URI remain at v0.3. |

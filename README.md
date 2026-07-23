@@ -20,9 +20,11 @@ TRACE is an MCP server that provides a standardized audit trail for AI-assisted 
 
 TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy or intercept calls — the AI client explicitly logs events to TRACE, creating a complete, human-readable provenance record.
 
-**Version:** 0.4.2 | **Spec:** v0.4.1 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
+**Version:** 0.5.0 | **Spec:** v0.5.0 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
 
-> The schema URI is an identifier (per W3C PROV convention) and is not currently a resolvable URL. The machine-readable JSON Schema lives at [`schemas/trace-v0.4.json`](https://github.com/Thru-Echoes/TRACE/blob/main/schemas/trace-v0.4.json) in this repository.
+> The schema URI is an identifier (per W3C PROV convention) and is not currently a resolvable URL. The machine-readable JSON Schema lives at [`schemas/trace-v0.5.json`](https://github.com/Thru-Echoes/TRACE/blob/main/schemas/trace-v0.5.json) in this repository.
+
+**What's new in 0.5.0** (additive — every v0.3.x/v0.4.x session loads unchanged): **canonical project identity**. A project is now identified by a stable canonical key rather than a free-text label, so case and separator variants of one name stop reading as separate projects while genuinely different projects can no longer be merged by a case-insensitive filesystem. Sessions gain an optional `metadata.project_key` (spec §3.2.1), authoritative when present; sessions written before v0.5 carry no key and resolve through the alias registry (`~/.trace/projects.json`, published as [`schemas/trace-projects-v1.json`](https://github.com/Thru-Echoes/TRACE/blob/main/schemas/trace-projects-v1.json)) — no capture record is ever rewritten. PROV exports gain `trace:projectKey` beside the untouched `trace:project` display literal, so already-exported artifacts keep their meaning. A `TRACE_PROJECT` pin makes one server process serve one project, and cross-project reads and writes fail closed. Full details in [CHANGELOG.md](https://github.com/Thru-Echoes/TRACE/blob/main/CHANGELOG.md) and [docs/adr/006-project-identity-and-isolation.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/adr/006-project-identity-and-isolation.md).
 
 **What's new in 0.4.2** (hardening — no protocol or wire changes; sessions stay at schema v0.4.1): a critical storage lost-update / event-ID-collision fix — a per-session file lock + disk-reload across *all* write paths (append, end, resolve), verified across real OS processes; hard payload caps on the query tools; a cheap, quiet session bootstrap; and packaging hardening. Full details in [CHANGELOG.md](https://github.com/Thru-Echoes/TRACE/blob/main/CHANGELOG.md).
 
@@ -256,7 +258,7 @@ TRACE implements the **Decision Provenance for AI-Assisted Workflows** specifica
 | Artifact | Location | Role |
 |----------|----------|------|
 | **Specification** | [`docs/specification.md`](https://github.com/Thru-Echoes/TRACE/blob/main/docs/specification.md) | Authoritative definition of the data model, semantics, and conformance rules. Technology-neutral. |
-| **JSON Schema** | [`schemas/trace-v0.4.json`](https://github.com/Thru-Echoes/TRACE/blob/main/schemas/trace-v0.4.json) | Machine-readable formalization. Any JSON document validating against this schema is a conforming session document. |
+| **JSON Schema** | [`schemas/trace-v0.5.json`](https://github.com/Thru-Echoes/TRACE/blob/main/schemas/trace-v0.5.json) | Machine-readable formalization. Any JSON document validating against this schema is a conforming session document. |
 | **Reference implementation** | This repository (`trace-mcp`) | An MCP server that produces conforming documents. One possible implementation — not the only one. |
 
 The specification defines five event types (tool invocations, decisions, annotations, state changes, contributions), a decision lifecycle model (proposed / accepted / revised / rejected), and an actor taxonomy (human / ai / system). Any tool that produces JSON documents conforming to the schema implements the standard — no dependency on MCP, Python, or TRACE itself.

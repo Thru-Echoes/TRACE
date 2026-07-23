@@ -55,6 +55,10 @@ def export_markdown(session: Session) -> str:
     lines.append(f"# TRACE Session: {session.id}")
     lines.append("")
     lines.append(f"**Project**: {md.project}")
+    # Only when stamped: deriving a key for a legacy session would present a
+    # guess as a recorded fact in a document meant to be read as the record.
+    if md.project_key:
+        lines.append(f"**Project key**: {md.project_key}")
     if md.experiment_id:
         lines.append(f"**Experiment**: {md.experiment_id}")
 

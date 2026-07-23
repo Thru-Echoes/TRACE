@@ -4,7 +4,7 @@
 loaded `scripts/validate_session.py` via a repo-relative path
 (`parent.parent.parent / "scripts"`) that only exists in a source checkout,
 and the JSON Schema itself wasn't shipped. The validator now lives in the
-package (`trace_mcp.validate`) and loads `schemas/trace-v0.4.json` as package
+package (`trace_mcp.validate`) and loads `schemas/trace-v0.5.json` as package
 data via importlib.resources, so the subcommand works from wheel installs,
 editable installs, and source checkouts alike.
 
@@ -28,8 +28,8 @@ from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.validate import load_schema, main, validate_file
 
 TRACE_ROOT = Path(__file__).parent.parent
-REPO_SCHEMA = TRACE_ROOT / "schemas" / "trace-v0.4.json"
-PACKAGE_SCHEMA = TRACE_ROOT / "src" / "trace_mcp" / "schemas" / "trace-v0.4.json"
+REPO_SCHEMA = TRACE_ROOT / "schemas" / "trace-v0.5.json"
+PACKAGE_SCHEMA = TRACE_ROOT / "src" / "trace_mcp" / "schemas" / "trace-v0.5.json"
 FIXTURE_SESSION = TRACE_ROOT / "tests" / "fixtures" / "waggle_session_2026-05-13.json"
 
 
@@ -40,7 +40,7 @@ class TestSchemaPackaging:
     def test_load_schema_from_package_data(self) -> None:
         """The schema must load via importlib.resources — no repo paths."""
         schema = load_schema()
-        assert schema["$id"] == "https://trace-protocol.org/schemas/trace-v0.4.json"
+        assert schema["$id"] == "https://trace-protocol.org/schemas/trace-v0.5.json"
         assert "properties" in schema
 
     def test_packaged_schema_matches_repo_schema(self) -> None:
@@ -48,7 +48,7 @@ class TestSchemaPackaging:
         byte-identical — both are written by scripts/generate_schema.py."""
         assert PACKAGE_SCHEMA.exists(), f"{PACKAGE_SCHEMA} missing — run scripts/generate_schema.py"
         assert PACKAGE_SCHEMA.read_bytes() == REPO_SCHEMA.read_bytes(), (
-            "src/trace_mcp/schemas/trace-v0.4.json has drifted from schemas/trace-v0.4.json — "
+            "src/trace_mcp/schemas/trace-v0.5.json has drifted from schemas/trace-v0.5.json — "
             "regenerate both with scripts/generate_schema.py"
         )
 
@@ -60,9 +60,9 @@ class TestSchemaPackaging:
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
         payload = (json.dumps(mod.build_schema(), indent=2) + "\n").encode("utf-8")
-        assert payload == REPO_SCHEMA.read_bytes(), "schemas/trace-v0.4.json is stale vs the Pydantic models"
+        assert payload == REPO_SCHEMA.read_bytes(), "schemas/trace-v0.5.json is stale vs the Pydantic models"
         assert payload == PACKAGE_SCHEMA.read_bytes(), (
-            "src/trace_mcp/schemas/trace-v0.4.json is stale vs the Pydantic models"
+            "src/trace_mcp/schemas/trace-v0.5.json is stale vs the Pydantic models"
         )
 
 

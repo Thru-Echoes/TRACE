@@ -1,11 +1,11 @@
 """Validate TRACE session JSON files against the packaged JSON Schema.
 
 This module backs the ``trace-mcp validate`` subcommand. It lives in the
-package (not ``scripts/``) and loads ``schemas/trace-v0.4.json`` as package
+package (not ``scripts/``) and loads ``schemas/trace-v0.5.json`` as package
 data via importlib.resources, so validation works identically from wheel
 installs, editable installs, and source checkouts. The packaged schema is
 written by ``scripts/generate_schema.py`` and guarded byte-identical to the
-top-level spec artifact ``schemas/trace-v0.4.json``.
+top-level spec artifact ``schemas/trace-v0.5.json``.
 
 Exports: ``load_schema``, ``validate_file``, ``main``.
 
@@ -25,13 +25,13 @@ import sys
 from importlib import resources
 from pathlib import Path
 
-_SCHEMA_FILENAME = "trace-v0.4.json"
+_SCHEMA_FILENAME = "trace-v0.5.json"
 
 
 def load_schema() -> dict:
     """Load the packaged TRACE session JSON Schema as a dict.
 
-    Reads ``trace_mcp/schemas/trace-v0.4.json`` from package data — never from
+    Reads ``trace_mcp/schemas/trace-v0.5.json`` from package data — never from
     a repo-relative path, so it works on installed packages.
     """
     text = (resources.files("trace_mcp") / "schemas" / _SCHEMA_FILENAME).read_text(encoding="utf-8")

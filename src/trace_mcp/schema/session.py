@@ -41,7 +41,7 @@ class TraceModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-SCHEMA_VERSION = "0.4.1"
+SCHEMA_VERSION = "0.5.0"
 """TRACE wire/schema format version that session documents conform to.
 
 Intentionally decoupled from the package version (``trace_mcp.__version__``):
@@ -87,6 +87,18 @@ class SessionMetadata(TraceModel):
     """Descriptive metadata for a session."""
 
     project: str
+    project_key: str | None = Field(
+        default=None,
+        description=(
+            "Canonical project key (spec v0.5 §3.2.1) — authoritative when present. "
+            "Consumers MUST fall back to resolving `project` through the alias table "
+            "or the canonical-key algorithm when it is absent, which is the case for "
+            "every session written before v0.5. Deliberately carries no schema "
+            "pattern: constraining it would retroactively invalidate live documents. "
+            "Consumers MUST NOT assume a rewriting intermediary maintains it — a "
+            "version-skewed writer preserves the field but does not re-derive it."
+        ),
+    )
     experiment_id: str | None = None
     description: str | None = None
     participants: list[Actor] = Field(default_factory=list)

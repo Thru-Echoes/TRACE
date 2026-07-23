@@ -127,6 +127,20 @@ def _resolve_start_project(project: str | None, bound: pident.BoundProject | Non
     return project
 
 
+def _pinned_project_key(bound: pident.BoundProject | None) -> str | None:
+    """The canonical key to stamp on a new session, or None to leave it unset.
+
+    Only a pinned process stamps ``metadata.project_key``: it is the only
+    configuration that carries an authoritative answer. An unpinned process
+    would be guessing, and a guess written here is exactly what ADR-005 must
+    never hash into a genesis record — an unstamped session stays resolvable
+    through the alias table, which is repairable; a wrongly stamped one is not.
+    """
+    if bound is None or bound.key in pident.RESERVED_KEYS:
+        return None
+    return bound.key
+
+
 def check_read_scope(session: Session) -> None:
     """Fail-closed cross-project read guard for the id-only read/export tools.
 
@@ -234,6 +248,7 @@ async def _ensure_session(session_id: str | None) -> tuple[Session, str]:
         storage,
         active_sessions,
         project=project,
+        project_key=_pinned_project_key(_bound_project()),
         description="Auto-created session (no explicit trace_start_session call)",
         tags=["auto-session"],
     )
@@ -288,8 +303,9 @@ async def trace_start_session(
     pin_error = _require_pin_error()
     if pin_error:
         return pin_error
+    bound = _bound_project()
     try:
-        resolved = _resolve_start_project(project, _bound_project())
+        resolved = _resolve_start_project(project, bound)
     except pident.ProjectKeyError as e:
         return f"Error: {e}"
     try:
@@ -303,6 +319,7 @@ async def trace_start_session(
             storage,
             active_sessions,
             project=resolved,
+            project_key=_pinned_project_key(bound),
             experiment_id=experiment_id,
             description=description,
             participants=participants,

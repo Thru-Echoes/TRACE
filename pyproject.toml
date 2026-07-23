@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "trace-mcp"
-version = "0.4.2"
+version = "0.5.0"
 description = "TRACE: Transparent Recording of AI-assisted Collaboration Experiments — MCP audit protocol for scientific workflows"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -130,7 +130,7 @@ include = [
     "src/trace_mcp/py.typed",
     "src/trace_mcp/adapters/claude_code/assets/**",
     # Packaged JSON Schema backing `trace-mcp validate` (byte-identical to the
-    # top-level schemas/trace-v0.4.json; both written by scripts/generate_schema.py).
+    # top-level schemas/trace-v0.5.json; both written by scripts/generate_schema.py).
     "src/trace_mcp/schemas/**",
     # In-package docs (linked from the top-level README; keeps tree-built and
     # sdist-built wheels identical — see test_wheel_matches_package_tree).

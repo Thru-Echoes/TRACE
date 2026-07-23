@@ -509,6 +509,7 @@ async def create_session(
     active_sessions: dict[str, Session],
     *,
     project: str,
+    project_key: str | None = None,
     experiment_id: str | None = None,
     description: str | None = None,
     participants: list[dict[str, Any]] | None = None,
@@ -518,6 +519,11 @@ async def create_session(
 
     This is the low-level creation function used by both ``start_session``
     (explicit) and the server's auto-session mechanism.
+
+    *project_key* stamps the canonical key (spec v0.5 §3.2.1). Callers pass it
+    only when the process is pinned and therefore has an authoritative answer;
+    left ``None``, the session carries the legacy shape and readers resolve its
+    ``project`` label through the alias table instead.
     """
     session_id = _generate_session_id()
     actor_list = [Actor(**p) for p in participants] if participants else []
@@ -527,6 +533,7 @@ async def create_session(
         id=session_id,
         metadata=SessionMetadata(
             project=project,
+            project_key=project_key,
             experiment_id=experiment_id,
             description=description,
             participants=actor_list,
