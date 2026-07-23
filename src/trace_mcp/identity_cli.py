@@ -165,10 +165,17 @@ def cmd_snapshot(args: argparse.Namespace, out) -> int:
     session_files = list(_iter_session_files())
     knowledge = identity_report.knowledge_dir()
     knowledge_files = sorted(knowledge.glob("*.json")) if knowledge.is_dir() else []
+    # A relocated knowledge dir (TRACE_KNOWLEDGE_DIR outside the home) must be
+    # archived TOO: the marker this snapshot writes is what green-lights the
+    # destructive merge phase, and merge-stores destroys knowledge sources — a
+    # backup that counted those stores without containing them would be a lie.
+    knowledge_external = knowledge.is_dir() and not knowledge.resolve().is_relative_to(home.resolve())
 
     with tarfile.open(archive, "w:gz") as tar:
         # Exclude the backups dir itself so the archive never contains prior archives.
         tar.add(home, arcname=home.name, filter=lambda ti: None if "/backups/" in ti.name + "/" else ti)
+        if knowledge_external:
+            tar.add(knowledge, arcname=f"{home.name}-external-knowledge")
 
     manifest = {
         "created": _now(),
@@ -179,6 +186,8 @@ def cmd_snapshot(args: argparse.Namespace, out) -> int:
             "knowledge_stores": len(knowledge_files),
         },
         "trace_home": str(home),
+        "knowledge_dir": str(knowledge),
+        "knowledge_dir_external": knowledge_external,
     }
     marker = _snapshot_marker()
     marker.parent.mkdir(parents=True, exist_ok=True)
@@ -218,6 +227,11 @@ def _collect_label_groups() -> dict[str, dict[str, Any]]:
         try:
             key = pident.canonical_project_key(label)
         except pident.ProjectKeyError:
+            continue
+        if key in pident.RESERVED_KEYS:
+            # The auto quarantine is an expected population, not drift, and it is
+            # never enrolled: a plan entry for it would only be re-refused by
+            # `apply` and confuse the operator into thinking it needs deciding.
             continue
         g = _group(key)
         if label not in g["labels"]:
@@ -262,6 +276,15 @@ def cmd_scan(args: argparse.Namespace, out) -> int:
         ],
     }
     dest = Path(args.output).expanduser() if args.output else _trace_home() / f"identity-plan-{_today()}.json"
+    if dest.exists():
+        # A plan file is where the human's decisions live between scan and apply.
+        # Overwriting one on a re-run would silently destroy those edits.
+        print(
+            f"Error: {dest} already exists — refusing to overwrite a possibly-edited plan. "
+            "Move it aside or pass a different --output path.",
+            file=out,
+        )
+        return 1
     dest.parent.mkdir(parents=True, exist_ok=True)
     dest.write_text(json.dumps(plan, indent=2) + "\n")
     print(f"Scan plan written: {dest}", file=out)
@@ -284,6 +307,12 @@ def cmd_apply(args: argparse.Namespace, out) -> int:
         return 1
 
     minted, updated, skipped = 0, 0, 0
+    # Migration records are BUFFERED and appended only after the registry write
+    # commits. locked_registry persists on clean exit and discards everything on
+    # failure (e.g. an alias-uniqueness violation) — logging inside the block
+    # would record mints that never happened, and a migration log that lies is
+    # worse than no log at all.
+    pending_records: list[dict[str, Any]] = []
     try:
         with pident.locked_registry() as registry:
             for entry in plan["projects"]:
@@ -306,7 +335,7 @@ def cmd_apply(args: argparse.Namespace, out) -> int:
                             actor="identity apply", action="mint", details={"key": key, "aliases": aliases}
                         )
                     )
-                    _append_migration({"op": "mint", "key": key, "display_label": display, "aliases": aliases})
+                    pending_records.append({"op": "mint", "key": key, "display_label": display, "aliases": aliases})
                     minted += 1
                 else:
                     new_aliases = sorted(set(existing.aliases) | set(aliases))
@@ -317,7 +346,7 @@ def cmd_apply(args: argparse.Namespace, out) -> int:
                                 actor="identity apply", action="alias-add", details={"key": key, "aliases": new_aliases}
                             )
                         )
-                        _append_migration({"op": "alias-add", "key": key, "aliases": new_aliases})
+                        pending_records.append({"op": "alias-add", "key": key, "aliases": new_aliases})
                         updated += 1
                     else:
                         skipped += 1
@@ -325,8 +354,10 @@ def cmd_apply(args: argparse.Namespace, out) -> int:
         print(f"Error: registry is unreadable ({exc}); refusing to overwrite it.", file=out)
         return 1
     except (TimeoutError, ValueError) as exc:
-        print(f"Error: could not apply plan ({exc}).", file=out)
+        print(f"Error: could not apply plan ({exc}); nothing was written.", file=out)
         return 1
+    for record in pending_records:
+        _append_migration(record)
 
     print(f"Applied: {minted} minted, {updated} alias-updated, {skipped} unchanged.", file=out)
     return 0
@@ -369,6 +400,15 @@ def cmd_check(args: argparse.Namespace, out) -> int:
             label = _session_label(data)
             if label is None:
                 continue
+            try:
+                if pident.canonical_project_key(label) in pident.RESERVED_KEYS:
+                    # The auto quarantine is an expected, permanently-unenrolled
+                    # population — flagging it would make a store holding ANY auto
+                    # session fail `check` forever, and exit-0 is the migration
+                    # runbook's verification criterion.
+                    continue
+            except pident.ProjectKeyError:
+                pass  # degenerate label: fall through and report it as unknown
             if registry.resolve(label) is None:
                 unknown_labels[label] = unknown_labels.get(label, 0) + 1
         if unknown_labels:
@@ -449,9 +489,19 @@ def cmd_merge_stores(args: argparse.Namespace, out) -> int:
         print("Nothing to merge: no knowledge directory.", file=out)
         return 0
 
-    # Which canonical keys to consolidate: a specific one, or every registered key
-    # that has at least one aliased source store on disk.
-    target_keys = [args.key] if args.key else sorted(registry.projects)
+    # Which canonical keys to consolidate: a specific one (resolving an alias or
+    # display label to its key, so `--key TRACE` reaches the trace-mcp entry
+    # instead of being skipped), or every registered key with aliased sources.
+    if args.key:
+        resolved = registry.resolve(args.key)
+        if resolved is None:
+            print(f"Error: '{args.key}' resolves to no registered project.", file=out)
+            return 1
+        if resolved != args.key:
+            print(f"  '{args.key}' resolved to registered key '{resolved}'.", file=out)
+        target_keys = [resolved]
+    else:
+        target_keys = sorted(registry.projects)
 
     merged_any = False
     for key in target_keys:
@@ -484,54 +534,75 @@ def cmd_merge_stores(args: argparse.Namespace, out) -> int:
         if not _preflight_merge(involved, out):
             return 1
 
-        # Load target (or start fresh), union each source in with Jaccard dedup.
-        target_store = learn_store.load_store(key)
-        before_target = len(target_store.learnings)
-        merge_records: list[dict[str, Any]] = []
-        for src in source_paths:
-            raw = _read_json(src)
-            if raw is None:
-                print(f"  skipping unreadable source {src.name}", file=out)
-                continue
-            src_store = KnowledgeStore.model_validate(raw)
-            added, deduped = 0, 0
-            for lrn in src_store.learnings:
-                if learn_store.find_duplicate(target_store, lrn.content) is not None:
-                    deduped += 1
-                    continue
-                new = lrn.model_copy(update={"id": target_store.next_learning_id()})
-                target_store.learnings.append(new)
-                added += 1
-            merge_records.append(
-                {
-                    "source": src.name,
-                    "source_sha256": _sha256(src),
-                    "learnings": len(src_store.learnings),
-                    "added": added,
-                    "deduped": deduped,
-                }
-            )
+        # The preflight is advisory (a writer could arrive between it and the
+        # write), so the whole load→union→save→rename span additionally holds
+        # the target's own store lock — the same lock every learn writer takes.
+        # Acquired AFTER the preflight, whose global lock scan would otherwise
+        # refuse on our own lock file. A concurrent holder makes this raise
+        # (fail closed) rather than merge under them.
+        try:
+            with learn_store.project_lock(key):
+                # Fail closed on a corrupt TARGET: the non-strict loader would
+                # hand back a fresh store, and saving the union over it would
+                # replace the damaged-but-recoverable original — the one file
+                # this command does not keep a premerge copy of.
+                try:
+                    target_store = learn_store.load_store(key, strict=True)
+                except learn_store.StoreLoadError as exc:
+                    print(f"Error: target store for '{key}' is unreadable ({exc}). Repair or move it first.", file=out)
+                    return 1
+                before_target = len(target_store.learnings)
+                merge_records: list[dict[str, Any]] = []
+                for src in source_paths:
+                    raw = _read_json(src)
+                    if raw is None:
+                        print(f"  skipping unreadable source {src.name}", file=out)
+                        continue
+                    src_store = KnowledgeStore.model_validate(raw)
+                    added, deduped = 0, 0
+                    for lrn in src_store.learnings:
+                        if learn_store.find_duplicate(target_store, lrn.content) is not None:
+                            deduped += 1
+                            continue
+                        new = lrn.model_copy(update={"id": target_store.next_learning_id()})
+                        target_store.learnings.append(new)
+                        added += 1
+                    merge_records.append(
+                        {
+                            "source": src.name,
+                            "source_sha256": _sha256(src),
+                            "learnings": len(src_store.learnings),
+                            "added": added,
+                            "deduped": deduped,
+                        }
+                    )
 
-        # Ensure the merged store declares the canonical key, then persist +
-        # regenerate the sidecar (save_store rewrites the .npy from inline vectors).
-        target_store.project = key
-        learn_store.save_store(target_store)
-        after_target = len(target_store.learnings)
+                # Ensure the merged store declares the canonical key, then persist +
+                # regenerate the sidecar (save_store rewrites the .npy from inline
+                # vectors). Still under the target lock: the save and the source
+                # renames are one unit a concurrent writer must not interleave.
+                target_store.project = key
+                learn_store.save_store(target_store)
+                after_target = len(target_store.learnings)
 
-        # Rename sources to premerge backups (kept forever) — reversible by hand.
-        premerges = []
-        for src in source_paths:
-            backup = src.with_name(f"{src.name}.premerge-{_today()}")
-            n = 1
-            while backup.exists():
-                backup = src.with_name(f"{src.name}.premerge-{_today()}-{n}")
-                n += 1
-            src.rename(backup)
-            premerges.append(backup.name)
-            # The source's sidecar is a derived artifact — drop it (regenerated for the target).
-            sidecar = src.with_suffix(".embeddings.npy")
-            if sidecar.exists():
-                sidecar.unlink()
+                # Rename sources to premerge backups (kept forever) — reversible by hand.
+                premerges = []
+                for src in source_paths:
+                    backup = src.with_name(f"{src.name}.premerge-{_today()}")
+                    n = 1
+                    while backup.exists():
+                        backup = src.with_name(f"{src.name}.premerge-{_today()}-{n}")
+                        n += 1
+                    src.rename(backup)
+                    premerges.append(backup.name)
+                    # The source's sidecar is a derived artifact — drop it
+                    # (regenerated for the target).
+                    sidecar = src.with_suffix(".embeddings.npy")
+                    if sidecar.exists():
+                        sidecar.unlink()
+        except TimeoutError as exc:
+            print(f"Error: could not acquire the store lock for '{key}' ({exc}). Aborting.", file=out)
+            return 1
 
         _append_migration(
             {
@@ -598,7 +669,13 @@ async def adopt_session(storage, session_id: str, target_key: str, reason: str |
         )
         event.id = write_session.next_event_id()
         write_session.events.append(event)
-        write_session.metadata.project = target_key
+        # Stamp the ADDITIVE key only. The captured display label (`project`,
+        # here the 'auto' sentinel) is left verbatim: ADR-006 §7 sanctions
+        # stamping project_key and appending the state_change, nothing more, and
+        # rewriting a captured field is exactly what alias-table-first forbids.
+        # Every consumer resolves identity through session_project_key, which
+        # prefers the stamp — so the session reads as the target project
+        # everywhere while its record still shows what was originally captured.
         write_session.metadata.project_key = target_key
         await storage.update_session(write_session)
 
