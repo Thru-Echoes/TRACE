@@ -31,6 +31,10 @@ INV1_REGISTERED_WRITERS = {
     ("tools/session_tools.py", "append_event"),
     ("tools/session_tools.py", "end_session"),
     ("tools/decision_tools.py", "resolve_decision"),
+    # ADR-006 S6: `adopt` re-homes an auto session into a real project. It is a
+    # session write (stamps project_key + appends a state_change) and therefore
+    # routes through locked_disk_session like every other writer.
+    ("identity_cli.py", "adopt_session"),
 }
 
 
