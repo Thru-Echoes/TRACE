@@ -34,6 +34,9 @@ rather than ever proceeding unlocked.
 - `src/trace_mcp/tools/session_tools.py :: append_event`
 - `src/trace_mcp/tools/session_tools.py :: end_session`
 - `src/trace_mcp/tools/decision_tools.py :: resolve_decision`
+- `src/trace_mcp/identity_cli.py :: adopt_session` (ADR-006 S6 — `identity adopt`
+  re-homes an `auto` session into a real project: stamps `metadata.project_key`
+  and appends a `state_change`, append-shaped, under the same locked helper)
 
 **Enforcement.** `JsonFileStorage.lock` writes a `<pid>:<time_ns>` token and
 steals a lock only when the holder PID is provably dead (single-host) or, for an
@@ -49,13 +52,20 @@ liveness), `tests/test_v042_storage_concurrency.py` (cross-process no-lost-updat
 ## INV-2 — Completed sessions are immutable (one documented exception)  · ENFORCED
 
 **Statement.** Once a session is `completed`, no event may be appended and it may
-not be re-ended. The **only** permitted post-completion mutation is resolving a
-still-`proposed` decision (the documented cross-session decision lifecycle),
-which stamps an audit warning. The check is made against **disk truth** inside
-the lock, not the in-memory copy.
+not be re-ended. Two post-completion mutations are permitted, both
+append-shaped and both recorded for audit: (1) resolving a still-`proposed`
+decision (the documented cross-session decision lifecycle), which stamps an
+audit warning; and (2) `identity adopt` re-homing an `auto`-quarantine session
+into a real project (ADR-006 S6), which appends a `state_change` recording
+old→new/actor/reason and stamps `project_key`. Adopt is confined to sessions
+whose key is reserved (`auto`/`shared`) — it can never relabel a real project's
+completed session. The check is made against **disk truth** inside the lock, not
+the in-memory copy.
 
-**Site-set:** the same three INV-1 write paths (each guards `disk.status ==
-"completed"` under the lock).
+**Site-set:** the INV-1 write paths. `append_event`/`end_session`/
+`resolve_decision` each guard `disk.status == "completed"` under the lock;
+`identity_cli.py :: adopt_session` is the second sanctioned post-completion
+appender, gated instead on the session resolving to a reserved key.
 
 **Tests.** `tests/test_decision_integrity.py` (post-completion resolution +
 stale-copy resurrection), `tests/test_integrity_hardening.py`

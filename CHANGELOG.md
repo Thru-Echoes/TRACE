@@ -9,6 +9,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`trace-mcp identity` migration tooling (ADR-006 S6).** Seven subcommands turn
+  the identity enforcement machinery into an operator can run against a store that
+  predates canonical keys, without ever rewriting a capture record:
+  - `snapshot` — back up `~/.trace` (counting by direct glob, so the oldest
+    sessions the 500-cap query would hide are included) and write the marker the
+    destructive phases require.
+  - `scan` — group every drifted label by canonical key into a human-editable
+    plan; writes no registry state.
+  - `apply` — mint the reviewed plan into the registry (idempotent; snapshot-gated).
+  - `check` — report drift (stray knowledge stores, session labels resolving to no
+    registered project, registry health); non-zero exit on findings. Shares one
+    drift-detection function with the health tool, so the two can never disagree.
+  - `merge-stores` — consolidate an alias group's knowledge stores into the
+    canonical-key store: Jaccard-deduped union, sources kept as `*.premerge-<date>`,
+    sidecar regenerated (never migrated), every merge logged to `migrations.jsonl`
+    with content hashes. Idempotent, snapshot-gated, and refuses to run while any
+    writer is active. The `auto` quarantine is never merged.
+  - `adopt` — re-home an `auto`-quarantine session into a real project, append-shaped
+    (records old→new as a `state_change` and stamps `project_key`, never an in-place
+    edit); refuses to relabel a real project's session.
+  - `bundle` — export one project (sessions, knowledge store, matching egress rows,
+    registry entry) as a self-contained tarball, selected by canonical match.
+- **Health check reports project identity.** `trace_health_check` gains a
+  `pinned` / `bound_project_key` / `registry` / `stray_knowledge_stores` block,
+  computed by the same core drift detector as `identity check`.
+
 - **Canonical project identity (spec v0.5.0, schema `trace-v0.5.json`).** A project
   is now identified by a stable canonical key derived from its display label, rather
   than by the label itself. Previously, storage identity and query identity were two
