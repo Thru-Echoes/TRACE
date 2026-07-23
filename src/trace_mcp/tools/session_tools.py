@@ -486,6 +486,15 @@ def format_bootstrap_message(
             f"'{project}'; most recent: {mr['id']} ({mr.get('event_count', 0)} events"
             f"{', ' + created if created else ''})."
         )
+    elif brief and brief.get("window_exhausted"):
+        # The bounded scan hit its read ceiling with more files beyond it: the
+        # honest claim is "none found in the window", never "none exist" — the
+        # project's newest session may simply sit deeper in a busy shared store.
+        ceiling = brief.get("read_ceiling") or brief.get("scanned", 0)
+        orientation = (
+            f"Prior context: no sessions for '{project}' found in the newest "
+            f"~{ceiling} session files (older history not scanned)."
+        )
     else:
         orientation = f"Prior context: No prior TRACE sessions recorded for '{project}'."
 
