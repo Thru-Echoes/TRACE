@@ -9,6 +9,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Egress ledger rows carry a `project_key` column (all three purposes).** The
+  matching and embedding attest sites sit in layers that deliberately know
+  nothing about projects, so their rows were unattributable; the canonical key
+  now travels from the tool boundary in a context variable (`egress_project`)
+  and every row is attributed. The extraction site passes the key explicitly,
+  resolved through the alias registry so an aliased legacy label attributes to
+  its real project. Rows written before v0.5 carry no key and are never
+  rewritten. The ledger stays one global append-only file.
+- **Per-project privacy ratchet is now applied** (`effective_learn_config`).
+  A project's registry entry (`local_only` / `llm_enabled` /
+  `embedding_backend_max`) tightens the machine-global config at all three
+  egress decision points — extraction, LLM matching, and embedding-backend
+  selection — for that project's calls, pinned or not. Restrict-only: an entry
+  can force a confidentiality-bound project fully local against a permissive
+  global, never loosen a global restriction. If the registry exists but is
+  unreadable, learn tools fail closed (the posture that would forbid the
+  egress may live in the unreadable file) while session capture is unaffected;
+  the auto-recall/extract hooks skip loudly instead of raising, because they
+  run inside capture paths that must complete.
+- **Project-wide extraction enumerates the store by direct glob.** It
+  previously went through the query layer, whose 500-file scan cap silently
+  hid the oldest sessions of a large store — exactly the ones a project-wide
+  extraction exists to mine. Matching is by canonical key; storage backends
+  without a filesystem location fall back to the query path.
+
+### Changed
+
+- **`load_store` fails closed on a corrupt knowledge store.** A file that
+  exists but cannot be parsed or validated now raises `StoreLoadError` instead
+  of returning a fresh empty store. The silent fallback meant the next save
+  atomically replaced the damaged-but-recoverable original with an empty
+  store, and read to callers as "this project has no learnings" when the truth
+  was "this project's learnings are unreadable". A missing file still returns
+  a fresh store (normal first use). Read aggregates (`project_summary`,
+  self-cost) skip-and-report the damage rather than aborting; the learn tools
+  surface a clear error with the file untouched.
+
 - **`trace-mcp identity` migration tooling (ADR-006 S6).** Seven subcommands turn
   the identity enforcement machinery into an operator can run against a store that
   predates canonical keys, without ever rewriting a capture record:

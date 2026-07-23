@@ -193,7 +193,21 @@ def _compute_knowledge_metrics(project: str) -> dict[str, Any]:
             "avg_recall_count": 0.0,
         }
 
-    store = load_store(project)
+    try:
+        store = load_store(project)
+    except Exception as exc:  # noqa: BLE001 — read aggregates skip-and-report, never abort
+        # load_store now fails closed on a corrupt store. A summary is a read
+        # aggregate: it reports the damage rather than aborting the whole
+        # summary (mirroring the skipped_sessions pattern).
+        logger.warning("project_summary: knowledge store for %r unreadable: %s", project, exc)
+        return {
+            "total": 0,
+            "by_category": {},
+            "most_surfaced": [],
+            "never_surfaced": 0,
+            "avg_recall_count": 0.0,
+            "store_unreadable": True,
+        }
     if not store.learnings:
         return {
             "total": 0,

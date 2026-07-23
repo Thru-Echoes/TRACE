@@ -230,3 +230,76 @@ def load_config() -> LearnConfig:
         embedding_model=merged.get("TRACE_EMBEDDING_MODEL", "text-embedding-3-small"),
         embedding_base_url=merged.get("TRACE_OPENAI_BASE_URL") or merged.get("OPENAI_BASE_URL") or None,
     )
+
+
+def effective_learn_config(base: LearnConfig, project: str) -> LearnConfig:
+    """Apply the project's registry privacy posture to *base* — a RESTRICT-ONLY ratchet.
+
+    A registry entry may TIGHTEN the machine-global config for one project (force
+    a confidentiality-bound client project local-only against a permissive
+    global) but can never loosen a global restriction: fields here are only ever
+    set to their more-restrictive value (ADR-006 §6). ``.env``/env-var precedence
+    inside ``load_config`` is untouched — this layers on top of its result.
+
+    Applied per call at the three egress decision points (extraction, LLM
+    matching, embedding-backend selection), pinned or not: the learn tools
+    resolve their ``project`` argument either way, so a restrictive entry
+    protects the project from every process that touches it.
+
+    Returns *base* itself (identity, not a copy) when no restriction applies —
+    callers use ``eff is base`` to keep the common path on the process-wide
+    backend instead of constructing per-project ones.
+
+    Raises:
+        RegistryUnavailableError: the registry exists but cannot be read. The
+            posture that would forbid egress may live in that unreadable file,
+            so knowledge/egress paths must fail closed rather than proceed on
+            the global config. (An ABSENT registry is the normal pre-migration
+            state and applies no restriction.) Session capture never calls
+            this, so capture is never blocked by registry damage.
+    """
+    from trace_mcp.project_identity import get_registry_cached, key_for_label
+
+    key = key_for_label(project)
+    if not key:
+        return base
+    registry = get_registry_cached()  # raises RegistryUnavailableError on damage
+    if registry is None:
+        return base
+    entry = registry.projects.get(key)
+    if entry is None:
+        return base
+
+    pc = entry.config
+    force_local = bool(pc.local_only)
+    force_llm_off = force_local or pc.llm_enabled is False
+    downgrade_embedding = (force_local or pc.embedding_backend_max == "local") and base.embedding_backend == "openai"
+
+    if (
+        not (force_local and not base.local_only)
+        and not (force_llm_off and base.llm_enabled)
+        and not downgrade_embedding
+    ):
+        return base
+
+    from dataclasses import replace
+
+    eff = base
+    if force_local and not base.local_only:
+        # Mirror load_config's own TRACE_LOCAL_ONLY semantics: one switch, all
+        # three egress paths.
+        eff = replace(eff, local_only=True, llm_enabled=False)
+        if eff.embedding_backend == "openai":
+            eff = replace(eff, embedding_backend="auto")
+    if force_llm_off and eff.llm_enabled:
+        eff = replace(eff, llm_enabled=False)
+    if downgrade_embedding and eff.embedding_backend == "openai":
+        eff = replace(eff, embedding_backend="auto")
+    logger.info(
+        "Per-project privacy ratchet active for '%s': local_only=%s llm_enabled=%s embedding_backend=%s",
+        key,
+        eff.local_only,
+        eff.llm_enabled,
+        eff.embedding_backend,
+    )
+    return eff
