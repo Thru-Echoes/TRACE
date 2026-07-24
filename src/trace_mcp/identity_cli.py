@@ -241,10 +241,20 @@ def _collect_label_groups() -> dict[str, dict[str, Any]]:
     knowledge = identity_report.knowledge_dir()
     if knowledge.is_dir():
         for store in sorted(knowledge.glob("*.json")):
-            stem = store.stem
-            if stem in pident.RESERVED_KEYS:
+            # Group by the store's CANONICAL key, not its raw filename stem. A
+            # legacy store written before canonical keying keeps an uppercase or
+            # separator-bearing filename (e.g. REAP.json, created by the old
+            # case-preserving sanitizer; a case-insensitive filesystem still
+            # serves it as reap's store). Grouping by the raw stem would mint a
+            # phantom 'REAP' group distinct from the 'reap' session group, and
+            # the two would then collide on apply's alias-uniqueness check.
+            try:
+                key = pident.canonical_project_key(store.stem)
+            except pident.ProjectKeyError:
                 continue
-            _group(stem)["stores"].append(store.name)
+            if key in pident.RESERVED_KEYS:
+                continue
+            _group(key)["stores"].append(store.name)
 
     return groups
 
