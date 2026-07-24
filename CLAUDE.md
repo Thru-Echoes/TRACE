@@ -118,10 +118,15 @@ instructions are in the global `~/.claude/CLAUDE.md`. Key points:
 - Log rejected alternatives as separate decision events for significant methodology discussions
 - End with a summary including what was accomplished and what is next
 - The scratchpad auto-generates decisions, contributions, and corrections from session events
-- This checkout's `.mcp.json` carries no `TRACE_PROJECT` pin, so the server is
-  unpinned here: pass `project="trace-mcp"` explicitly to `trace_start_session`.
-  Pin it (`trace-mcp-init`) to make the argument optional and to get fail-closed
-  cross-project isolation.
+- This checkout's `.mcp.json` pins `TRACE_PROJECT=trace-mcp`, so omit the
+  `project` argument to `trace_start_session` — the server resolves it, and
+  cross-project reads and writes fail closed. An **unpinned** server instead
+  rejects `trace_start_session` outright, which a client reasonably reports as
+  "TRACE tools are unavailable"; if you see that, the pin is missing.
+- Consumer projects build the server via `uvx --from <this checkout>`, which
+  compiles the **currently checked-out working tree**. Leaving a half-finished
+  branch checked out ships it to every consumer on their next server start.
+  Keep `main` checked out unless actively testing a branch.
 
 ## Available Tools (22 total)
 
