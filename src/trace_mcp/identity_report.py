@@ -78,10 +78,21 @@ def find_stray_stores(
         return []
     stray: list[str] = []
     for path in kdir.glob("*.json"):
-        stem = path.stem
-        if stem in pident.RESERVED_KEYS:
+        # Classify by the store's CANONICAL key — a legacy uppercase or
+        # separator-bearing filename (REAP.json, created before canonical
+        # keying) belongs to key 'reap' and is NOT stray once 'reap' is
+        # registered. Comparing the raw stem to registry keys would flag such a
+        # file forever, breaking the `identity check` exit-0 verification. The
+        # reported value stays the actual filename stem, so the operator can
+        # find the file.
+        try:
+            key = pident.canonical_project_key(path.stem)
+        except pident.ProjectKeyError:
+            stray.append(path.stem)  # a filename yielding no key belongs to no project
             continue
-        if stem in registry.projects:
+        if key in pident.RESERVED_KEYS:
             continue
-        stray.append(stem)
+        if key in registry.projects:
+            continue
+        stray.append(path.stem)
     return sorted(stray)

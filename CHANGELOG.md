@@ -149,6 +149,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`identity scan` and stray-store detection canonicalize the store filename
+  stem.** A knowledge store written before canonical keying keeps a legacy
+  filename — an uppercase or separator-bearing stem such as `REAP.json` — that a
+  case-insensitive filesystem still serves as its canonical project's store.
+  `scan` grouped stores by the raw stem, minting a phantom `REAP` group distinct
+  from the `reap` session group; the two then collided on `apply`'s
+  alias-uniqueness check. `find_stray_stores` compared the raw stem to registry
+  keys (its docstring said "canonical stem" but the code did not), so such a
+  store was reported stray even when its canonical key was registered — which
+  would make `identity check` fail its exit-0 verification permanently. Both
+  sites now classify by canonical key; the stray report still names the actual
+  filename so the operator can find it.
 - **`identity apply` no longer logs mints that never happened.** Migration
   records were appended to `migrations.jsonl` inside the registry transaction;
   when the write failed (e.g. an alias-uniqueness violation), the registry

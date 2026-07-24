@@ -150,6 +150,24 @@ class TestScan:
         gamma = next(p for p in plan["projects"] if p["key"] == "gamma")
         assert gamma["knowledge_stores"] == ["gamma.json"]
 
+    def test_legacy_uppercase_store_groups_under_its_canonical_key(self, _isolated_home: Path) -> None:
+        """A store file written before canonical keying keeps an uppercase stem.
+
+        Grouping it by the raw stem mints a phantom 'REAP' group distinct from
+        the 'reap' session group, and the two collide on apply's alias-uniqueness
+        check. The store must fold into its canonical session group instead.
+        """
+        _write_session(_isolated_home, "trace_20260101_a", "REAP")  # -> key 'reap'
+        _write_store(_isolated_home, "REAP", learnings=["x"])  # legacy uppercase filename
+
+        _run("scan", "-o", str(_isolated_home / "plan.json"))
+        plan = json.loads((_isolated_home / "plan.json").read_text())
+        keys = [p["key"] for p in plan["projects"]]
+        assert "REAP" not in keys, f"phantom uppercase group leaked into the plan: {keys}"
+        reap = next(p for p in plan["projects"] if p["key"] == "reap")
+        assert reap["knowledge_stores"] == ["REAP.json"]
+        assert sum(reap["session_counts"].values()) == 1
+
 
 # ── apply ──────────────────────────────────────────────────────────────────
 
@@ -220,6 +238,19 @@ class TestCheck:
         code, out = _run("check")
         assert code == 1
         assert "Totally Unenrolled" in out
+
+    def test_legacy_uppercase_store_is_not_stray_when_its_key_is_registered(self, _isolated_home: Path) -> None:
+        """A store whose canonical key is registered must not read as stray.
+
+        `find_stray_stores` classified by the raw filename stem, so REAP.json
+        was flagged even with 'reap' registered — which would make `identity
+        check` fail exit-0 forever and break S8's verification criterion.
+        """
+        _enroll("reap", display="REAP")
+        _write_store(_isolated_home, "REAP", learnings=["x"], project="REAP")  # legacy uppercase file
+
+        code, out = _run("check")
+        assert code == 0, f"a registered project's legacy-cased store was flagged stray: {out}"
 
     def test_reports_absent_registry(self, _isolated_home: Path) -> None:
         _, out = _run("check")
