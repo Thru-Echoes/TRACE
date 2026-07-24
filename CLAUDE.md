@@ -2,8 +2,8 @@
 
 > **Full documentation**: [README.md](README.md) (architecture, tools, configuration, changelog)
 > **Formal specification**: [docs/specification.md](docs/specification.md)
-> **Version**: 0.4.2 (package) · protocol/schema v0.4.1
-> **TRACE project name**: "trace-mcp"
+> **Version**: 0.5.0 (package) · protocol/schema v0.5.0
+> **TRACE project name**: "trace-mcp" (canonical project key: `trace-mcp`)
 
 ---
 
@@ -11,14 +11,21 @@
 
 ```bash
 uv pip install -e ".[dev]"          # Install with dev dependencies
-uv run pytest                       # Run full test suite (950+ tests)
+uv run pytest                       # Run full test suite (1240+ tests)
 uv run pytest tests/test_invariants.py       # Invariant-registry guard (docs/INVARIANTS.md) — fast
 uv run pytest -k llm                # Run real LLM integration tests
 uv run ruff check src/              # Lint
 uv run pyright src/                 # Type check
 python scripts/generate_schema.py   # Regenerate JSON Schema from Pydantic models
 uv build && uv run pytest tests/test_packaging_artifacts.py   # Verify the shipped wheel/sdist before tagging
+trace-mcp identity check            # Report project-identity drift (non-zero exit on findings)
 ```
+
+Two console scripts ship with the package: `trace-mcp` (the MCP server) and
+`trace-mcp-init` (writes `.mcp.json`, the `TRACE_PROJECT` pin, and host adapter
+assets into a consumer project). `trace-mcp identity` dispatches to the
+migration tooling (`snapshot`, `scan`, `apply`, `check`, `merge-stores`,
+`adopt`, `bundle`) — see [`docs/adr/006-project-identity-and-isolation.md`](docs/adr/006-project-identity-and-isolation.md).
 
 ### Key Patterns
 
@@ -33,6 +40,9 @@ uv build && uv run pytest tests/test_packaging_artifacts.py   # Verify the shipp
 - **Fail closed on integrity primitives**: the per-session lock raises `TimeoutError` rather than writing unlocked; stale-lock theft is gated on holder-PID liveness. A missed lock must be *visible*, not silent.
 - **Read aggregates skip-and-report**: `project_summary`/`health_check` catch per-session `ValidationError`/`JSONDecodeError` and surface a `skipped_sessions` list rather than aborting the whole aggregate.
 - **Schema models preserve unknown fields** (`extra="allow"` via the `TraceModel` base) for forward-compat; `Environment` is the one closed exception (legacy `trace_version` drop).
+- **A project is identified by its canonical key, never by its free-text label** — `metadata.project_key` is authoritative when present; a document without one resolves through the alias registry (`~/.trace/projects.json`). `project` stays an unconstrained display label. All matching and filtering goes through `project_identity` (INV-4, INV-9); never compare labels directly.
+- **Label repair is alias-table-first** — a mislabelled project is fixed by adding an alias, never by rewriting a capture record. `auto` and `shared` are reserved keys.
+- **Cross-project reads and writes fail closed** when the server is pinned via `TRACE_PROJECT`; `TRACE_REQUIRE_PIN` additionally refuses both session-creation paths on an unpinned process.
 - `server.py` imports `__version__` from `trace_mcp` for startup log
 - **Line length**: 120 (ruff configured)
 
@@ -41,11 +51,16 @@ uv build && uv run pytest tests/test_packaging_artifacts.py   # Verify the shipp
 ```
 src/trace_mcp/
     server.py              # MCP server entry point (FastMCP) + extension loader
+    project_identity.py    # Canonical project keys + alias registry (~/.trace/projects.json)
+    identity_cli.py        # `trace-mcp identity` migration subcommands
+    identity_report.py     # Read-only drift/stray-store reporting for the CLI
+    init_project.py        # `trace-mcp-init`: .mcp.json, TRACE_PROJECT pin, adapter dispatch
     scratchpad.py           # Session-end scratchpad generator
     extension_hooks.py     # Hook registry for extension ↔ core integration
     schema/                # Pydantic v2 models (Session, TraceEvent, etc.)
     storage/               # Abstract interface + JSON file backend
     tools/                 # MCP tool implementations (session, logging, decision, query, export)
+    adapters/              # Host installers (claude_code, codex) — pure, zero runtime imports
     extensions/learn/      # trace-learn: cross-session knowledge persistence (default)
 ```
 
@@ -55,18 +70,27 @@ provides a `register(mcp, storage)` function.
 ## Invariants & Pre-merge
 
 Correctness invariants are registered in [`docs/INVARIANTS.md`](docs/INVARIANTS.md)
-— one row per invariant with its exhaustive site-set and enforcing test.
+— one entry per invariant with its exhaustive site-set and enforcing test.
+Ten are registered and enforced (INV-1 … INV-10), covering session writes,
+completed-session immutability, decision validation, canonical-key project
+scoping, cloud-egress attestation, project/session coherence, registry writes,
+the knowledge-store lock, learn-tool label guarding, and version-declaration
+consistency.
 `tests/test_invariants.py` runs as a dedicated CI step and **fails when a new
-write path** (any `storage.update_session` caller) appears that is not registered
-and routed through `locked_disk_session`. This is the durable defense against the
-recurring defect pattern — *an invariant enforced in one place but not uniformly.*
+site appears that is not registered** — a new `storage.update_session` caller
+outside `locked_disk_session`, a new OpenAI call site that does not
+`attest_egress()` first, a new registry write that bypasses `locked_registry`.
+This is the durable defense against the recurring defect pattern — *an invariant
+enforced in one place but not uniformly.*
 
 **Before merging a change that touches a write/read path, packaging, or a
 registered invariant:**
 
 1. Run the invariant guard — `uv run pytest tests/test_invariants.py`.
 2. If you add a session-write path, route it through `locked_disk_session` and
-   register it in `docs/INVARIANTS.md` + `INV1_REGISTERED_WRITERS`.
+   register it in `docs/INVARIANTS.md` + `INV1_REGISTERED_WRITERS`. The same
+   pattern applies to the other site-set registries (`INV5_EGRESS_CALL_SITES`,
+   `INV7_REGISTRY_WRITE_SITES`).
 3. For a release/packaging change, build and verify the *real* artifact
    (`uv build && uv run pytest tests/test_packaging_artifacts.py`) — the dev
    `uvx --from <path>` launcher builds differently than the published wheel, so a
@@ -94,6 +118,10 @@ instructions are in the global `~/.claude/CLAUDE.md`. Key points:
 - Log rejected alternatives as separate decision events for significant methodology discussions
 - End with a summary including what was accomplished and what is next
 - The scratchpad auto-generates decisions, contributions, and corrections from session events
+- This checkout's `.mcp.json` carries no `TRACE_PROJECT` pin, so the server is
+  unpinned here: pass `project="trace-mcp"` explicitly to `trace_start_session`.
+  Pin it (`trace-mcp-init`) to make the argument optional and to get fail-closed
+  cross-project isolation.
 
 ## Available Tools (22 total)
 
@@ -105,7 +133,7 @@ instructions are in the global `~/.claude/CLAUDE.md`. Key points:
 
 <!-- trace-mcp:claude-code -->
 
-## TRACE Audit Protocol
+## TRACE Audit Protocol (v0.5.0+)
 
 This project uses [TRACE](https://github.com/Thru-Echoes/TRACE) for transparent
 documentation of AI-human collaboration. The TRACE MCP server is configured in
@@ -113,6 +141,21 @@ documentation of AI-human collaboration. The TRACE MCP server is configured in
 
 **Absolute rule**: Never fabricate, falsify, or retroactively alter TRACE
 data. A sparse honest record beats a dense fabricated one.
+
+**Project identity (v0.5.0, spec §3.2 and §3.2.2)**
+
+This project has a canonical project key, minted by `trace-mcp-init` and
+recorded in `.claude/trace.project` (the hooks' highest-precedence source), in
+`.mcp.json` as the `TRACE_PROJECT` env pin, and in the registry at
+`~/.trace/projects.json`. The key — not the free-text display label — is what
+identifies the project, so case and separator variants of the name no longer
+read as separate projects.
+
+- With the pin set, omit `project` from `trace_start_session`; the server
+  resolves it. Cross-project reads and writes fail closed.
+- Without a pin, pass `project="<label>"` explicitly.
+- Never repair a wrong label by editing a captured session. Add an alias to
+  the registry instead — capture records are not rewritten.
 
 **Session lifecycle**
 
@@ -123,12 +166,32 @@ data. A sparse honest record beats a dense fabricated one.
 **What to log**
 
 - **Decisions** (propose BEFORE acting, resolve when the human responds).
-- **Corrections** when the human catches an AI mistake.
+  - **Proposer Identity Rule (v0.4.1, spec §3.6)**: set `proposed_by` to the
+    actor who authored the proposal *content* (whose words populate
+    `description`), not the speaker of the resolving directive.
+    Question→AI-proposal→accept means `proposed_by=ai`, `resolved_by=human`.
+- **Corrections** when a participant catches a mistake.
+  - If the corrected entity is not a TRACE event (subagent output, tool
+    result, external claim), use a URI-form reference per spec §3.7.1:
+    `external:<uri>` (universal fallback), `jsonl:<path>#L<line>`,
+    `subagent:<id>`, or `tool-result:<id>`. `related_event_ids` is NOT
+    for the correction relationship.
+- **Discoveries (v0.4.1, `category="discovery"`)**: non-trivial findings
+  from autonomous work — log AT THE MOMENT of discovery, not in a
+  post-hoc summary.
 - **Contributions** — one per artifact, with `direction` (who had the idea)
-  and `execution` (who did the work).
-- Domain tool calls (not file reads, greps, or TRACE's own calls).
+  and `execution` (who did the work). Always set `conversation_snippet`
+  to the relevant user message (~200 chars). If no user message
+  motivated the event, use the explicit absence marker
+  `<autonomous-stretch>` (no user turn since the last decision) or
+  `<no recent user message>` (general fallback) rather than omitting.
+  Silent omission is a v0.4.1 protocol violation per spec §3.4.1.
+- **Subagent dispatches** when their outcome is summarized by a
+  contribution — `trace_log_tool_call(host="internal", server="claude-code",
+  parent_event_id=...)` per spec §3.5. Skip routine file reads, greps,
+  or TRACE's own calls.
 
-Full protocol, including attribution rules and examples, lives at the
-[TRACE specification](https://github.com/Thru-Echoes/TRACE/blob/main/docs/specification.md).
+Full protocol, including attribution rules, URI-form references, and
+worked examples, lives at the [TRACE specification](https://github.com/Thru-Echoes/TRACE/blob/main/docs/specification.md).
 
 <!-- /trace-mcp:claude-code -->
