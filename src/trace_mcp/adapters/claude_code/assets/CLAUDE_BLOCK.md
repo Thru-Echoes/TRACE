@@ -1,6 +1,6 @@
 <!-- trace-mcp:claude-code -->
 
-## TRACE Audit Protocol (v0.4.1+)
+## TRACE Audit Protocol (v0.5.0+)
 
 This project uses [TRACE](https://github.com/Thru-Echoes/TRACE) for transparent
 documentation of AI-human collaboration. The TRACE MCP server is configured in
@@ -8,6 +8,21 @@ documentation of AI-human collaboration. The TRACE MCP server is configured in
 
 **Absolute rule**: Never fabricate, falsify, or retroactively alter TRACE
 data. A sparse honest record beats a dense fabricated one.
+
+**Project identity (v0.5.0, spec §3.2 and §3.2.2)**
+
+This project has a canonical project key, minted by `trace-mcp-init` and
+recorded in `.claude/trace.project` (the hooks' highest-precedence source), in
+`.mcp.json` as the `TRACE_PROJECT` env pin, and in the registry at
+`~/.trace/projects.json`. The key — not the free-text display label — is what
+identifies the project, so case and separator variants of the name no longer
+read as separate projects.
+
+- With the pin set, omit `project` from `trace_start_session`; the server
+  resolves it. Cross-project reads and writes fail closed.
+- Without a pin, pass `project="<label>"` explicitly.
+- Never repair a wrong label by editing a captured session. Add an alias to
+  the registry instead — capture records are not rewritten.
 
 **Session lifecycle**
 

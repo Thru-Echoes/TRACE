@@ -235,6 +235,45 @@ can neither open a quarantine store nor create a mis-keyed one.
 
 ---
 
+## INV-10 — Every restatement of a version agrees with its source of truth  · ENFORCED
+
+**Statement.** The package version has exactly one source of truth
+(`pyproject.toml :: version`) and the spec/wire version exactly one
+(`schema/session.py :: SCHEMA_VERSION`). Every other file that restates either
+number must agree with it. The two are **independent** — a hardening release
+may bump the package while the wire format stands still — so nothing asserts
+that they equal each other.
+
+**Exhaustive site-set (package version):**
+- `src/trace_mcp/__init__.py :: __version__`
+- `server.json :: version` and `server.json :: packages[*].version`
+- `CITATION.cff :: version`
+- `README.md` — the `**Version:**` banner
+- `CLAUDE.md` — the `> **Version**:` banner
+
+**Exhaustive site-set (spec/wire version):**
+- `docs/specification.md` — the `## Specification v<X>` heading
+- `schemas/trace-v<major>.<minor>.json` and its `$id`
+- `src/trace_mcp/schemas/trace-v<major>.<minor>.json` (the packaged copy)
+
+**Why this is an integrity invariant, not cosmetics.** `server.json` is the MCP
+registry manifest — a stale version there is what an installer *resolves*, not
+a typo in prose. It had silently drifted a full minor version behind
+`pyproject.toml` because only the `__init__.py` ↔ `pyproject.toml` pair was
+ever checked: the same shape as every other defect in this file, an invariant
+enforced in one place but not uniformly.
+
+**Guard:** `tests/test_installation_health.py :: TestVersionDeclarationSites`
+(plus the pre-existing `TestPyprojectConsistency :: test_version_matches_pyproject`
+for the `__init__.py` site). Each site is read and compared to its source of
+truth; the schema-file check derives the filename from `SCHEMA_VERSION` so a
+wire bump that forgets to rename or regenerate the schema fails.
+
+**Status.** ENFORCED.
+
+---
+
 *To add an invariant: give it the next `INV-N`, state it, enumerate the
-exhaustive site-set, name the guard + test, and add a check to
-`tests/test_invariants.py` that fails when a new site violates it.*
+exhaustive site-set, name the guard + test, and add a check that fails when a
+new site violates it — in `tests/test_invariants.py` for the AST/enumeration
+guards, or alongside the behavior it protects where that reads better.*

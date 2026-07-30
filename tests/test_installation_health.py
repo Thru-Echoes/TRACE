@@ -237,6 +237,117 @@ class TestPyprojectConsistency:
         assert "trace_mcp.server:main" in pyproject
 
 
+# ── Version-Declaration Enumeration Guard ────────────────────────────────────
+#
+# The package version is restated in several files that no test used to read,
+# so a release bump could land in pyproject.toml while `server.json` kept
+# advertising the previous version to the MCP registry — a stale version there
+# is what an installer resolves, not a cosmetic typo. These tests enumerate
+# every site that restates a version and pin each to its single source of
+# truth: the package version to pyproject.toml, the spec/wire version to
+# ``SCHEMA_VERSION``.
+#
+# The two versions are deliberately independent — a hardening release may bump
+# the package while the wire format stands still — so nothing here asserts that
+# they are equal.
+#
+# To add a site: append it to the relevant helper below. Do not "fix" a
+# failure by loosening the assertion.
+
+
+def _package_version() -> str:
+    """Read the canonical package version out of pyproject.toml.
+
+    Pure. Fails the calling test if the version cannot be located.
+    """
+    for line in (TRACE_ROOT / "pyproject.toml").read_text().split("\n"):
+        if line.strip().startswith("version"):
+            return line.split('"')[1]
+    pytest.fail("Could not find version in pyproject.toml")
+
+
+def _spec_version() -> str:
+    """Read the canonical spec/wire version out of ``schema/session.py``.
+
+    Pure. Fails the calling test if ``SCHEMA_VERSION`` cannot be located.
+    """
+    from trace_mcp.schema.session import SCHEMA_VERSION
+
+    return SCHEMA_VERSION
+
+
+class TestVersionDeclarationSites:
+    """Every file restating a version agrees with that version's source of truth."""
+
+    def test_server_json_advertises_the_package_version(self) -> None:
+        """`server.json` feeds the MCP registry; a stale version there is what
+        an installer resolves. Both the top-level and per-package versions count.
+        """
+        manifest = json.loads((TRACE_ROOT / "server.json").read_text())
+        expected = _package_version()
+
+        declared = {("server.json:version", manifest.get("version"))}
+        declared |= {
+            (f"server.json:packages[{i}].version", pkg.get("version"))
+            for i, pkg in enumerate(manifest.get("packages", []))
+        }
+
+        assert declared, "server.json positive control failed: no version fields found at all."
+        stale = {site: got for site, got in declared if got != expected}
+        assert not stale, f"server.json versions disagree with pyproject.toml ({expected}): {stale}"
+
+    def test_citation_cff_declares_the_package_version(self) -> None:
+        """CITATION.cff is what a DOI archive and citation tooling read."""
+        expected = _package_version()
+        lines = [ln for ln in (TRACE_ROOT / "CITATION.cff").read_text().split("\n") if ln.startswith("version:")]
+
+        assert len(lines) == 1, f"expected exactly one top-level `version:` line in CITATION.cff, found {len(lines)}"
+        assert lines[0].split(":", 1)[1].strip().strip("\"'") == expected, (
+            f"CITATION.cff version != pyproject.toml version ({expected}): {lines[0]!r}"
+        )
+
+    @pytest.mark.parametrize(
+        ("doc", "prefix"),
+        [
+            ("README.md", "**Version:**"),
+            ("CLAUDE.md", "> **Version**:"),
+        ],
+    )
+    def test_docs_state_the_package_version(self, doc: str, prefix: str) -> None:
+        """The version banners in the two front-door docs are the ones a reader
+        trusts without checking pyproject.toml.
+        """
+        expected = _package_version()
+        matches = [ln for ln in (TRACE_ROOT / doc).read_text().split("\n") if ln.startswith(prefix)]
+
+        assert len(matches) == 1, f"expected exactly one line starting {prefix!r} in {doc}, found {len(matches)}"
+        assert expected in matches[0], f"{doc} version banner does not state {expected}: {matches[0]!r}"
+
+    def test_specification_states_the_schema_version(self) -> None:
+        """The spec heading is the human-readable form of ``SCHEMA_VERSION``."""
+        expected = _spec_version()
+        heading = f"## Specification v{expected}"
+        text = (TRACE_ROOT / "docs" / "specification.md").read_text()
+
+        assert heading in text, f"docs/specification.md does not carry the heading {heading!r} for SCHEMA_VERSION"
+
+    def test_schema_file_tracks_the_schema_version(self) -> None:
+        """The published schema filename and its ``$id`` both encode the
+        major.minor of the wire version, and the copy shipped inside the package
+        must not lag the top-level one.
+        """
+        major, minor, *_ = _spec_version().split(".")
+        name = f"trace-v{major}.{minor}.json"
+
+        published = TRACE_ROOT / "schemas" / name
+        packaged = TRACE_ROOT / "src" / "trace_mcp" / "schemas" / name
+        assert published.exists(), f"schemas/{name} missing for SCHEMA_VERSION {_spec_version()}"
+        assert packaged.exists(), f"src/trace_mcp/schemas/{name} missing for SCHEMA_VERSION {_spec_version()}"
+
+        schema_id = json.loads(published.read_text()).get("$id", "")
+        assert schema_id.endswith(name), f"schemas/{name} has a mismatched $id: {schema_id!r}"
+
+
 # ── Consumer Project Tests ───────────────────────────────────────────────────
 
 

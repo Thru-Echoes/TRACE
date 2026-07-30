@@ -15,7 +15,10 @@
         "filelock",
         "--refresh",
         "trace-mcp"
-      ]
+      ],
+      "env": {
+        "TRACE_PROJECT": "trace-mcp"
+      }
     }
   }
 }
