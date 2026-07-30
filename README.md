@@ -4,6 +4,17 @@ In the age of AI, how do we know *who* proposed *what* in a scientific or coding
 
 What does the solution to this look like? 
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Thru-Echoes/TRACE/main/docs/provenance.svg" width="900" alt="Timeline of a real captured TRACE session: two decisions (one proposed by AI and accepted by a human, one still awaiting resolution), a discovery, two contributions attributed direction-human/execution-AI, a to-do, and a correction that retracts one of the contributions.">
+</p>
+
+Every row above is a real event from session `trace_20260730_32c108`, captured as
+the work happened. Note what a diff could not have told you: one decision is
+still **awaiting resolution** because the AI is not permitted to resolve its own
+proposal, and the last event **retracts** an earlier contribution that turned out
+to be wrong. Regenerate it from any session with
+`python3 scripts/make_provenance_animation.py <session.json>`.
+
 **One sentence from you, fully-scoped session from Claude:**
 
 <p align="center">
