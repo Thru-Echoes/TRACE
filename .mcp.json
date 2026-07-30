@@ -11,9 +11,8 @@
         "numpy",
         "--with",
         "model2vec",
-        "--with",
-        "filelock",
-        "--refresh",
+        "--refresh-package",
+        "trace-mcp",
         "trace-mcp"
       ],
       "env": {
