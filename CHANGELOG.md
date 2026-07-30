@@ -5,11 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+> **On the 0.4.1 and 0.4.2 sections.** Both were written up here but never
+> tagged, so no git tag or GitHub Release exists for either and neither has a
+> comparison link. Their changes ship in the v0.5.0 tag, whose comparison link
+> therefore spans from v0.4.0.
+
 ## [Unreleased]
 
-## [0.5.0] — 2026-07-24
+## [0.5.0] — 2026-07-30
 
 ### Added
+
+- **A shipped-launch-path guard.** `TestShippedLaunchPath` installs the built
+  wheel into a clean virtualenv with no lockfile — the dependency resolution a
+  consumer actually gets — and asserts the server imports and registers its core
+  tools. The existing `uvx` check covers the same path but passes
+  `--refresh-package trace-mcp`, which refreshes the package and not its
+  transitive dependencies, so a machine whose cache already held a working
+  environment stayed green while a cold-cache consumer got a dead server. The
+  new guard cannot be masked that way, and it asserts that tools *register*
+  rather than only that the module imports.
+- **A provenance figure generated from real capture data.** `scripts/make_provenance_animation.py`
+  renders any session file as a self-contained animated SVG plus a still frame,
+  with light and dark styling and no external assets. Event type, category,
+  actor, direction/execution, disposition and correction targets are copied
+  verbatim; only descriptions are shortened, at a word boundary.
 
 - **Honest bounded session orientation.** `session_brief` scans newest-first up
   to a `read_ceiling` (default 200 files), stopping early at `scan_cap`
@@ -150,6 +170,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   against the v0.4 schema (`additionalProperties` is permitted throughout).
 
 ### Fixed
+
+- **The `mcp` dependency is bounded below 2.0.** `mcp` 2.0.0 removed
+  `mcp.server.fastmcp`, which `server.py` imports at module scope, so the
+  previously unbounded `mcp>=1.0.0` resolved to a release the server cannot
+  import — it died before registering a single tool, which a client reports as
+  a total absence of TRACE tools. Consumers launch with `uvx --refresh`, which
+  ignores the lockfile and re-resolves on every server start, so the break
+  reached every project the day the upstream major was published. Lifting the
+  bound requires porting to the `mcp` 2.x API (`mcp.server.mcpserver`).
+- **This checkout's own launch arguments match the canonical form.**
+  `--refresh` became `--refresh-package trace-mcp`, so a server start rebuilds
+  TRACE from the working tree without re-resolving the whole dependency tree,
+  and the redundant `--with filelock` was dropped. The relative `--from .` is
+  unchanged: it is the local-only guarantee asserted by
+  `test_mcp_json_uses_uvx`, since the `trace-mcp` name on PyPI belongs to an
+  unrelated project.
+
 
 - **`identity scan` and stray-store detection canonicalize the store filename
   stem.** A knowledge store written before canonical keying keeps a legacy
@@ -625,9 +662,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Knowledge persistence, behavioral checks, checkpoints.
 
 [Unreleased]: https://github.com/Thru-Echoes/TRACE/compare/v0.5.0...HEAD
-[0.5.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.2...v0.5.0
-[0.4.2]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.1...v0.4.2
-[0.4.1]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.0...v0.4.1
+[0.5.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.1.0...v0.2.0
