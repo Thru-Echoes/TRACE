@@ -60,22 +60,25 @@ Three events from a real `corp-sus-report-extractor` session: a human-proposed s
 
 ## Preliminary deployment results
 
-Since the v0.3 release (2026-03-19), TRACE has been used across **5 research workflows**:
+Between 2026-03-18 and 2026-07-30, TRACE was used across **8 sustained research and development projects**:
 
-| Project | Domain | Sessions | Events | Decisions | Corrections |
+| Project | Domain | Sessions | Decisions | Contributions | Corrections |
 |---|---|---:|---:|---:|---:|
-| When-Algorithms-Meet-Artists | Computational art / cultural studies | 22 | 114 | 27 | 4 |
-| corp-sus-report-extractor | Corporate sustainability disclosure | 11 | 56 | 17 | 3 |
-| TRACE (self-host / meta) | Protocol research | 9 | 54 | 16 | 6 |
-| REAP | Environmental discourse analysis | 3 | 53 | 22 | 3 |
-| green-narrative | Environmental narrative analysis | 7 | 50 | 19 | 5 |
-| **Total** | | **52** | **327** | **101** | **21** |
+| trace-mcp (self-host / meta) | Protocol research | 88 | 132 | 205 | 25 |
+| trace-meeting-recorder | Speech transcription / diarization | 72 | 108 | 156 | 25 |
+| corp-sus-report-extractor | Corporate sustainability disclosure | 54 | 91 | 132 | 18 |
+| REAP | Environmental discourse analysis | 38 | 65 | 112 | 18 |
+| When-Algorithms-Meet-Artists | Computational art / cultural studies | 31 | 56 | 95 | 5 |
+| trace-research | Manuscript / literature synthesis | 30 | 48 | 76 | 18 |
+| waggle | Applied agentic tooling | 24 | 31 | 76 | 6 |
+| green-narrative | Environmental narrative analysis | 23 | 38 | 40 | 8 |
+| **Total** | | **360** | **569** | **892** | **123** |
 
-Decisions: **45% AI-proposed / 55% human-proposed**. Of resolved decisions, 86% accepted, 6% revised, 8% rejected — plus 21 separately-logged corrections. The acceptance rate is not rubber-stamping; the corrections, revisions, and rejections are the active human steering this protocol is designed to surface.
+Decisions: **67% AI-proposed / 33% human-proposed**. Of the 421 *resolved* decisions, 90% accepted, 6% revised, 4% rejected; a further 148 remain in the `proposed` state, because an AI may not resolve its own proposal and not every proposal gets answered. The acceptance rate is not rubber-stamping — the 27 revisions, 15 rejections, and 123 separately-logged corrections are the active human steering this protocol exists to surface, and each one is an alternative that a commit history would have discarded.
 
-Contributions: **73% human-directed → AI-executed, 20% collaborative-directed, 8% AI-directed**. Pure AI-directed-and-executed work is a minority; the dominant pattern is human direction with AI execution — which existing attribution norms cannot describe.
+Contributions: **70% human-directed, 22% collaborative, 8% AI-directed**; 66% are human-directed *and* AI-executed. Pure AI-directed-and-executed work is a small minority. The dominant pattern is human direction with AI execution — which existing authorship and attribution norms cannot describe.
 
-> These figures are aggregated from per-session TRACE logs in `~/.trace/sessions/`, which are not committed to this repository (they contain project-internal content). They are reproducible from those logs via `trace_project_summary`; an aggregated, de-identified export can be provided on request.
+> **What these counts include.** Figures are aggregated from per-session logs in `~/.trace/sessions/`, which are not committed here (they contain project-internal content), and cover the eight named projects only. The store also holds meeting-transcription namespaces, throwaway test keys, and short exploratory sessions; those are excluded, since a transcript namespace accumulates thousands of machine-written annotation events and no decisions, and including them would inflate a raw event count by more than an order of magnitude without adding a single act of provenance. Counts here are the deliberately logged event types. Sessions recorded before v0.5 under the display label `TRACE` are counted under `trace-mcp`, which is the same project under its canonical key. Reproducible from those logs via `trace_project_summary`; an aggregated, de-identified export can be provided on request.
 
 ## Architecture
 
