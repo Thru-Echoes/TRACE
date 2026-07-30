@@ -43,6 +43,7 @@ representative, not an exhaustive per-file tally.
 | **E2E server** | 12 | Full MCP tool invocations through the server layer |
 | **Protocol additions (v0.4.1)** | 101 | Attribution audit, URI-form `corrects_event_ids`, PROV-LD correction split, decision-audit hook, `tool_call` wrapper, core/extension boundary, extension status |
 | **Hardening (v0.4.2)** | 20 | Storage lost-update + **cross-process** concurrency lock, query payload caps, cheap bootstrap, recall-count accounting |
+| **Project identity + isolation (v0.5.0)** | 184 | Canonical project keys, alias registry and its locked writes, `TRACE_PROJECT` pinning and cross-project fail-closed behavior, `trace-mcp identity` migration subcommands, `trace-mcp-init` pin minting, hook-asset consistency, learn-store containment, per-project privacy ratchet |
 | **Spec conformance + guards** | 225 | Specification conformance, hardening E2E, decision guard-rails, failure-mode detectors |
 
 ### What the test suite does NOT cover
