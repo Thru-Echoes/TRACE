@@ -24,6 +24,8 @@ there only; the repo's own ``dist/`` is untouched).
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import subprocess
 import sys
@@ -202,6 +204,85 @@ class TestWheelInstallE2E:
         )
         assert bad.returncode == 1, f"Expected exit 1 for invalid doc, got {bad.returncode}: {bad.stdout}"
         assert "FAIL" in bad.stdout
+
+
+class TestShippedLaunchPath:
+    """Resolve every dependency from scratch — the resolution consumers get —
+    and prove the server still imports and registers its tools.
+
+    ``uv run pytest`` resolves through ``uv.lock``, which pins a known-good
+    ``mcp``. Consumers launch with ``uvx --refresh``, which ignores the lockfile
+    and re-resolves the declared spec on each server start. The paths agree
+    until an upstream major lands: ``mcp`` 2.0.0 removed ``mcp.server.fastmcp``,
+    so an unbounded ``mcp>=1.0.0`` resolved to a release whose import raises
+    ``ModuleNotFoundError`` before a single tool is registered.
+
+    ``TestUvxIntegration::test_uvx_entry_point_resolves`` already covers the
+    launch path and does fail on that break — but only where the resolution is
+    genuinely cold. It passes ``--refresh-package trace-mcp``, which refreshes
+    the package and *not* its transitive deps, so a developer whose uv cache
+    already holds an env built against ``mcp`` 1.x sees green while consumers
+    with a cold cache get a dead server. This guard is not subject to that: it
+    installs the built wheel into a brand-new venv with no lockfile, which
+    re-resolves the whole dependency set.
+
+    It also asserts further along. The existing check proves the module
+    imports; this one lists the registered tools, so a resolution that imports
+    but registers nothing still fails.
+
+    The assertion is behavioural, so a future port to the ``mcp`` 2.x API
+    satisfies this guard without editing it.
+    """
+
+    # 17 core tools; the 5 trace-learn tools need heavy optional deps and load
+    # in main(), not at import, so they are deliberately out of scope here.
+    CORE_TOOL_FLOOR = 17
+
+    PROBE = (
+        "import asyncio, json\n"
+        "from trace_mcp.server import mcp\n"
+        "print(json.dumps(sorted(t.name for t in asyncio.run(mcp.list_tools()))))\n"
+    )
+
+    def test_server_registers_tools_under_fresh_resolution(self, built_dist: dict[str, Path], tmp_path: Path) -> None:
+        venv_dir = tmp_path / "venv"
+        subprocess.run(["uv", "venv", str(venv_dir)], check=True, capture_output=True, timeout=120)
+        python = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
+
+        # No --frozen, no lockfile: dependency specs resolve from the index
+        # exactly as `uvx --refresh` resolves them for a consumer.
+        install = subprocess.run(
+            ["uv", "pip", "install", "--python", str(python), f"trace-mcp @ {built_dist['wheel'].as_uri()}"],
+            capture_output=True,
+            text=True,
+            timeout=300,
+        )
+        assert install.returncode == 0, (
+            f"Fresh resolution of the shipped wheel failed — consumers would get this on server start:\n"
+            f"stdout: {install.stdout}\nstderr: {install.stderr}"
+        )
+
+        # Point storage at a temp dir so the probe cannot touch the real store.
+        probe = subprocess.run(
+            [str(python), "-c", self.PROBE],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env={**os.environ, "TRACE_SESSIONS_DIR": str(tmp_path / "sessions")},
+        )
+        assert probe.returncode == 0, (
+            f"The server failed to import under fresh dependency resolution — every tool would be "
+            f"missing for every consumer, while the locked dev environment stays green:\n"
+            f"stdout: {probe.stdout}\nstderr: {probe.stderr}"
+        )
+
+        tool_names = json.loads(probe.stdout.strip().splitlines()[-1])
+        assert len(tool_names) >= self.CORE_TOOL_FLOOR, (
+            f"Expected at least {self.CORE_TOOL_FLOOR} core tools from a freshly resolved server, "
+            f"got {len(tool_names)}: {tool_names}"
+        )
+        for required in ("trace_start_session", "trace_health_check"):
+            assert required in tool_names, f"{required} missing from a freshly resolved server: {tool_names}"
 
 
 class TestNoPersonalDataInSdist:
