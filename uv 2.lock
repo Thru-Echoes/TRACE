@@ -2205,7 +2205,7 @@ requires-dist = [
     { name = "jsonschema", marker = "extra == 'all'", specifier = ">=4.0" },
     { name = "jsonschema", marker = "extra == 'dev'", specifier = ">=4.0" },
     { name = "jsonschema", marker = "extra == 'validate'", specifier = ">=4.0" },
-    { name = "mcp", specifier = ">=1.0.0,<2" },
+    { name = "mcp", specifier = ">=1.0.0" },
     { name = "model2vec", marker = "extra == 'all'", specifier = ">=0.4" },
     { name = "model2vec", marker = "extra == 'dev'", specifier = ">=0.4" },
     { name = "model2vec", marker = "extra == 'embeddings'", specifier = ">=0.4" },
