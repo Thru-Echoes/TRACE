@@ -33,14 +33,7 @@ classifiers = [
     "Typing :: Typed",
 ]
 dependencies = [
-    # Upper bound is load-bearing, not caution: mcp 2.0.0 removed
-    # `mcp.server.fastmcp`, which server.py imports at module scope. Consumers
-    # launch via `uvx --refresh`, which ignores uv.lock and re-resolves this
-    # spec on every server start — an unbounded major resolves to a release the
-    # server cannot import, and every tool disappears at once. Lifting the
-    # bound requires porting server.py to the mcp 2.x API (mcp.server.mcpserver).
-    # Guarded by tests/test_packaging_artifacts.py::TestShippedLaunchPath.
-    "mcp>=1.0.0,<2",
+    "mcp>=1.0.0",
     "pydantic>=2.0",
 ]
 
