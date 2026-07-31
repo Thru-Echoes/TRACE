@@ -82,6 +82,21 @@ def _resolve_trace_source() -> str:
     )
 
 
+LEARN_EXTRAS: tuple[str, ...] = ("openai", "numpy", "model2vec")
+"""Optional dependencies the trace-learn extension needs in order to register.
+
+`uvx --from <src> trace-mcp` installs the base package only, so without these
+the extension does not load and the server comes up with the 17 core tools
+instead of the documented 22 — silently, because a missing optional dependency
+is not an error. They are `--with` flags rather than a hard dependency so the
+core install stays `mcp` + `pydantic`.
+
+Installing `openai` does not enable cloud calls: LLM matching and extraction
+remain opt-in behind `TRACE_LLM_ENABLED` and an API key, and the local
+`model2vec` backend is the default.
+"""
+
+
 def _mcp_server_config(project_key: str | None = None) -> dict:
     """Build the `.mcp.json` ``mcpServers`` entry for TRACE.
 
@@ -95,9 +110,12 @@ def _mcp_server_config(project_key: str | None = None) -> dict:
     writes are refused rather than silently accepted.
     """
     source = _resolve_trace_source()
+    with_flags: list[str] = []
+    for pkg in LEARN_EXTRAS:
+        with_flags += ["--with", pkg]
     entry: dict = {
         "command": "uvx",
-        "args": ["--from", source, "--refresh-package", "trace-mcp", "trace-mcp"],
+        "args": ["--from", source, *with_flags, "--refresh-package", "trace-mcp", "trace-mcp"],
     }
     if project_key:
         entry["env"] = {"TRACE_PROJECT": project_key}
@@ -276,11 +294,18 @@ def _rebuild_args(fresh_args: list[str], with_packages: list[str]) -> list[str]:
 
     ``fresh_args`` ends with the tool name (the uvx command); preserved
     ``--with`` flags are inserted just before it so uvx option order stays valid.
+
+    Packages the fresh args already carry are dropped from *with_packages*
+    rather than appended again: the canonical entry now ships the trace-learn
+    extras itself, so re-running init over a config that already had them would
+    otherwise duplicate every one on each run.
     """
-    if not with_packages:
+    already = set(_extract_with_packages(fresh_args))
+    extra = [pkg for pkg in with_packages if pkg not in already]
+    if not extra:
         return list(fresh_args)
     with_flags: list[str] = []
-    for pkg in with_packages:
+    for pkg in extra:
         with_flags += ["--with", pkg]
     return fresh_args[:-1] + with_flags + fresh_args[-1:]
 
