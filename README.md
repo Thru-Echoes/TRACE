@@ -27,6 +27,11 @@ to be wrong. Regenerate it from any session with
 
 ## **TRACE: Transparent Recording of AI-assisted Collaboration Experiments**
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21711455.svg)](https://doi.org/10.5281/zenodo.21711455)
+[![CI](https://github.com/Thru-Echoes/TRACE/actions/workflows/ci.yml/badge.svg)](https://github.com/Thru-Echoes/TRACE/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/Thru-Echoes/TRACE/blob/main/LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://github.com/Thru-Echoes/TRACE/blob/main/pyproject.toml)
+
 TRACE is an MCP server that provides a standardized audit trail for AI-assisted research workflows. It records tool calls, decisions, annotations, contributions, and actor attribution — who proposed what, who accepted or revised it, and why.
 
 TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy or intercept calls — the AI client explicitly logs events to TRACE, creating a complete, human-readable provenance record.
@@ -35,11 +40,9 @@ TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy 
 
 > The schema URI is an identifier (per W3C PROV convention) and is not currently a resolvable URL. The machine-readable JSON Schema lives at [`schemas/trace-v0.5.json`](https://github.com/Thru-Echoes/TRACE/blob/main/schemas/trace-v0.5.json) in this repository.
 
-**What's new in 0.5.0** (additive — every v0.3.x/v0.4.x session loads unchanged): **canonical project identity**. A project is now identified by a stable canonical key rather than a free-text label, so case and separator variants of one name stop reading as separate projects while genuinely different projects can no longer be merged by a case-insensitive filesystem. Sessions gain an optional `metadata.project_key` (spec §3.2, with the canonical-key rules in §3.2.2), authoritative when present; sessions written before v0.5 carry no key and resolve through the alias registry (`~/.trace/projects.json`, published as [`schemas/trace-projects-v1.json`](https://github.com/Thru-Echoes/TRACE/blob/main/schemas/trace-projects-v1.json)) — no capture record is ever rewritten. PROV exports gain `trace:projectKey` beside the untouched `trace:project` display literal, so already-exported artifacts keep their meaning. A `TRACE_PROJECT` pin makes one server process serve one project, and cross-project reads and writes fail closed. Full details in [CHANGELOG.md](https://github.com/Thru-Echoes/TRACE/blob/main/CHANGELOG.md) and [docs/adr/006-project-identity-and-isolation.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/adr/006-project-identity-and-isolation.md).
+**New in 0.5.0 — canonical project identity.** Additive; every v0.3.x and v0.4.x session loads unchanged. A project is identified by a stable canonical key rather than a free-text label, so case and separator variants of one name stop reading as separate projects, and two genuinely different projects can no longer be merged by a case-insensitive filesystem. A `TRACE_PROJECT` pin binds one server process to one project, and cross-project reads and writes fail closed. No capture record is ever rewritten — a mislabelled project is repaired by adding an alias.
 
-**What's new in 0.4.2** (hardening — no protocol or wire changes; sessions stay at schema v0.4.1): a critical storage lost-update / event-ID-collision fix — a per-session file lock + disk-reload across *all* write paths (append, end, resolve), verified across real OS processes; hard payload caps on the query tools; a cheap, quiet session bootstrap; and packaging hardening. Full details in [CHANGELOG.md](https://github.com/Thru-Echoes/TRACE/blob/main/CHANGELOG.md).
-
-**What's new in 0.4.1** (additive — v0.3.x and v0.4.0 sessions load unchanged): the **Proposer Identity Rule** (`proposed_by` identifies the *author* of proposal content, not the speaker of the resolving directive — spec §3.6); a `discovery` annotation category for non-trivial findings surfaced during autonomous execution (§3.7); **URI-form `corrects_event_ids`** with schemes `external:`, `jsonl:`, `subagent:`, `tool-result:` for correcting things that aren't TRACE events (§3.7.1); `host` and `parent_event_id` on `tool_call` to cover MCP, host-internal, and external tools and to link subagent-dispatch chains (§3.5); a normative MUST on `conversation_snippet` for contributions and corrections with an explicit `<autonomous-stretch>` absence marker (§3.4.1). The PROV-LD correction mapping splits along the event-ID vs URI-form axis — downstream consumers matching `prov:wasRevisionOf` for corrections should switch to `prov:wasInvalidatedBy` (event IDs) and `prov:wasInfluencedBy` with `prov:atLocation` (URI form). Full details in [CHANGELOG.md](https://github.com/Thru-Echoes/TRACE/blob/main/CHANGELOG.md) and [docs/adr/002-v041-protocol-additions.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/adr/002-v041-protocol-additions.md); worked examples in [docs/examples.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/examples.md).
+See [CHANGELOG.md](https://github.com/Thru-Echoes/TRACE/blob/main/CHANGELOG.md) for the full entry and for 0.4.x, which added the Proposer Identity Rule, the `discovery` annotation category, URI-form corrections, and `host` / `parent_event_id` on tool calls. Design rationale lives in [the ADRs](https://github.com/Thru-Echoes/TRACE/tree/main/docs/adr); worked examples in [docs/examples.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/examples.md).
 
 ## Why decision provenance?
 
@@ -60,25 +63,24 @@ Three events from a real `corp-sus-report-extractor` session: a human-proposed s
 
 ## Preliminary deployment results
 
-Between 2026-03-18 and 2026-07-30, TRACE was used across **8 sustained research and development projects**:
+Between 2026-03-18 and 2026-07-30, TRACE was used across **7 sustained research and development projects**:
 
 | Project | Domain | Sessions | Decisions | Contributions | Corrections |
 |---|---|---:|---:|---:|---:|
-| trace-mcp (self-host / meta) | Protocol research | 88 | 132 | 205 | 25 |
-| trace-meeting-recorder | Speech transcription / diarization | 72 | 108 | 156 | 25 |
+| trace-mcp (self-host / meta) | Protocol research | 89 | 132 | 206 | 26 |
 | corp-sus-report-extractor | Corporate sustainability disclosure | 54 | 91 | 132 | 18 |
 | REAP | Environmental discourse analysis | 38 | 65 | 112 | 18 |
 | When-Algorithms-Meet-Artists | Computational art / cultural studies | 31 | 56 | 95 | 5 |
 | trace-research | Manuscript / literature synthesis | 30 | 48 | 76 | 18 |
 | waggle | Applied agentic tooling | 24 | 31 | 76 | 6 |
 | green-narrative | Environmental narrative analysis | 23 | 38 | 40 | 8 |
-| **Total** | | **360** | **569** | **892** | **123** |
+| **Total** | | **289** | **461** | **737** | **99** |
 
-Decisions: **67% AI-proposed / 33% human-proposed**. Of the 421 *resolved* decisions, 90% accepted, 6% revised, 4% rejected; a further 148 remain in the `proposed` state, because an AI may not resolve its own proposal and not every proposal gets answered. The acceptance rate is not rubber-stamping — the 27 revisions, 15 rejections, and 123 separately-logged corrections are the active human steering this protocol exists to surface, and each one is an alternative that a commit history would have discarded.
+Decisions: **68% AI-proposed / 32% human-proposed**. Of the 344 *resolved* decisions, 89% accepted, 7% revised, 4% rejected; a further 117 remain in the `proposed` state, because an AI may not resolve its own proposal and not every proposal gets answered. The acceptance rate is not rubber-stamping — the 23 revisions, 15 rejections, and 99 separately-logged corrections are the active human steering this protocol exists to surface, and each one is an alternative that a commit history would have discarded.
 
-Contributions: **70% human-directed, 22% collaborative, 8% AI-directed**; 66% are human-directed *and* AI-executed. Pure AI-directed-and-executed work is a small minority. The dominant pattern is human direction with AI execution — which existing authorship and attribution norms cannot describe.
+Contributions: **68% human-directed, 24% collaborative, 8% AI-directed**; 65% are human-directed *and* AI-executed. Pure AI-directed-and-executed work is a small minority. The dominant pattern is human direction with AI execution — which existing authorship and attribution norms cannot describe.
 
-> **What these counts include.** Figures are aggregated from per-session logs in `~/.trace/sessions/`, which are not committed here (they contain project-internal content), and cover the eight named projects only. The store also holds meeting-transcription namespaces, throwaway test keys, and short exploratory sessions; those are excluded, since a transcript namespace accumulates thousands of machine-written annotation events and no decisions, and including them would inflate a raw event count by more than an order of magnitude without adding a single act of provenance. Counts here are the deliberately logged event types. Sessions recorded before v0.5 under the display label `TRACE` are counted under `trace-mcp`, which is the same project under its canonical key. Reproducible from those logs via `trace_project_summary`; an aggregated, de-identified export can be provided on request.
+> **What these counts include.** Figures were taken on 2026-07-30 from per-session logs in `~/.trace/sessions/`, which are not committed here (they contain project-internal content), and cover the seven named projects only. The store also holds meeting-transcription namespaces, throwaway test keys, and short exploratory sessions; those are excluded, since a transcript namespace accumulates thousands of machine-written annotation events and no decisions, and counting them would inflate a raw event total by more than an order of magnitude without adding a single act of provenance. Counts here are the deliberately logged event types. Sessions recorded before v0.5 under the display label `TRACE` are counted under `trace-mcp`, which is the same project under its canonical key. Reproducible from those logs via `trace_project_summary`; an aggregated, de-identified export can be provided on request.
 
 ## Architecture
 
@@ -115,13 +117,23 @@ Add to your project's `.mcp.json`:
   "mcpServers": {
     "trace": {
       "command": "uvx",
-      "args": ["--from", "/path/to/TRACE", "--refresh-package", "trace-mcp", "trace-mcp"]
+      "args": [
+        "--from", "/path/to/TRACE",
+        "--with", "openai", "--with", "numpy", "--with", "model2vec",
+        "--refresh-package", "trace-mcp", "trace-mcp"
+      ],
+      "env": { "TRACE_PROJECT": "your-project-key" }
     }
   }
 }
 ```
 
-Using `uvx` builds the package into an isolated environment, avoiding `.venv` breakage from Python upgrades. The `--refresh-package` flag ensures source changes are picked up on next server start.
+Using `uvx` builds the package into an isolated environment, avoiding `.venv` breakage from Python upgrades. `--refresh-package` rebuilds TRACE from the source tree on the next server start, without re-resolving the whole dependency set each time.
+
+Two parts of that config are easy to omit and worth keeping:
+
+- **The three `--with` packages are what make this a 22-tool server.** They are the optional dependencies of the trace-learn extension. Without them the server still starts and still records provenance, but the extension does not load and you get the 17 core tools with no error to tell you why.
+- **`TRACE_PROJECT` pins the process to one project.** With it set you omit `project` from `trace_start_session`, and cross-project reads and writes fail closed. Without it, pass `project="..."` explicitly on every session start — an unpinned server rejects the call rather than guessing.
 
 ### Install hooks
 
@@ -232,7 +244,7 @@ Claude: -> trace_end_session(summary="Analyzed 47 passages...")
 
 ## Knowledge persistence (trace-learn)
 
-The default `trace-learn` extension surfaces relevant past learnings at session start, on-demand via `trace_learn_recall`, and when decisions are proposed — and auto-extracts new learnings at session end. Matching uses cloud LLM scoring only when explicitly opted in (`TRACE_LLM_ENABLED=true` plus an `OPENAI_API_KEY`), with BM25 fallback otherwise. Storage: `~/.trace/knowledge/{project}.json` (env: `TRACE_KNOWLEDGE_DIR`).
+The default `trace-learn` extension surfaces relevant past learnings at session start, on-demand via `trace_learn_recall`, and when decisions are proposed — and auto-extracts new learnings at session end. Matching uses cloud LLM scoring only when explicitly opted in (`TRACE_LLM_ENABLED=true` plus an `OPENAI_API_KEY`), with BM25 fallback otherwise. Storage: `~/.trace/knowledge/{project_key}.json`, named by the canonical project key rather than the display label (env: `TRACE_KNOWLEDGE_DIR`).
 
 See [`docs/extensions/trace-learn.md`](https://github.com/Thru-Echoes/TRACE/blob/main/docs/extensions/trace-learn.md) for matching backends, BM25 stemming, per-backend thresholds, extraction details, and LLM configuration.
 
@@ -240,6 +252,12 @@ See [`docs/extensions/trace-learn.md`](https://github.com/Thru-Echoes/TRACE/blob
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `TRACE_PROJECT` | _unset_ | Pins the server process to one project key. With it set, `project` is optional on `trace_start_session` and cross-project reads and writes fail closed. Unset, the call requires an explicit `project`. |
+| `TRACE_REQUIRE_PIN` | `false` | Set `1` to refuse **both** session-creation paths on an unpinned process, including the implicit auto-create a logging call would otherwise perform. |
+| `TRACE_ALLOW_CROSS_PROJECT_READS` | `false` | Set `1` to let a pinned server read other projects. Off by default; writes stay refused regardless. |
+| `TRACE_DEFAULT_PROJECT` | `auto` | Quarantine key used when a session is auto-created with no project available. |
+| `TRACE_REGISTRY_PATH` | `~/.trace/projects.json` | Canonical-key alias registry. |
+| `TRACE_LOCK_TIMEOUT` | `15` | Seconds to wait for the knowledge-store lock before failing closed. |
 | `TRACE_SESSIONS_DIR` | `~/.trace/sessions/` | Directory for session JSON files |
 | `TRACE_KNOWLEDGE_DIR` | `~/.trace/knowledge/` | Directory for trace-learn knowledge stores |
 | `TRACE_EGRESS_LOG` | `~/.trace/egress.jsonl` | Cloud-egress ledger: one JSONL line per cloud call trace-learn makes (the fact of the call — provider, endpoint, model, purpose, item count — never the content) |
@@ -290,10 +308,18 @@ Regenerate the schema from models: `python scripts/generate_schema.py` (writes t
 ```
 src/trace_mcp/
     server.py              # MCP server entry point (FastMCP) + extension loader
+    project_identity.py    # Canonical project keys + alias registry
+    identity_cli.py        # `trace-mcp identity` migration subcommands
+    identity_report.py     # Read-only drift and stray-store reporting
+    init_project.py        # `trace-mcp-init`: .mcp.json, pin, adapter dispatch
+    validate.py            # `trace-mcp validate` schema conformance CLI
+    scratchpad.py          # Session-end scratchpad generator
     extension_hooks.py     # Hook registry for extension ↔ core integration
     schema/                # Pydantic v2 models (Session, TraceEvent, etc.)
-    storage/               # Abstract interface + JSON file backend
+    schemas/               # Packaged JSON Schema copy
+    storage/               # Abstract interface, JSON file backend, locked writes
     tools/                 # MCP tool implementations
+    exporters/             # Markdown and PROV JSON-LD exporters
     extensions/learn/      # trace-learn (default extension)
     adapters/              # Host adapters (claude_code, codex)
         claude_code/       # Hook scripts, settings template, CLAUDE_BLOCK
@@ -301,6 +327,7 @@ src/trace_mcp/
 docs/
     specification.md       # Authoritative protocol spec
     examples.md            # Worked logging examples
+    INVARIANTS.md          # Correctness invariants, site sets, enforcing tests
     adr/                   # Architecture Decision Records
     extensions/            # Extension documentation
 ```
@@ -309,10 +336,28 @@ The host-adapter layer is a pure installer; core has zero imports from `adapters
 
 ## Known limitations
 
-- **Single-client server** — TRACE uses global state in `server.py` (one `active_sessions` dict). It is designed for a single AI client; concurrent clients would need separate server instances.
+- **One in-memory session cache per process** — `server.py` holds a single `active_sessions` dict, so a server process is designed for one AI client. Concurrent clients want separate server instances. This is a caching limit, not a durability one: every session write goes through a per-session lock and re-reads authoritative disk state first, so concurrent processes do not lose each other's updates.
 - **File-based storage only** — All data is stored as JSON files. There is no database backend. Large-scale deployments would need a database adapter against the `TraceStorage` abstract interface.
-- **No concurrent write protection on Windows** — The atomic write pattern (temp file + `os.replace`) works cross-platform, but there is no file locking on Windows.
 - **LLM matching is optional** — Without an OpenAI API key, knowledge recall uses BM25 (keyword-based). Semantic similarity requires LLM configuration.
+
+## Citation
+
+Archived on Zenodo. Cite the **concept DOI** unless you need to pin a specific archive — it always resolves to the most recent version:
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21711455.svg)](https://doi.org/10.5281/zenodo.21711455)
+
+```bibtex
+@software{muellerklein_trace,
+  author    = {Muellerklein, Oliver},
+  title     = {{TRACE: Transparent Recording of AI-assisted Collaboration Experiments}},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.21711455},
+  url       = {https://doi.org/10.5281/zenodo.21711455}
+}
+```
+
+The v0.5.0 archive specifically is [`10.5281/zenodo.21711456`](https://doi.org/10.5281/zenodo.21711456). [`CITATION.cff`](https://github.com/Thru-Echoes/TRACE/blob/main/CITATION.cff) carries both, so GitHub's "Cite this repository" button and any CFF-aware tool stay in sync with this section.
 
 ## Contributing
 
