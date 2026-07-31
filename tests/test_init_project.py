@@ -59,7 +59,22 @@ def test_fresh_init_shape(tmp_path: Path) -> None:
     assert "wrote" in status
     entry = _read(tmp_path)["mcpServers"]["trace"]
     assert entry["command"] == "uvx"
-    assert entry["args"] == ["--from", _SOURCE, "--refresh-package", "trace-mcp", "trace-mcp"]
+    # The trace-learn extras are part of the canonical entry: without them the
+    # extension does not register and the server comes up with 17 tools instead
+    # of the documented 22, with no error to explain the gap.
+    assert entry["args"] == [
+        "--from",
+        _SOURCE,
+        "--with",
+        "openai",
+        "--with",
+        "numpy",
+        "--with",
+        "model2vec",
+        "--refresh-package",
+        "trace-mcp",
+        "trace-mcp",
+    ]
     assert "env" not in entry  # no empty env block on a fresh install
 
 
@@ -89,12 +104,37 @@ def test_reinit_preserves_with_extras(tmp_path: Path) -> None:
     assert "updated" in status
 
     args = _read(tmp_path)["mcpServers"]["trace"]["args"]
-    # Canonical source is rebuilt (old /old/TRACE gone), the command stays last,
-    # and the hand-added extras are preserved in order.
-    assert args[:4] == ["--from", _SOURCE, "--refresh-package", "trace-mcp"]
+    # Canonical source is rebuilt (old /old/TRACE gone) and the command stays last.
+    assert args[:2] == ["--from", _SOURCE]
     assert args[-1] == "trace-mcp"
+    assert "--refresh-package" in args and "--refresh" not in args
+    # These three are now canonical, so they must appear exactly once each —
+    # the existing entry carried the same packages, and re-running init must
+    # not append a second copy of every one.
     with_pkgs = [args[i + 1] for i, a in enumerate(args) if a == "--with"]
     assert with_pkgs == ["openai", "numpy", "model2vec"]
+
+
+def test_reinit_preserves_hand_added_extra_alongside_canonical(tmp_path: Path) -> None:
+    """A package the user added themselves survives, appended after the canonical set."""
+    existing = {
+        "mcpServers": {
+            "trace": {
+                "command": "uvx",
+                "args": ["--from", "/old/TRACE", "--with", "numpy", "--with", "pandas", "--refresh", "trace-mcp"],
+            }
+        }
+    }
+    (tmp_path / ".mcp.json").write_text(json.dumps(existing))
+
+    _write_mcp_json(tmp_path)
+
+    args = _read(tmp_path)["mcpServers"]["trace"]["args"]
+    with_pkgs = [args[i + 1] for i, a in enumerate(args) if a == "--with"]
+    assert with_pkgs == ["openai", "numpy", "model2vec", "pandas"], (
+        "canonical extras first, no duplicate of the overlapping one, hand-added package kept"
+    )
+    assert args[-1] == "trace-mcp"
 
 
 def test_reinit_preserves_env_block(tmp_path: Path) -> None:

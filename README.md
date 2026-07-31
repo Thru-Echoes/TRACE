@@ -1,3 +1,5 @@
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21711455.svg)](https://doi.org/10.5281/zenodo.21711455) [![CI](https://github.com/Thru-Echoes/TRACE/actions/workflows/ci.yml/badge.svg)](https://github.com/Thru-Echoes/TRACE/actions/workflows/ci.yml) [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/Thru-Echoes/TRACE/blob/main/LICENSE) [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://github.com/Thru-Echoes/TRACE/blob/main/pyproject.toml)
+
 # Why TRACE? 
 
 In the age of AI, how do we know *who* proposed *what* in a scientific or coding dev workflow? Was the idea for that methodological decision made by *AI* or by a *human*? And when decisions are proposed by AI, are they being accepted, rejected, or iterated on? 
@@ -26,11 +28,6 @@ to be wrong. Regenerate it from any session with
 3. `trace_start_session` runs there, learnings auto-recall, and a five-item task plan emerges.
 
 ## **TRACE: Transparent Recording of AI-assisted Collaboration Experiments**
-
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21711455.svg)](https://doi.org/10.5281/zenodo.21711455)
-[![CI](https://github.com/Thru-Echoes/TRACE/actions/workflows/ci.yml/badge.svg)](https://github.com/Thru-Echoes/TRACE/actions/workflows/ci.yml)
-[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/Thru-Echoes/TRACE/blob/main/LICENSE)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://github.com/Thru-Echoes/TRACE/blob/main/pyproject.toml)
 
 TRACE is an MCP server that provides a standardized audit trail for AI-assisted research workflows. It records tool calls, decisions, annotations, contributions, and actor attribution — who proposed what, who accepted or revised it, and why.
 
