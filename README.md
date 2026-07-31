@@ -27,6 +27,11 @@ to be wrong. Regenerate it from any session with
 
 ## **TRACE: Transparent Recording of AI-assisted Collaboration Experiments**
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21711455.svg)](https://doi.org/10.5281/zenodo.21711455)
+[![CI](https://github.com/Thru-Echoes/TRACE/actions/workflows/ci.yml/badge.svg)](https://github.com/Thru-Echoes/TRACE/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](https://github.com/Thru-Echoes/TRACE/blob/main/LICENSE)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://github.com/Thru-Echoes/TRACE/blob/main/pyproject.toml)
+
 TRACE is an MCP server that provides a standardized audit trail for AI-assisted research workflows. It records tool calls, decisions, annotations, contributions, and actor attribution — who proposed what, who accepted or revised it, and why.
 
 TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy or intercept calls — the AI client explicitly logs events to TRACE, creating a complete, human-readable provenance record.
@@ -334,6 +339,25 @@ The host-adapter layer is a pure installer; core has zero imports from `adapters
 - **One in-memory session cache per process** — `server.py` holds a single `active_sessions` dict, so a server process is designed for one AI client. Concurrent clients want separate server instances. This is a caching limit, not a durability one: every session write goes through a per-session lock and re-reads authoritative disk state first, so concurrent processes do not lose each other's updates.
 - **File-based storage only** — All data is stored as JSON files. There is no database backend. Large-scale deployments would need a database adapter against the `TraceStorage` abstract interface.
 - **LLM matching is optional** — Without an OpenAI API key, knowledge recall uses BM25 (keyword-based). Semantic similarity requires LLM configuration.
+
+## Citation
+
+Archived on Zenodo. Cite the **concept DOI** unless you need to pin a specific archive — it always resolves to the most recent version:
+
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.21711455.svg)](https://doi.org/10.5281/zenodo.21711455)
+
+```bibtex
+@software{muellerklein_trace,
+  author    = {Muellerklein, Oliver},
+  title     = {{TRACE: Transparent Recording of AI-assisted Collaboration Experiments}},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.21711455},
+  url       = {https://doi.org/10.5281/zenodo.21711455}
+}
+```
+
+The v0.5.0 archive specifically is [`10.5281/zenodo.21711456`](https://doi.org/10.5281/zenodo.21711456). [`CITATION.cff`](https://github.com/Thru-Echoes/TRACE/blob/main/CITATION.cff) carries both, so GitHub's "Cite this repository" button and any CFF-aware tool stay in sync with this section.
 
 ## Contributing
 
