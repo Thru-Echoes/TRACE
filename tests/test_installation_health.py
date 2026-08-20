@@ -103,6 +103,17 @@ class TestPackageImport:
 
         assert hasattr(trace_mcp.extensions.learn, "register")
 
+    def test_mcp_handshake_reports_package_version(self) -> None:
+        """The MCP initialize handshake's serverInfo must carry trace-mcp's own
+        version, not the mcp library's. FastMCP defaults the low-level server
+        version to the mcp package version, which misreports what a client is
+        talking to (e.g. '1.29.0' instead of '0.5.0')."""
+        import trace_mcp
+        from trace_mcp import server
+
+        opts = server.mcp._mcp_server.create_initialization_options()
+        assert opts.server_version == trace_mcp.__version__
+
     def test_import_exporters(self) -> None:
         """Exporter modules should be importable."""
         from trace_mcp.exporters import markdown_export
