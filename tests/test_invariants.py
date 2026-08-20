@@ -303,9 +303,10 @@ def _learn_tool_functions_with_project() -> set[tuple[str, str]]:
 def test_inv9_learn_tools_guard_reserved_projects() -> None:
     tools = _learn_tool_functions_with_project()
     assert tools, "INV-9 positive control: no @mcp.tool with a project param found — pattern rot."
-    guards = _functions_calling("_reserved_project_error")
+    guards = _functions_calling("_resolve_project")
     missing = tools - guards
     assert not missing, (
         "INV-9 violation (docs/INVARIANTS.md): these learn tools take a free-form project but do not "
-        f"call _reserved_project_error at entry: {sorted(missing)}. A reserved-key label could reach a store."
+        f"call _resolve_project at entry: {sorted(missing)}. A foreign label could bypass the TRACE_PROJECT "
+        "pin, or a reserved-key label could reach a store."
     )

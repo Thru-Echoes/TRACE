@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 
 from trace_mcp.adapters import detect_adapter, get_adapter, list_adapters
+from trace_mcp.adapters.base import MCP_SERVER_KEY
 from trace_mcp.adapters.claude_code import MARKER_END, MARKER_START, ClaudeCodeAdapter
 from trace_mcp.adapters.codex import CodexAdapter
 
@@ -146,7 +147,7 @@ class TestClaudeCodeInstall:
         assert len(post) == 2
         matchers = [entry["matcher"] for entry in post]
         assert "Edit|Write" in matchers
-        assert "trace_end_session" in matchers
+        assert f"mcp__{MCP_SERVER_KEY}__trace_end_session" in matchers
 
         # SessionStart added
         assert "SessionStart" in merged["hooks"]
@@ -327,3 +328,193 @@ class TestResolveTraceSource:
 
         # Three levels up from src/trace_mcp/init_project.py is the repo root
         assert ip._resolve_trace_source() == str(repo)
+
+
+# ── Decision-audit matcher (PostToolUse) ──────────────────────────────────
+
+
+class TestDecisionAuditMatcher:
+    """Claude Code hook matchers match the FULL tool name exactly (simple
+    strings are not substrings), and MCP tools are namespaced
+    ``mcp__<server-key>__<tool>``. A bare ``trace_end_session`` matcher
+    therefore never fires — the decision-audit hook was dead in every
+    project installed from the old template. The matcher must be derived
+    from the ``.mcp.json`` server key the installer itself writes."""
+
+    def _installed_settings(self, tmp_path: Path) -> dict:
+        a = ClaudeCodeAdapter()
+        (tmp_path / "CLAUDE.md").write_text("# Example\n")
+        a.install(tmp_path)
+        return json.loads((tmp_path / ".claude" / "settings.json").read_text())
+
+    def test_matcher_is_full_namespaced_tool_name(self, tmp_path: Path) -> None:
+        settings = self._installed_settings(tmp_path)
+        matchers = [e.get("matcher") for e in settings["hooks"]["PostToolUse"]]
+        assert f"mcp__{MCP_SERVER_KEY}__trace_end_session" in matchers
+        assert "trace_end_session" not in matchers
+
+    def test_reinstall_migrates_stale_short_matcher(self, tmp_path: Path) -> None:
+        """A consumer initialized from the old template carries the dead
+        short-matcher entry; re-running install must replace it, not stack a
+        second registration beside it."""
+        a = ClaudeCodeAdapter()
+        (tmp_path / "CLAUDE.md").write_text("# Example\n")
+        (tmp_path / ".claude").mkdir()
+        stale = {
+            "hooks": {
+                "PostToolUse": [
+                    {
+                        "matcher": "trace_end_session",
+                        "hooks": [
+                            {
+                                "type": "command",
+                                "command": '"$CLAUDE_PROJECT_DIR/.claude/hooks/decision-audit.sh"',
+                                "timeout": 10,
+                            }
+                        ],
+                    }
+                ]
+            }
+        }
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.write_text(json.dumps(stale, indent=2))
+
+        a.install(tmp_path)
+        merged = json.loads(settings_path.read_text())
+        audit_entries = [
+            e
+            for e in merged["hooks"]["PostToolUse"]
+            if any("decision-audit" in h.get("command", "") for h in e.get("hooks", []))
+        ]
+        assert len(audit_entries) == 1, f"stale matcher entry not migrated: {audit_entries}"
+        assert audit_entries[0]["matcher"] == f"mcp__{MCP_SERVER_KEY}__trace_end_session"
+
+    def test_reinstall_preserves_unrelated_posttooluse_entries(self, tmp_path: Path) -> None:
+        a = ClaudeCodeAdapter()
+        (tmp_path / "CLAUDE.md").write_text("# Example\n")
+        (tmp_path / ".claude").mkdir()
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PostToolUse": [
+                            {"matcher": "Edit|Write", "hooks": [{"type": "command", "command": "my-linter.sh"}]}
+                        ]
+                    }
+                }
+            )
+        )
+        a.install(tmp_path)
+        merged = json.loads(settings_path.read_text())
+        commands = [h["command"] for e in merged["hooks"]["PostToolUse"] for h in e["hooks"]]
+        assert "my-linter.sh" in commands
+
+    def test_init_and_adapter_share_one_server_key(self) -> None:
+        """The matcher is only correct if the adapter derives it from the SAME
+        key init writes into .mcp.json — a drift here silently kills the hook."""
+        from trace_mcp import init_project as ip
+
+        entry = ip._mcp_server_config(None)
+        assert set(entry) == {MCP_SERVER_KEY}
+
+    def test_user_tuned_current_entry_is_respected(self, tmp_path: Path) -> None:
+        """A user who raised the timeout on the CURRENT registration keeps their
+        tuning — reinstall neither resets nor duplicates it."""
+        a = ClaudeCodeAdapter()
+        (tmp_path / "CLAUDE.md").write_text("# Example\n")
+        (tmp_path / ".claude").mkdir()
+        tuned = {
+            "matcher": f"mcp__{MCP_SERVER_KEY}__trace_end_session",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": '"$CLAUDE_PROJECT_DIR/.claude/hooks/decision-audit.sh"',
+                    "timeout": 60,
+                }
+            ],
+        }
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.write_text(json.dumps({"hooks": {"PostToolUse": [tuned]}}))
+
+        a.install(tmp_path)
+        merged = json.loads(settings_path.read_text())
+        audit_entries = [
+            e
+            for e in merged["hooks"]["PostToolUse"]
+            if any("decision-audit" in h.get("command", "") for h in e.get("hooks", []))
+        ]
+        assert len(audit_entries) == 1, f"user-tuned entry duplicated or removed: {audit_entries}"
+        assert audit_entries[0]["hooks"][0]["timeout"] == 60
+
+    def test_stale_entry_removed_even_when_desired_already_present(self, tmp_path: Path) -> None:
+        a = ClaudeCodeAdapter()
+        (tmp_path / "CLAUDE.md").write_text("# Example\n")
+        (tmp_path / ".claude").mkdir()
+        cmd = '"$CLAUDE_PROJECT_DIR/.claude/hooks/decision-audit.sh"'
+        stale = {"matcher": "trace_end_session", "hooks": [{"type": "command", "command": cmd, "timeout": 10}]}
+        fixed = {
+            "matcher": f"mcp__{MCP_SERVER_KEY}__trace_end_session",
+            "hooks": [{"type": "command", "command": cmd, "timeout": 10}],
+        }
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.write_text(json.dumps({"hooks": {"PostToolUse": [stale, fixed]}}))
+
+        a.install(tmp_path)
+        merged = json.loads(settings_path.read_text())
+        audit_entries = [
+            e
+            for e in merged["hooks"]["PostToolUse"]
+            if any("decision-audit" in h.get("command", "") for h in e.get("hooks", []))
+        ]
+        assert len(audit_entries) == 1, f"stale entry survived beside the fixed one: {audit_entries}"
+
+    def test_user_authored_namespaced_registration_preserved(self, tmp_path: Path) -> None:
+        """A user who wired the installer's script under their OWN server key's
+        namespace (e.g. a renamed server entry) keeps that registration — only
+        the exact matcher form historical templates shipped is migrated."""
+        a = ClaudeCodeAdapter()
+        (tmp_path / "CLAUDE.md").write_text("# Example\n")
+        (tmp_path / ".claude").mkdir()
+        user_entry = {
+            "matcher": "mcp__trace-prod__trace_end_session",
+            "hooks": [
+                {
+                    "type": "command",
+                    "command": '"$CLAUDE_PROJECT_DIR/.claude/hooks/decision-audit.sh"',
+                    "timeout": 10,
+                }
+            ],
+        }
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.write_text(json.dumps({"hooks": {"PostToolUse": [user_entry]}}))
+
+        a.install(tmp_path)
+        merged = json.loads(settings_path.read_text())
+        matchers = [e.get("matcher") for e in merged["hooks"]["PostToolUse"] if isinstance(e, dict)]
+        assert "mcp__trace-prod__trace_end_session" in matchers, "user-authored registration was deleted"
+        assert f"mcp__{MCP_SERVER_KEY}__trace_end_session" in matchers
+
+    def test_malformed_settings_entries_do_not_crash_install(self, tmp_path: Path) -> None:
+        """Settings files are user-edited JSON: non-dict entries and malformed
+        hooks values must be skipped in place, never dereferenced."""
+        a = ClaudeCodeAdapter()
+        (tmp_path / "CLAUDE.md").write_text("# Example\n")
+        (tmp_path / ".claude").mkdir()
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings_path.write_text(
+            json.dumps(
+                {
+                    "hooks": {
+                        "PostToolUse": ["not-a-dict", 7, {"matcher": "X", "hooks": "nope"}],
+                        "SessionStart": "also-not-a-list",
+                    }
+                }
+            )
+        )
+        a.install(tmp_path)  # must not raise
+        merged = json.loads(settings_path.read_text())
+        assert "not-a-dict" in merged["hooks"]["PostToolUse"]  # left in place
+        matchers = [e.get("matcher") for e in merged["hooks"]["PostToolUse"] if isinstance(e, dict)]
+        assert f"mcp__{MCP_SERVER_KEY}__trace_end_session" in matchers
+        assert merged["hooks"]["SessionStart"] == "also-not-a-list"  # malformed event untouched
