@@ -46,6 +46,20 @@ logger = logging.getLogger("trace-mcp")
 
 # --- Server state ---
 mcp = FastMCP("trace")
+# FastMCP exposes no version parameter and defaults the low-level server's
+# version to the mcp LIBRARY version, so the initialize handshake's serverInfo
+# misreports what a client is talking to. Stamp trace-mcp's own version on the
+# underlying server (guarded by
+# tests/test_installation_health.py::TestPackageImport::test_mcp_handshake_reports_package_version).
+# Defensive: `_mcp_server` is a private FastMCP attribute — if a future mcp 1.x
+# release moves it, a cosmetic version misreport must degrade to a warning,
+# never an import-time crash that takes the whole fleet down on its next
+# cold-resolved server start (the mcp 2.0 failure shape). CI's cold-resolution
+# guard still fails loudly in that case, via the test above.
+try:
+    mcp._mcp_server.version = __version__
+except AttributeError:  # pragma: no cover — depends on the installed mcp internals
+    logger.warning("could not stamp trace-mcp's version on the MCP server; serverInfo will report the mcp library's")
 storage = JsonFileStorage()
 active_sessions: dict[str, Session] = {}
 _current_session_id: str | None = None
