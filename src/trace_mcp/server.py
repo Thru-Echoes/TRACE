@@ -46,6 +46,20 @@ logger = logging.getLogger("trace-mcp")
 
 # --- Server state ---
 mcp = FastMCP("trace")
+# FastMCP exposes no version parameter and defaults the low-level server's
+# version to the mcp LIBRARY version, so the initialize handshake's serverInfo
+# misreports what a client is talking to. Stamp trace-mcp's own version on the
+# underlying server (guarded by
+# tests/test_installation_health.py::TestPackageImport::test_mcp_handshake_reports_package_version).
+# Defensive: `_mcp_server` is a private FastMCP attribute — if a future mcp 1.x
+# release moves it, a cosmetic version misreport must degrade to a warning,
+# never an import-time crash that takes the whole fleet down on its next
+# cold-resolved server start (the mcp 2.0 failure shape). CI's cold-resolution
+# guard still fails loudly in that case, via the test above.
+try:
+    mcp._mcp_server.version = __version__
+except AttributeError:  # pragma: no cover — depends on the installed mcp internals
+    logger.warning("could not stamp trace-mcp's version on the MCP server; serverInfo will report the mcp library's")
 storage = JsonFileStorage()
 active_sessions: dict[str, Session] = {}
 _current_session_id: str | None = None
@@ -104,27 +118,10 @@ def _resolve_start_project(project: str | None, bound: pident.BoundProject | Non
     resolving to a reserved key (``auto``/``shared``) is rejected.
 
     Raises ``ProjectKeyError`` on any violation (the caller surfaces it).
+    Delegates to ``project_identity.resolve_scoped_project`` — the single
+    scope-resolution rule shared with the learn tools (INV-9).
     """
-    if bound is not None:
-        if bound.key in pident.RESERVED_KEYS:
-            raise pident.ProjectKeyError(f"server is pinned to reserved key '{bound.key}' — fix TRACE_PROJECT.")
-        if project is None:
-            return bound.display_label
-        supplied = pident.key_for_label(project)
-        if supplied != bound.key:
-            raise pident.ProjectKeyError(
-                f"this server is pinned to project '{bound.key}', but trace_start_session named "
-                f"{project!r} (key '{supplied or '<invalid>'}'). Omit the project argument to use the pin."
-            )
-        return project
-    if not project or not project.strip():
-        raise pident.ProjectKeyError(
-            "no project given and this server is not pinned (TRACE_PROJECT unset). "
-            'Pass project="<name>", or set TRACE_PROJECT in the server\'s .mcp.json env.'
-        )
-    if pident.canonical_project_key(project) in pident.RESERVED_KEYS:
-        raise pident.ProjectKeyError(f"{project!r} resolves to a reserved project key and cannot be used.")
-    return project
+    return pident.resolve_scoped_project(project, bound)
 
 
 def _pinned_project_key(bound: pident.BoundProject | None) -> str | None:

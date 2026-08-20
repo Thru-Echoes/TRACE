@@ -103,6 +103,17 @@ class TestPackageImport:
 
         assert hasattr(trace_mcp.extensions.learn, "register")
 
+    def test_mcp_handshake_reports_package_version(self) -> None:
+        """The MCP initialize handshake's serverInfo must carry trace-mcp's own
+        version, not the mcp library's. FastMCP defaults the low-level server
+        version to the mcp package version, which misreports what a client is
+        talking to (e.g. '1.29.0' instead of '0.5.0')."""
+        import trace_mcp
+        from trace_mcp import server
+
+        opts = server.mcp._mcp_server.create_initialization_options()
+        assert opts.server_version == trace_mcp.__version__
+
     def test_import_exporters(self) -> None:
         """Exporter modules should be importable."""
         from trace_mcp.exporters import markdown_export
@@ -414,3 +425,40 @@ class TestConsumerProjects:
 
         if failures:
             pytest.fail("Consumer project configuration check failed:\n  - " + "\n  - ".join(failures))
+
+
+class TestNoSyncConflictArtifacts:
+    """Cloud-sync/Finder conflict copies ("pyproject 2.toml", "uv 2.lock") must
+    never be tracked. One pair was committed alongside an unrelated fix and
+    shipped a stale pre-fix pyproject snapshot in the public repo; .gitignore
+    patterns alone cannot retro-protect against an accidental `git add`, so
+    this guard fails the suite the moment such a filename is tracked."""
+
+    def test_no_numbered_duplicate_filenames_tracked(self) -> None:
+        """A conflict copy is a numbered file whose UN-numbered sibling is also
+        tracked ("pyproject 2.toml" beside "pyproject.toml") — filename shape
+        alone is not evidence, so a legitimately numbered standalone file is
+        never flagged."""
+        import re
+
+        try:
+            result = subprocess.run(
+                ["git", "ls-files"],
+                cwd=TRACE_ROOT,
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+        except FileNotFoundError:
+            pytest.skip("git not installed")
+        if result.returncode != 0:
+            pytest.skip("not a git checkout (sdist/wheel test run)")
+        tracked = set(result.stdout.splitlines())
+        conflict_shape = re.compile(r"^(?P<stem>.+) \d+(?P<ext>\.[^./]+)$")
+        dupes = sorted(
+            f for f in tracked if (m := conflict_shape.match(f)) and (m.group("stem") + m.group("ext")) in tracked
+        )
+        assert not dupes, (
+            f"sync-conflict duplicate filenames are tracked: {dupes}. "
+            "Remove them (git rm) — they are stale copies minted by a sync tool, not sources."
+        )
