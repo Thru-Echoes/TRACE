@@ -99,6 +99,15 @@ AI Client (any MCP-aware client: Claude Code, Cursor, ChatGPT, Codex, ...)
 
 ## Quick Start
 
+> **⚠️ TRACE is not on PyPI.** The PyPI package named `trace-mcp` is an
+> unrelated project — `pip install trace-mcp` installs someone else's code.
+> Install from a clone of this repository (below), or point `uvx --from` at a
+> local checkout or a pinned VCS source:
+>
+> ```bash
+> uvx --from 'git+https://github.com/Thru-Echoes/TRACE.git@v0.5.0' trace-mcp
+> ```
+
 ### Install
 
 ```bash
