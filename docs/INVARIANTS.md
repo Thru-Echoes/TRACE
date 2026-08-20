@@ -215,19 +215,27 @@ temp file, a caller exception writes nothing).
 
 ---
 
-## INV-9 — Every learn tool guards its free-form project label  · ENFORCED
+## INV-9 — Every learn tool resolves its project label against the pin  · ENFORCED
 
 **Statement.** Each `@mcp.tool` in `extensions/learn` that takes a `project`
-parameter calls `_reserved_project_error` at entry, so a reserved-key
-(`auto`/`shared`) or degenerate label returns an error and never reaches a
-knowledge store. Combined with the canonical `_store_path`, a free-form label
-can neither open a quarantine store nor create a mis-keyed one.
+parameter calls `_resolve_project` at entry, which delegates to
+`project_identity.resolve_scoped_project` — the same scope rule
+`trace_start_session` uses. Under a `TRACE_PROJECT` pin, an omitted project
+resolves to the pin and a label resolving to any other key errors naming both
+keys; unpinned, an explicit non-empty label is required; a reserved-key
+(`auto`/`shared`) or degenerate label is rejected in both modes. Combined with
+the canonical `_store_path`, a free-form label can neither cross the pin, open
+a quarantine store, nor create a mis-keyed one. (Before this rule, learn tools
+accepted any foreign label on a pinned server — a cross-project read/write
+bypass of the documented fail-closed guarantee.)
 
 **Sites:** `src/trace_mcp/extensions/learn/__init__.py` (`trace_learn_recall`,
 `trace_learn_add`, `trace_learn_list`, `trace_learn_forget`,
-`trace_learn_extract`).
+`trace_learn_extract`); `src/trace_mcp/server.py` (`_resolve_start_project`,
+by delegation).
 
 **Guard:** `tests/test_invariants.py :: test_inv9_learn_tools_guard_reserved_projects`
+(structural) + `tests/test_learn_pin_scope.py` (behavioral).
 (AST enumeration — a new learn tool with a `project` param that does not call
 `_reserved_project_error` fails, with a positive control against pattern rot).
 

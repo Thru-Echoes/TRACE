@@ -12,6 +12,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Learn tools now enforce the `TRACE_PROJECT` pin (INV-9, ADR-006).** All
+  five `trace_learn_*` tools resolve their `project` argument through the same
+  scope rule as `trace_start_session`: under a pin, an omitted `project`
+  resolves to the pinned project and a label resolving to any other key errors
+  naming both keys; unpinned, an explicit label is required. Previously a
+  pinned server accepted any foreign label on the learn surface — a
+  cross-project read/write bypass of the documented fail-closed guarantee.
+  `project` is now optional on all five tools (it was required), which is
+  backwards-compatible for MCP callers, which pass arguments by name. When a
+  pinned call is accepted through a registry alias whose canonical form
+  differs from the pinned key, the operation is keyed to the pinned project's
+  store — an accepted alias can never open a different store file than the
+  project it was authorized against.
+- **`trace_learn_recall` no longer returns unranked listings dressed as
+  results.** A call with neither `context`/`query` nor `tags` previously
+  returned the store's first N learnings in insertion order under a
+  `"results"` key, with no scores and no warning — indistinguishable from a
+  ranked match. It now returns an explicit error pointing at
+  `trace_learn_list`; whitespace-only query text and blank tag elements are
+  treated as absent rather than ranked against; and every ranked recall
+  response carries a `backend` field naming the engine selected for the
+  ranking (`bm25`, `embedding:<model>`, `llm:<model>` — the embedding backend
+  scores learnings that lack embeddings through its internal BM25 fallback),
+  so a degraded backend configuration is visible to the caller. This is a
+  protocol-visible behavioral change: a caller that relied on the no-query
+  listing must switch to `trace_learn_list`.
+- **`trace_learn_recall` accepts `query` as an alias for `context`.** MCP
+  argument models silently drop unknown fields, so a client sending
+  `query=...` used to have its query text ignored entirely (surfacing as
+  insertion-order "results"). Either name works now; passing both with
+  different values is an error, never a silent preference.
+
 ## [0.5.0] — 2026-07-30
 
 ### Added
