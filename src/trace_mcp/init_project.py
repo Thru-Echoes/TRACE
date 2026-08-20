@@ -25,7 +25,7 @@ from pathlib import Path
 
 from trace_mcp import project_identity as pident
 from trace_mcp.adapters import detect_adapter, get_adapter, list_adapters
-from trace_mcp.adapters.base import Adapter
+from trace_mcp.adapters.base import MCP_SERVER_KEY, Adapter
 
 # Bold-tolerant, and byte-identical in intent to the hooks' shared block: the
 # absence check MUST accept the bolded form, or init appends a second pin line
@@ -119,7 +119,9 @@ def _mcp_server_config(project_key: str | None = None) -> dict:
     }
     if project_key:
         entry["env"] = {"TRACE_PROJECT": project_key}
-    return {"trace": entry}
+    # The server key is shared with the adapters (hook matchers derive
+    # mcp__<key>__<tool> from it) — see adapters.base.MCP_SERVER_KEY.
+    return {MCP_SERVER_KEY: entry}
 
 
 # ── Project identity ──────────────────────────────────────────────────────
@@ -371,9 +373,11 @@ def _write_mcp_json(project_dir: Path, project_key: str | None = None) -> str:
         config = {"mcpServers": {}}
         servers = config["mcpServers"]
 
-    was_present = "trace" in servers
-    fresh_entry = _mcp_server_config(project_key)["trace"]
-    servers["trace"] = _merge_trace_entry(servers.get("trace"), fresh_entry) if was_present else fresh_entry
+    was_present = MCP_SERVER_KEY in servers
+    fresh_entry = _mcp_server_config(project_key)[MCP_SERVER_KEY]
+    servers[MCP_SERVER_KEY] = (
+        _merge_trace_entry(servers.get(MCP_SERVER_KEY), fresh_entry) if was_present else fresh_entry
+    )
 
     mcp_path.write_text(json.dumps(config, indent=2) + "\n")
     return f"  {'updated' if was_present else 'wrote'}: {mcp_path}"
@@ -457,7 +461,7 @@ def init_project(
         if not dry_run:
             print(_write_mcp_json(project_dir, project_key))
         else:
-            entry = _mcp_server_config(project_key)["trace"]
+            entry = _mcp_server_config(project_key)[MCP_SERVER_KEY]
             print(f"  [dry-run] would write: {project_dir / '.mcp.json'} (uvx --from {entry['args'][1]})")
     except (TraceSourceUnresolvedError, TraceInitError) as exc:
         print(f"Error: {exc}")

@@ -9,6 +9,13 @@ from typing import Literal
 
 Disposition = Literal["installed", "updated", "skipped"]
 
+MCP_SERVER_KEY = "trace"
+"""The ``mcpServers`` key ``trace-mcp-init`` writes into a consumer's
+``.mcp.json``. Hosts namespace MCP tool names as ``mcp__<server-key>__<tool>``,
+so anything that must name a tool exactly — like a Claude Code hook matcher —
+derives from THIS constant. Init and the adapters must share it: if they
+drift, hook matchers silently stop firing."""
+
 
 @dataclass(frozen=True)
 class InstallResult:

@@ -38,7 +38,7 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "trace_end_session",
+        "matcher": "mcp__trace__trace_end_session",
         "hooks": [
           {
             "type": "command",
