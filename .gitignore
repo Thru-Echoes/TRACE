@@ -107,8 +107,15 @@ review_2*-*-*_*/
 notes/
 *-handoff-*/
 
-# macOS Finder file-duplication artifacts ("Foo 2.py", "Bar 2.md", "Baz 2.json").
-# Byte-identical clones that pollute builds and test collection.
+# Cloud-sync/Finder conflict copies ("Foo 2.py", "uv 2.lock") — stale clones a
+# sync tool mints beside the original. Patterns stay NARROW (the observed
+# families, plus the two concrete root artifacts that were once committed)
+# because broad shape-only ignores would also hide legitimately numbered files
+# and directories from git status. The durable guard is sibling-based and
+# tracked-file-level: tests/test_installation_health.py::TestNoSyncConflictArtifacts.
 * 2.py
 * 2.md
 * 2.json
+* [0-9].pth
+pyproject [0-9]*.toml
+uv [0-9]*.lock
