@@ -118,27 +118,10 @@ def _resolve_start_project(project: str | None, bound: pident.BoundProject | Non
     resolving to a reserved key (``auto``/``shared``) is rejected.
 
     Raises ``ProjectKeyError`` on any violation (the caller surfaces it).
+    Delegates to ``project_identity.resolve_scoped_project`` — the single
+    scope-resolution rule shared with the learn tools (INV-9).
     """
-    if bound is not None:
-        if bound.key in pident.RESERVED_KEYS:
-            raise pident.ProjectKeyError(f"server is pinned to reserved key '{bound.key}' — fix TRACE_PROJECT.")
-        if project is None:
-            return bound.display_label
-        supplied = pident.key_for_label(project)
-        if supplied != bound.key:
-            raise pident.ProjectKeyError(
-                f"this server is pinned to project '{bound.key}', but trace_start_session named "
-                f"{project!r} (key '{supplied or '<invalid>'}'). Omit the project argument to use the pin."
-            )
-        return project
-    if not project or not project.strip():
-        raise pident.ProjectKeyError(
-            "no project given and this server is not pinned (TRACE_PROJECT unset). "
-            'Pass project="<name>", or set TRACE_PROJECT in the server\'s .mcp.json env.'
-        )
-    if pident.canonical_project_key(project) in pident.RESERVED_KEYS:
-        raise pident.ProjectKeyError(f"{project!r} resolves to a reserved project key and cannot be used.")
-    return project
+    return pident.resolve_scoped_project(project, bound)
 
 
 def _pinned_project_key(bound: pident.BoundProject | None) -> str | None:

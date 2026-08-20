@@ -605,3 +605,44 @@ def get_bound_project() -> BoundProject | None:
         return BoundProject(key=canon, display_label=raw, degraded=True)
     entry = registry.projects.get(hit)
     return BoundProject(key=hit, display_label=entry.display_label if entry else raw)
+
+
+def resolve_scoped_project(project: str | None, bound: BoundProject | None = None) -> str:
+    """Resolve a tool's free-form ``project`` argument against the process pin.
+
+    The single scope-resolution rule (ADR-006) for every tool that takes a
+    ``project`` parameter. Returns the display label the tool should operate
+    on. Raises ``ProjectKeyError`` on every violation so callers surface one
+    exception type:
+
+    - Pinned: ``None`` resolves to the pin's display label; a supplied label
+      must resolve to the pinned key or the error names both keys.
+    - Unpinned: a non-empty label is required.
+    - A label resolving to a reserved key (``auto``/``shared``) is rejected in
+      both modes, as is a pin set to a reserved key.
+
+    Side effects: reads ``TRACE_PROJECT`` and the registry via
+    ``get_bound_project`` when *bound* is omitted. Never enrolls a project.
+    """
+    if bound is None:
+        bound = get_bound_project()
+    if bound is not None:
+        if bound.key in RESERVED_KEYS:
+            raise ProjectKeyError(f"server is pinned to reserved key '{bound.key}' — fix TRACE_PROJECT.")
+        if project is None:
+            return bound.display_label
+        supplied = key_for_label(project)
+        if supplied != bound.key:
+            raise ProjectKeyError(
+                f"this server is pinned to project '{bound.key}', but the call named "
+                f"{project!r} (key '{supplied or '<invalid>'}'). Omit the project argument to use the pin."
+            )
+        return project
+    if not project or not project.strip():
+        raise ProjectKeyError(
+            "no project given and this server is not pinned (TRACE_PROJECT unset). "
+            'Pass project="<name>", or set TRACE_PROJECT in the server\'s .mcp.json env.'
+        )
+    if canonical_project_key(project) in RESERVED_KEYS:
+        raise ProjectKeyError(f"{project!r} resolves to a reserved project key and cannot be used.")
+    return project
