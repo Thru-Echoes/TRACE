@@ -38,20 +38,35 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _reserved_project_error(project: str) -> str | None:
-    """JSON error if *project* is degenerate or resolves to a reserved key, else None.
+def _resolve_project(project: str | None) -> tuple[str, str | None]:
+    """Resolve *project* against the process pin; ``(label, None)`` or ``("", error-JSON)``.
 
-    The usage-ban half of ADR-006 (INV-9): reserved keys (auto/shared) are
-    quarantine stores, not projects a learn tool may operate on. Every learn
-    tool calls this at entry so a free-form label cannot reach a reserved store.
+    The scope gate for every learn tool (INV-9, ADR-006): pin resolution
+    (``None`` → the pin), foreign-label rejection on a pinned server (the error
+    names both keys), and the reserved-key usage ban all happen here — before
+    any knowledge store is touched. Unpinned, an explicit non-empty label is
+    required.
+
+    The returned label is STORE-SAFE: knowledge-store filenames key on
+    ``canonical_project_key(label)`` (registry-independent), so when a pinned
+    call is accepted through a registry ALIAS whose canonical form differs from
+    the pinned key (or the pin's display label itself diverges), the pinned KEY
+    is returned instead — otherwise the accepted alias would silently open a
+    different store file than the project it was authorized against.
     """
     try:
-        key = pident.canonical_project_key(project)
+        label = pident.resolve_scoped_project(project)
+        bound = pident.get_bound_project()
+        if bound is not None:
+            if pident.canonical_project_key(label) != bound.key:
+                label = bound.key
+        elif pident.key_for_label(label) in pident.RESERVED_KEYS:
+            # Defense in depth: a registry alias must not smuggle a benign-looking
+            # label into a reserved quarantine store on an unpinned server.
+            raise pident.ProjectKeyError(f"{label!r} resolves to a reserved project key and cannot be used.")
+        return label, None
     except pident.ProjectKeyError as exc:
-        return json.dumps({"error": str(exc), "project": project})
-    if key in pident.RESERVED_KEYS:
-        return json.dumps({"error": f"'{project}' is a reserved project key and cannot be used", "project": project})
-    return None
+        return "", json.dumps({"error": str(exc), "project": project or ""})
 
 
 def register(mcp: FastMCP, storage: TraceStorage) -> None:
@@ -150,12 +165,12 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             return []
         return [lrn for lrn in ks.learnings if lrn.embedding is None or lrn.embedding_model != active.model_name]
 
-    def _registry_unavailable_error(project: str, exc: Exception) -> str:
+    def _registry_unavailable_error(project: str | None, exc: Exception) -> str:
         return json.dumps(
             {
                 "error": "project registry unreadable — learn operations fail closed",
                 "detail": str(exc),
-                "project": project,
+                "project": project or "",
             }
         )
 
@@ -254,16 +269,25 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
 
     @mcp.tool()
     async def trace_learn_recall(
-        project: str,
+        project: str | None = None,
         context: str | None = None,
         tags: list[str] | None = None,
         threshold: float | None = None,
         limit: int = 10,
+        query: str | None = None,
     ) -> str:
         """Find relevant past learnings for a given context.
 
         Searches the project's knowledge store using text similarity
-        and tag matching. Returns scored results above the threshold.
+        and tag matching. Returns scored results above the threshold, plus a
+        ``backend`` field naming what produced the ranking. ``query`` is an
+        alias for ``context`` (either alone is fine; both with different
+        values is an error). A call with neither context/query nor tags is an
+        error — use ``trace_learn_list`` to browse the store unranked.
+
+        ``project`` is optional when the server is pinned (TRACE_PROJECT):
+        omit it to use the pin; a supplied label must resolve to the pinned
+        project. Unpinned, an explicit project is required.
 
         When threshold is None, uses the backend's default (BM25: 0.15, LLM: 0.2).
 
@@ -272,19 +296,44 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         keep recall fully local.
         """
         try:
-            guard = _reserved_project_error(project)
-            if guard:
-                return guard
+            project, _err = _resolve_project(project)
+            if _err:
+                return _err
+            # Normalize BEFORE alias-conflict detection: whitespace-only text is
+            # no query (it must not rank, and must not count as a conflicting
+            # alias value), and blank tag elements are no criteria.
+            if context is not None:
+                context = context.strip() or None
+            if query is not None:
+                query = query.strip() or None
+            if tags is not None:
+                tags = [t.strip() for t in tags if isinstance(t, str) and t.strip()] or None
+            if query is not None and context is not None and query != context:
+                return json.dumps(
+                    {
+                        "error": "query and context were both given and differ — pass a single query text",
+                        "project": project,
+                    }
+                )
+            if context is None:
+                context = query
+            if not context and not tags:
+                return json.dumps(
+                    {
+                        "error": "recall needs context text or tags to rank against",
+                        "hint": "To browse the store without a query, use trace_learn_list.",
+                        "project": project,
+                    }
+                )
             _eff, backend, provider = _effective(project)
             # Lock the full span (recall may backfill
             # embeddings and save — a read-modify-write).
             with store.project_lock(project), egress_project(pident.key_for_label(project) or None):
                 ks = store.load_store(project)
                 if not ks.learnings:
-                    return json.dumps({"project": project, "results": [], "total": 0})
-                if not context and not tags:
-                    results = store.list_learnings(ks)
-                    return json.dumps({"project": project, "results": results[:limit], "total": len(results)})
+                    return json.dumps(
+                        {"project": project, "results": [], "total": 0, "backend": matching.describe_backend(backend)}
+                    )
                 # Lazy-embed: generate (or regenerate) embeddings for learnings that need them
                 stale = _needs_embedding(ks, provider)
                 embedded = await _embed_learnings(stale, provider) if stale else False
@@ -299,7 +348,14 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                 )
                 if results or embedded:
                     store.save_store(ks)
-                return json.dumps({"project": project, "results": results, "total": len(results)})
+                return json.dumps(
+                    {
+                        "project": project,
+                        "results": results,
+                        "total": len(results),
+                        "backend": matching.describe_backend(backend),
+                    }
+                )
         except pident.RegistryUnavailableError as exc:
             return _registry_unavailable_error(project, exc)
         except Exception as exc:
@@ -319,8 +375,8 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
 
     @mcp.tool()
     async def trace_learn_add(
-        project: str,
         content: str,
+        project: str | None = None,
         source_session: str | None = None,
         source_event: str | None = None,
         category: str = "learning",
@@ -331,13 +387,17 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         Use this to record insights, patterns, or corrections that should
         persist across sessions.
 
+        ``project`` is optional when the server is pinned (TRACE_PROJECT):
+        omit it to use the pin; a supplied label must resolve to the pinned
+        project. Unpinned, an explicit project is required.
+
         Data flow: with the OpenAI embedding backend configured, the learning
         content is embedded via OpenAI. Set ``TRACE_LOCAL_ONLY=1`` for local-only.
         """
         try:
-            guard = _reserved_project_error(project)
-            if guard:
-                return guard
+            project, _err = _resolve_project(project)
+            if _err:
+                return _err
             if category not in _VALID_CATEGORIES:
                 return json.dumps(
                     {
@@ -402,17 +462,21 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
 
     @mcp.tool()
     async def trace_learn_list(
-        project: str,
+        project: str | None = None,
         category: str | None = None,
     ) -> str:
         """List all learnings in a project's knowledge store.
 
         Optionally filter by category (learning, correction, gotcha, decision).
+
+        ``project`` is optional when the server is pinned (TRACE_PROJECT):
+        omit it to use the pin; a supplied label must resolve to the pinned
+        project. Unpinned, an explicit project is required.
         """
         try:
-            guard = _reserved_project_error(project)
-            if guard:
-                return guard
+            project, _err = _resolve_project(project)
+            if _err:
+                return _err
             ks = store.load_store(project)
             results = store.list_learnings(ks, category=category)
             return json.dumps({"project": project, "learnings": results, "total": len(results)})
@@ -422,17 +486,21 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
 
     @mcp.tool()
     async def trace_learn_forget(
-        project: str,
         learning_id: str,
+        project: str | None = None,
     ) -> str:
         """Remove a learning from the project's knowledge store.
 
         Use this when a learning is outdated, wrong, or no longer relevant.
+
+        ``project`` is optional when the server is pinned (TRACE_PROJECT):
+        omit it to use the pin; a supplied label must resolve to the pinned
+        project. Unpinned, an explicit project is required.
         """
         try:
-            guard = _reserved_project_error(project)
-            if guard:
-                return guard
+            project, _err = _resolve_project(project)
+            if _err:
+                return _err
             with store.project_lock(project):  # lock the full read-modify-write span
                 ks = store.load_store(project)
                 removed = store.remove_learning(ks, learning_id)
@@ -446,10 +514,14 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
 
     @mcp.tool()
     async def trace_learn_extract(
-        project: str,
+        project: str | None = None,
         session_id: str | None = None,
     ) -> str:
         """Extract learnings from session annotations and decisions.
+
+        ``project`` is optional when the server is pinned (TRACE_PROJECT):
+        omit it to use the pin; a supplied label must resolve to the pinned
+        project. Unpinned, an explicit project is required.
 
         Processes learning/correction/gotcha annotations and rejected/revised
         decisions into persistent knowledge entries. Idempotent — running twice
@@ -467,9 +539,9 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         Otherwise, extracts from all sessions for the project.
         """
         try:
-            guard = _reserved_project_error(project)
-            if guard:
-                return guard
+            project, _err = _resolve_project(project)
+            if _err:
+                return _err
             # INV-6: when extracting a specific session, refuse if it belongs to a
             # different project — the cross-wired-extract bleed (would send this
             # project's whole store to the cloud alongside another's events).

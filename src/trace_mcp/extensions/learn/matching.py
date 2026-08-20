@@ -495,6 +495,24 @@ class EmbeddingBackend:
 # ── Backend auto-selection ────────────────────────────────────────────────
 
 
+def describe_backend(backend: MatchingBackend) -> str:
+    """Short name of the engine behind a ranking, for recall responses.
+
+    A caller must be able to tell WHICH backend produced a ranking — a
+    degraded or misconfigured backend has to be visible in the response, not
+    silent (the fail-loud posture of docs/INVARIANTS.md).
+    """
+    if isinstance(backend, EmbeddingBackend):
+        return f"embedding:{backend._provider.model_name}"
+    if isinstance(backend, LLMBackend):
+        return f"llm:{backend._model}"
+    if isinstance(backend, BM25Backend):
+        return "bm25"
+    if isinstance(backend, JaccardBackend):
+        return "jaccard"
+    return type(backend).__name__
+
+
 def get_default_backend(config: LearnConfig | None = None) -> MatchingBackend:
     """Return the best available matching backend based on *config*.
 
