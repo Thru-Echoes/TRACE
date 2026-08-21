@@ -276,11 +276,36 @@ Claude: -> trace_end_session(summary="Analyzed 47 passages...")
 
 ## Knowledge persistence (trace-learn)
 
-The default `trace-learn` extension surfaces relevant past learnings at session start, on-demand via `trace_learn_recall`, and when decisions are proposed — and auto-extracts new learnings at session end. Matching uses cloud LLM scoring only when explicitly opted in (`TRACE_LLM_ENABLED=true` plus an `OPENAI_API_KEY`), with BM25 fallback otherwise. Storage: `~/.trace/knowledge/{project_key}.json`, named by the canonical project key rather than the display label (env: `TRACE_KNOWLEDGE_DIR`).
+The default `trace-learn` extension surfaces relevant past learnings at session start, on-demand via `trace_learn_recall`, and when decisions are proposed — and auto-extracts new learnings at session end. Matching uses cloud LLM scoring only when explicitly opted in (`TRACE_LLM_ENABLED=true` plus an `OPENAI_API_KEY` in the project's `.env`), with BM25 fallback otherwise — and a fallback caused by a missing or refused key is reported rather than passed off as a result. Storage: `~/.trace/knowledge/{project_key}.json`, named by the canonical project key rather than the display label (env: `TRACE_KNOWLEDGE_DIR`).
 
 See [`docs/extensions/trace-learn.md`](https://github.com/Thru-Echoes/TRACE/blob/main/docs/extensions/trace-learn.md) for matching backends, BM25 stemming, per-backend thresholds, extraction details, and LLM configuration.
 
 ## Configuration
+
+### Where configuration is read from
+
+TRACE reads settings from three sources, highest priority first:
+
+1. an environment variable already exported in the process
+2. **`./.env` — this project's own file**, read from the directory the host launches the MCP server in
+3. `~/.trace/.env` — machine-wide defaults
+
+**The OpenAI API key belongs in the project's own `.env`.** Each project gets its own credential, so one leaked or exhausted key exposes one project rather than every project on the machine — the same isolation TRACE gives sessions and knowledge stores, applied to the credential that reaches a third party. `.env` is gitignored; [`.env.example`](https://github.com/Thru-Echoes/TRACE/blob/main/.env.example) is the committed template. `~/.trace/.env` still works as a fallback for projects that have not been given a key, and TRACE says so at session start rather than letting a project quietly borrow the shared one.
+
+One setting does not follow that order. **`TRACE_LOCAL_ONLY` is a restrict-only ratchet**: any source can turn the no-egress kill switch *on*, and none can turn it *off*. Without that exception, a project `.env` could opt out of a machine-wide privacy policy.
+
+Configuration is read **once, at server start** — restart the MCP server after editing a `.env`.
+
+#### When the key is missing or refused
+
+A cloud call attempted with no key, or with a key the provider rejects, is reported loudly — never quietly downgraded:
+
+- **No key, cloud path requested** → the `trace_start_session` banner and every affected `trace_learn_*` response carry a warning naming the three places searched and the file to fix. Recall still answers, on local keyword matching, and says so.
+- **Key rejected (401/403)** → an explicit error, *regardless* of `TRACE_STRICT_LLM`. Strict mode governs whether degradation is acceptable, not whether you are told your credential was refused. The key is scrubbed from the message.
+- **Key borrowed from `~/.trace/.env`** → a session-start notice, since a project silently using the machine-wide credential is the thing per-project keys exist to prevent.
+- **Configured backend cannot be built** → the extension still registers, with keyword matching and a notice on every recall. It never disappears silently: an extension that fails to register looks identical to one that was never installed.
+
+### Environment variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -290,11 +315,12 @@ See [`docs/extensions/trace-learn.md`](https://github.com/Thru-Echoes/TRACE/blob
 | `TRACE_DEFAULT_PROJECT` | `auto` | Quarantine key used when a session is auto-created with no project available. |
 | `TRACE_REGISTRY_PATH` | `~/.trace/projects.json` | Canonical-key alias registry. |
 | `TRACE_LOCK_TIMEOUT` | `15` | Seconds to wait for the knowledge-store lock before failing closed. |
+| `TRACE_LOCAL_ONLY` | `false` | No-egress kill switch. **Ratchets**: any source may set it `true`; none may set it `false` over a source that set it `true`. |
 | `TRACE_SESSIONS_DIR` | `~/.trace/sessions/` | Directory for session JSON files |
 | `TRACE_KNOWLEDGE_DIR` | `~/.trace/knowledge/` | Directory for trace-learn knowledge stores |
 | `TRACE_EGRESS_LOG` | `~/.trace/egress.jsonl` | Cloud-egress ledger: one JSONL line per cloud call trace-learn makes (the fact of the call — provider, endpoint, model, purpose, item count — never the content) |
 | `TRACE_LOG_LEVEL` | `INFO` | Logging verbosity |
-| `OPENAI_API_KEY` | — | OpenAI API key for LLM matching and extraction |
+| `OPENAI_API_KEY` | — | OpenAI API key for LLM matching, extraction, and cloud embeddings. **Put it in this project's `.env`** — see above; `~/.trace/.env` is a fallback, not the home for it |
 | `TRACE_LLM_MODEL` | `gpt-5.4-mini` | Model for LLM relevance scoring |
 | `TRACE_LLM_EXTRACTION_MODEL` | `gpt-5.4-mini` | Model for LLM learning extraction |
 | `TRACE_LLM_ENABLED` | `false` | Cloud LLM matching/extraction is opt-in: set `true` (with `OPENAI_API_KEY`) to enable |

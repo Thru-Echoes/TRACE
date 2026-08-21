@@ -283,7 +283,12 @@ async def extract_from_session_llm(
     synthesising cross-event patterns and generating quality tags.
     Falls back to rule-based extraction on any error (unless strict mode).
     """
-    from trace_mcp.extensions.learn.config import LLMFallbackError
+    from trace_mcp.extensions.learn.config import (
+        ApiKeyRejectedError,
+        LLMFallbackError,
+        is_auth_error,
+        redact_key,
+    )
 
     if not _HAS_OPENAI or not config.openai_api_key:
         if config.strict_llm and config.openai_api_key:
@@ -394,6 +399,20 @@ async def extract_from_session_llm(
         return new_ids
 
     except Exception as exc:
+        if is_auth_error(exc):
+            # Same rule as matching: strict mode decides whether degradation is
+            # acceptable, never whether a refused credential is reported.
+            detail = redact_key(str(exc), config.openai_api_key)
+            logger.error(
+                "OpenAI rejected the API key during extraction (model=%s): %s",
+                config.llm_extraction_model,
+                detail,
+            )
+            raise ApiKeyRejectedError(
+                f"OpenAI REJECTED the API key (model={config.llm_extraction_model}): {detail}. "
+                f"The key in use came from {config.key_origin()}. Replace it there and restart the MCP "
+                f"server. Searched, in order: {config.key_search_description()}."
+            ) from exc
         if config.strict_llm:
             logger.error(
                 "LLM extraction failed in strict mode (model=%s) — "

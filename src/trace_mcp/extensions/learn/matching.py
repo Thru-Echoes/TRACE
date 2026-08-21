@@ -293,6 +293,11 @@ class LLMBackend:
         self._model = config.llm_model
         self._tag_weight = config.tag_weight
         self._strict = config.strict_llm
+        # Kept so a rejected credential can name the file to edit, and so the
+        # credential itself can be scrubbed from any provider message.
+        self._key_origin = config.key_origin()
+        self._key_search = config.key_search_description()
+        self._api_key = config.openai_api_key
         self._bm25_fallback = BM25Backend(
             k1=config.bm25_k1,
             b=config.bm25_b,
@@ -323,8 +328,25 @@ class LLMBackend:
         try:
             scores = await self._llm_score(candidates, context, context_tags)
         except Exception as exc:
-            from trace_mcp.extensions.learn.config import LLMFallbackError
+            from trace_mcp.extensions.learn.config import (
+                ApiKeyRejectedError,
+                LLMFallbackError,
+                is_auth_error,
+                redact_key,
+            )
 
+            if is_auth_error(exc):
+                # Independent of strict mode: strict governs whether degradation
+                # is acceptable, not whether the user is told their credential
+                # was refused. Returning keyword results here would hand back
+                # plausible output from a broken configuration.
+                detail = redact_key(str(exc), self._api_key)
+                logger.error("OpenAI rejected the API key during matching (model=%s): %s", self._model, detail)
+                raise ApiKeyRejectedError(
+                    f"OpenAI REJECTED the API key (model={self._model}): {detail}. "
+                    f"The key in use came from {self._key_origin}. Replace it there and restart the MCP server. "
+                    f"Searched, in order: {self._key_search}."
+                ) from exc
             if self._strict:
                 logger.error(
                     "LLM scoring failed in strict mode (model=%s) — "
