@@ -12,6 +12,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`trace-mcp fleet-check [ROOTS...] [--live] [--json]`.** Runs the deployed-state
+  doctor over every project declaring a TRACE server under the given roots and
+  rolls failures up by check, which is the view a fleet actually needs: not
+  "these 23 projects are broken" but "this one defect appears in 23 projects".
+  Roots come from arguments or `TRACE_FLEET_ROOTS`; with neither, the command
+  exits as a usage error rather than guessing a directory — a checker that
+  assumes one machine's layout silently surveys nothing on another and reports
+  that as a healthy fleet. The walk is depth-capped, skips dependency and VCS
+  directories, does not follow symlinks, and reports a project once however many
+  roots reach it. Unreadable roots and unparseable configs are reported and make
+  the sweep non-clean; a project whose check raises is reported as failed rather
+  than ending the sweep. Directories that cannot be read are reported and make
+  the sweep non-clean — a partial survey presented as a complete one is the
+  failure this tool exists to prevent — while branches left un-descended at the
+  depth cap are reported as a count (a real tree truncates thousands of times,
+  and a flag that is always false is a flag nobody reads); `--max-depth` raises
+  the limit. `--live` lists the commands it would run and requires `--yes` before
+  executing any of them, since a sweep reaches directories the operator never
+  named individually.
+
 ### Changed
 
 - **The OpenAI API key is now per project: `./.env` overrides `~/.trace/.env`.**
