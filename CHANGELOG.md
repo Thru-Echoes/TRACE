@@ -12,6 +12,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The OpenAI API key is now per project: `./.env` overrides `~/.trace/.env`.**
+  The precedence was inverted — the machine-global file shadowed every
+  project's own file — so a key placed in a project was silently ignored, which
+  is indistinguishable from having no key at all. An exported environment
+  variable still wins over both. Each project having its own credential means a
+  leaked or exhausted key exposes one project rather than every project on the
+  machine, the same isolation TRACE already gives sessions and knowledge stores.
+  `~/.trace/.env` remains a fallback for projects with no key of their own, and
+  that fallback is now announced instead of assumed. A committed `.env.example`
+  documents the file.
+- **A blank value never overrides a real one, in any source.** A copied
+  template containing a bare `OPENAI_API_KEY=` would otherwise mask a working
+  key from a lower-priority file — and, because such a template also leaves the
+  cloud flags off, without tripping the missing-key warning either. The same
+  applies to an exported-but-empty variable (`docker run -e OPENAI_API_KEY`).
+  To stop a project using an inherited key, set `TRACE_LOCAL_ONLY=true` rather
+  than blanking the value.
+- **`TRACE_LOCAL_ONLY` is a restrict-only ratchet.** It is ORed across every
+  configuration source: any source may switch the no-egress kill switch on, and
+  none may switch it off. Without this, the precedence change above would let a
+  project `.env` opt out of a machine-wide privacy policy.
+
 ### Added
 
 - **`trace-mcp doctor [DIR] [--live] [--json]` — deployed-state conformance
@@ -34,6 +58,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A hook is checked under **its own host event** — one registered under the
   wrong event is installed, current, executable, and still never fires — and
   TRACE-stamped scripts this build no longer ships are reported as leftovers.
+- **A missing or refused OpenAI key is now loud.** Cloud access requested with
+  no key resolvable is reported in the `trace_start_session` banner and in every
+  affected `trace_learn_*` response, naming the three places searched and the
+  file to fix; a key the provider rejects (401/403) raises `ApiKeyRejectedError`
+  regardless of `TRACE_STRICT_LLM` — on the matching, extraction, and embedding
+  paths alike — with the credential scrubbed from the message and its own error
+  code, so it is never reported as a strict-mode problem the reader cannot fix.
+  Only a 401 counts: a 403 also covers model access, region, and proxy failures,
+  which stay on the strict-mode path rather than being misdiagnosed as a bad
+  key. Strict mode governs whether degradation is acceptable, never whether
+  the user is told their credential was refused — silently returning
+  keyword-ranked results from a broken configuration hands back plausible output
+  and looks exactly like success.
+- **The trace-learn extension no longer fails to register when its configured
+  backend cannot be built.** Strict mode's refusal to degrade previously escaped
+  into the extension loader, so the server came up with the 17 core tools and no
+  explanation — the same silent-degradation shape the refusal exists to prevent.
+  It now registers with keyword matching and repeats the reason on every
+  affected response.
 - **INV-11 — a freshly initialized project is conformance-clean.** A new
   registry row binds the installer's output to the checker's expectations, so
   template rot (a hook matcher that never fires, a stale asset, a launch config

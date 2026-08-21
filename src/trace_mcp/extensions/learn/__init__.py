@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, cast, get_args
+from typing import TYPE_CHECKING, Any, cast, get_args
 
+from trace_mcp import extension_status
 from trace_mcp import project_identity as pident
 from trace_mcp.extension_hooks import register_extract_hook, register_recall_hook
 from trace_mcp.extensions.learn import extraction, matching, store
@@ -73,8 +74,41 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
     """Register trace-learn tools and hooks on the MCP server."""
 
     _config = load_config()
-    _backend = matching.get_default_backend(_config)
-    _embedding_provider = get_embedding_provider(_config)
+    # Registration must survive a backend that cannot be built. `get_default_backend`
+    # refuses to degrade to keyword matching in strict mode — correct for a caller
+    # that can report it, but here the exception would escape the extension loader
+    # and the server would come up with the 17 core tools and no explanation. That
+    # is the silent-degradation failure this project treats as the worst outcome,
+    # so the failure is captured and re-reported on every affected response instead.
+    _startup_error: str | None = None
+    try:
+        _backend = matching.get_default_backend(_config)
+        _embedding_provider = get_embedding_provider(_config)
+    except Exception as exc:  # noqa: BLE001 - a broken backend must not unregister the tools
+        _startup_error = str(exc)
+        logger.error(
+            "trace-learn: could not build the configured matching backend (%s). Registering with keyword "
+            "matching only; every recall response will carry this notice.",
+            exc,
+        )
+        _backend = matching.BM25Backend(k1=_config.bm25_k1, b=_config.bm25_b, tag_weight=_config.tag_weight)
+        _embedding_provider = None
+
+    def _key_notices(config: LearnConfig | None = None) -> list[str]:
+        """Loud notices to attach to any response that would have used the cloud.
+
+        Takes the EFFECTIVE config for the calling project, not the process-wide
+        one: a project the registry ratchets offline asks for no cloud path and
+        must not be told it is missing a key for one.
+        """
+        notices = list(extension_status.key_warnings(config if config is not None else _config))
+        if _startup_error:
+            notices.append(
+                f"⚠️ The configured matching backend could not be built, so recall is running on local "
+                f"keyword matching: {_startup_error}"
+            )
+        return notices
+
     _decay_params = DecayParams(
         enabled=_config.decay_enabled,
         half_life_days=_config.decay_half_life_days,
@@ -138,6 +172,17 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                 lrn.embedding_model = active.model_name
             return True
         except Exception as exc:
+            from trace_mcp.extensions.learn.config import ApiKeyRejectedError
+
+            if isinstance(exc, ApiKeyRejectedError):
+                # Strict mode decides whether degradation is acceptable, never
+                # whether a refused credential is reported. Swallowing it here
+                # is the one path that would leave the headline guarantee false:
+                # recall's lazy-embed step would be skipped, everything would
+                # fall to keyword scoring, and the response would carry no
+                # notice because a key IS configured.
+                logger.error("OpenAI rejected the API key while embedding: %s", exc)
+                raise
             if _config.strict_llm:
                 logger.error(
                     "Embedding generation failed in strict mode (provider=%s) — "
@@ -331,9 +376,18 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
             with store.project_lock(project), egress_project(pident.key_for_label(project) or None):
                 ks = store.load_store(project)
                 if not ks.learnings:
-                    return json.dumps(
-                        {"project": project, "results": [], "total": 0, "backend": matching.describe_backend(backend)}
-                    )
+                    empty: dict[str, Any] = {
+                        "project": project,
+                        "results": [],
+                        "total": 0,
+                        "backend": matching.describe_backend(backend),
+                    }
+                    # A first-run project is exactly where a missing key is most
+                    # worth saying out loud, so this early return carries the
+                    # notices too.
+                    if notices := _key_notices(_eff):
+                        empty["warnings"] = notices
+                    return json.dumps(empty)
                 # Lazy-embed: generate (or regenerate) embeddings for learnings that need them
                 stale = _needs_embedding(ks, provider)
                 embedded = await _embed_learnings(stale, provider) if stale else False
@@ -348,19 +402,26 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                 )
                 if results or embedded:
                     store.save_store(ks)
-                return json.dumps(
-                    {
-                        "project": project,
-                        "results": results,
-                        "total": len(results),
-                        "backend": matching.describe_backend(backend),
-                    }
-                )
+                payload: dict[str, Any] = {
+                    "project": project,
+                    "results": results,
+                    "total": len(results),
+                    "backend": matching.describe_backend(backend),
+                }
+                if notices := _key_notices(_eff):
+                    payload["warnings"] = notices
+                return json.dumps(payload)
         except pident.RegistryUnavailableError as exc:
             return _registry_unavailable_error(project, exc)
         except Exception as exc:
-            from trace_mcp.extensions.learn.config import LLMFallbackError
+            from trace_mcp.extensions.learn.config import ApiKeyRejectedError, LLMFallbackError
 
+            if isinstance(exc, ApiKeyRejectedError):
+                # Checked BEFORE LLMFallbackError, which it subclasses: labelling
+                # a refused credential "strict mode blocked fallback" sends the
+                # reader to TRACE_STRICT_LLM, where nothing they change will fix it.
+                logger.error("OpenAI rejected the API key: %s", exc)
+                return json.dumps({"error": "OpenAI API key rejected", "detail": str(exc), "project": project})
             if isinstance(exc, LLMFallbackError):
                 logger.error("Strict LLM mode blocked fallback in trace_learn_recall: %s", exc)
                 return json.dumps(
@@ -446,8 +507,14 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
         except pident.RegistryUnavailableError as exc:
             return _registry_unavailable_error(project, exc)
         except Exception as exc:
-            from trace_mcp.extensions.learn.config import LLMFallbackError
+            from trace_mcp.extensions.learn.config import ApiKeyRejectedError, LLMFallbackError
 
+            if isinstance(exc, ApiKeyRejectedError):
+                # Checked BEFORE LLMFallbackError, which it subclasses: labelling
+                # a refused credential "strict mode blocked fallback" sends the
+                # reader to TRACE_STRICT_LLM, where nothing they change will fix it.
+                logger.error("OpenAI rejected the API key: %s", exc)
+                return json.dumps({"error": "OpenAI API key rejected", "detail": str(exc), "project": project})
             if isinstance(exc, LLMFallbackError):
                 logger.error("Strict LLM mode blocked fallback in trace_learn_add: %s", exc)
                 return json.dumps(
@@ -573,14 +640,15 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                     await _embed_learnings(to_embed, provider)
                     store.save_store(ks)
 
-                return json.dumps(
-                    {
-                        "project": project,
-                        "new_learnings": len(all_new_ids),
-                        "new_ids": all_new_ids,
-                        "total_learnings": len(ks.learnings),
-                    }
-                )
+                payload: dict[str, Any] = {
+                    "project": project,
+                    "new_learnings": len(all_new_ids),
+                    "new_ids": all_new_ids,
+                    "total_learnings": len(ks.learnings),
+                }
+                if notices := _key_notices(eff):
+                    payload["warnings"] = notices
+                return json.dumps(payload)
         except pident.RegistryUnavailableError as exc:
             return _registry_unavailable_error(project, exc)
         except (pident.ProjectMismatchError, pident.ProjectKeyError) as exc:
@@ -588,8 +656,14 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                 {"error": "project/session coherence check failed", "detail": str(exc), "project": project}
             )
         except Exception as exc:
-            from trace_mcp.extensions.learn.config import LLMFallbackError
+            from trace_mcp.extensions.learn.config import ApiKeyRejectedError, LLMFallbackError
 
+            if isinstance(exc, ApiKeyRejectedError):
+                # Checked BEFORE LLMFallbackError, which it subclasses: labelling
+                # a refused credential "strict mode blocked fallback" sends the
+                # reader to TRACE_STRICT_LLM, where nothing they change will fix it.
+                logger.error("OpenAI rejected the API key: %s", exc)
+                return json.dumps({"error": "OpenAI API key rejected", "detail": str(exc), "project": project})
             if isinstance(exc, LLMFallbackError):
                 logger.error("Strict LLM mode blocked fallback in trace_learn_extract: %s", exc)
                 return json.dumps(
