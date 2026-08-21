@@ -12,6 +12,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`trace-mcp doctor [DIR] [--live] [--json]` — deployed-state conformance
+  (INV-11).** The unit suite proves the source tree is correct; it cannot prove
+  a *deployment* is. The doctor checks one project directory against this
+  build's own shipped artifacts: the `.mcp.json` launch entry (uvx command, a
+  resolvable `--from` source that is not the unrelated PyPI distribution, the
+  three trace-learn `--with` extras, a refresh flag), the host hook deployment
+  (all shipped scripts present, executable, carrying this build's
+  `[trace-hooks vX.Y]` stamp, registered in `settings.json`, and — the defect
+  that left the decision-audit hook dead in most deployed projects — attached
+  to the namespaced `mcp__<server-key>__trace_end_session` matcher), and the
+  three project-pin sites, which must all canonicalize to one key. `--live`
+  additionally spawns the project's own configured command and verifies the
+  build it actually serves (version and the 22-tool surface), which is the only
+  way to catch a warm package cache serving a stale wheel despite
+  `--refresh-package`; the finding carries the remedy. Exits non-zero on any
+  failing check, mirroring `trace-mcp identity check`; `--json` emits a
+  `DoctorReport` with stable check ids (`0` clean, `1` findings, `2` usage error; diagnostics on stderr).
+  A hook is checked under **its own host event** — one registered under the
+  wrong event is installed, current, executable, and still never fires — and
+  TRACE-stamped scripts this build no longer ships are reported as leftovers.
+- **INV-11 — a freshly initialized project is conformance-clean.** A new
+  registry row binds the installer's output to the checker's expectations, so
+  template rot (a hook matcher that never fires, a stale asset, a launch config
+  missing the extras that make a 22-tool server) fails at PR time instead of
+  months later on a consumer's machine. The guard is parametrized over the
+  adapter registry: a new host adapter is checked the moment it ships.
+
 ### Fixed
 
 - **Learn tools now enforce the `TRACE_PROJECT` pin (INV-9, ADR-006).** All

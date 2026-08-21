@@ -993,6 +993,14 @@ def main() -> None:
 
         raise SystemExit(identity_main(sys.argv[2:]))
 
+    if len(sys.argv) > 1 and sys.argv[1] == "doctor":
+        # Imported lazily like the other subcommands: the conformance layer
+        # pulls in the adapter assets, which the running server must never
+        # depend on (adapters are pure installers).
+        from trace_mcp.conformance.cli import main as doctor_main
+
+        raise SystemExit(doctor_main(sys.argv[2:]))
+
     if len(sys.argv) > 1 and sys.argv[1] == "validate":
         # In-package validator (schema ships as package data) — the previous
         # repo-relative load of scripts/validate_session.py crashed on any

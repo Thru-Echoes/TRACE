@@ -281,6 +281,55 @@ wire bump that forgets to rename or regenerate the schema fails.
 
 ---
 
+## INV-11 — A freshly initialized project is conformance-clean  · ENFORCED
+
+**Statement.** For every host adapter TRACE actually installs, running
+`trace-mcp-init` on an empty directory must produce a deployment that
+`trace_mcp.conformance.run_doctor` reports as `ok` — no failing check — using
+only this build's own shipped artifacts as the reference. Equivalently: the
+installer's OUTPUT and the checker's EXPECTATIONS are never allowed to
+disagree.
+
+**Why this is an integrity invariant, not a convenience.** The defects this
+closes were all *deployment* defects invisible to the unit suite: a
+`settings_template.json` that shipped a PostToolUse matcher naming the bare
+tool name `trace_end_session` (which a host never matches, because MCP tools
+are namespaced `mcp__<server-key>__<tool>`), so the decision-audit hook was
+dead in 15 of 17 deployed projects for several releases; hook copies frozen at
+an older release across the whole fleet; launch configs missing the
+`--with` extras, which yields a silent 17-tool server instead of the
+documented 22. Each one was found by hand, months late. Binding installer to
+checker means the next one fails at PR time.
+
+**Exhaustive site-set (what the invariant binds together):**
+- Installer output — `src/trace_mcp/init_project.py` (`.mcp.json` entry:
+  command, `--from` source, `LEARN_EXTRAS`, refresh flag, `TRACE_PROJECT` pin;
+  plus the pin file and the CLAUDE.md pin line) and
+  `src/trace_mcp/adapters/claude_code/` with its `assets/` (hook scripts,
+  `settings_template.json`, `CLAUDE_BLOCK.md`).
+- Checker expectations — `src/trace_mcp/conformance/expectations.py` and the
+  probes in `src/trace_mcp/conformance/probes.py`.
+
+**Enforcement.** The expectations are *derived from the shipped artifacts*
+rather than restated: required hook filenames and the `[trace-hooks vX.Y]`
+stamp are read from `adapters.claude_code.HOOK_ASSETS_DIR`, the decision-audit
+matcher is built from `adapters.base.MCP_SERVER_KEY`, the expected served
+version from `trace_mcp.__version__`, and the expected tool total is computed
+from the declared tool names (themselves pinned against the README table and
+against the tools the server registers).
+
+**Guard:** `tests/test_conformance_doctor.py :: test_fresh_init_is_doctor_clean`
+— parametrized over the adapter registry, skipping only adapters whose
+`install()` is not implemented. A new host adapter therefore starts being
+checked the moment it ships, and the doctor must learn that host's layout or
+the guard fails. Supporting guards in the same file pin the derivation itself
+(a hand-copied hook list, stamp, matcher, or tool count fails) and assert that
+breaking exactly one aspect of a fresh install fails exactly one check.
+
+**Status.** ENFORCED.
+
+---
+
 *To add an invariant: give it the next `INV-N`, state it, enumerate the
 exhaustive site-set, name the guard + test, and add a check that fails when a
 new site violates it — in `tests/test_invariants.py` for the AST/enumeration

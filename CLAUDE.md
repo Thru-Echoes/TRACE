@@ -19,6 +19,7 @@ uv run pyright src/                 # Type check
 python scripts/generate_schema.py   # Regenerate JSON Schema from Pydantic models
 uv build && uv run pytest tests/test_packaging_artifacts.py   # Verify the shipped wheel/sdist before tagging
 trace-mcp identity check            # Report project-identity drift (non-zero exit on findings)
+trace-mcp doctor [DIR] [--live]     # Report deployed-state drift for one project (non-zero exit on findings)
 ```
 
 Two console scripts ship with the package: `trace-mcp` (the MCP server) and
@@ -54,6 +55,7 @@ src/trace_mcp/
     project_identity.py    # Canonical project keys + alias registry (~/.trace/projects.json)
     identity_cli.py        # `trace-mcp identity` migration subcommands
     identity_report.py     # Read-only drift/stray-store reporting for the CLI
+    conformance/           # `trace-mcp doctor` — deployed-state checks (INV-11)
     init_project.py        # `trace-mcp-init`: .mcp.json, TRACE_PROJECT pin, adapter dispatch
     scratchpad.py           # Session-end scratchpad generator
     extension_hooks.py     # Hook registry for extension ↔ core integration
@@ -71,11 +73,11 @@ provides a `register(mcp, storage)` function.
 
 Correctness invariants are registered in [`docs/INVARIANTS.md`](docs/INVARIANTS.md)
 — one entry per invariant with its exhaustive site-set and enforcing test.
-Ten are registered and enforced (INV-1 … INV-10), covering session writes,
+Eleven are registered and enforced (INV-1 … INV-11), covering session writes,
 completed-session immutability, decision validation, canonical-key project
 scoping, cloud-egress attestation, project/session coherence, registry writes,
-the knowledge-store lock, learn-tool label guarding, and version-declaration
-consistency.
+the knowledge-store lock, learn-tool label guarding, version-declaration
+consistency, and conformance of a freshly initialized project.
 `tests/test_invariants.py` runs as a dedicated CI step and **fails when a new
 site appears that is not registered** — a new `storage.update_session` caller
 outside `locked_disk_session`, a new OpenAI call site that does not

@@ -205,6 +205,73 @@ class TestWheelInstallE2E:
         assert bad.returncode == 1, f"Expected exit 1 for invalid doc, got {bad.returncode}: {bad.stdout}"
         assert "FAIL" in bad.stdout
 
+    def test_trace_mcp_doctor_works_from_wheel_install(self, built_dist: dict[str, Path], tmp_path: Path) -> None:
+        """INV-11 against the SHIPPED artifact, not the source tree.
+
+        `trace-mcp doctor` derives its expectations from packaged data (the
+        adapter's hook assets), exactly like `trace-mcp-init` copies them — so
+        a sdist-allowlist gap would leave the doctor dead on arrival from a
+        wheel install while every source-tree test stayed green. This installs
+        the wheel, initializes a project with the installed console script, and
+        checks it with the installed doctor: a fresh install must be clean.
+        """
+        venv_dir = tmp_path / "venv"
+        subprocess.run(["uv", "venv", str(venv_dir)], check=True, capture_output=True, timeout=120)
+        python = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
+        subprocess.run(
+            ["uv", "pip", "install", "--python", str(python), f"trace-mcp @ {built_dist['wheel'].as_uri()}"],
+            check=True,
+            capture_output=True,
+            timeout=300,
+        )
+
+        project = tmp_path / "consumer"
+        project.mkdir()
+        source = tmp_path / "TRACE-checkout"
+        source.mkdir()
+        env = {
+            **os.environ,
+            # An installed wheel has no safe `--from` to infer (the PyPI name
+            # belongs to another project), so init fails closed without this.
+            "TRACE_SOURCE_PATH": str(source),
+            "TRACE_REGISTRY_PATH": str(tmp_path / "projects.json"),
+            "TRACE_SESSIONS_DIR": str(tmp_path / "sessions"),
+            "TRACE_KNOWLEDGE_DIR": str(tmp_path / "knowledge"),
+        }
+        init = subprocess.run(
+            [str(python.parent / "trace-mcp-init"), str(project), "--client", "claude-code"],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+        assert init.returncode == 0, f"trace-mcp-init failed from a wheel install:\n{init.stdout}\n{init.stderr}"
+
+        doctor = subprocess.run(
+            [str(python.parent / "trace-mcp"), "doctor", str(project)],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+        assert doctor.returncode == 0, (
+            f"a freshly initialized project is not doctor-clean when both commands come from the shipped "
+            f"wheel (INV-11):\n{doctor.stdout}\n{doctor.stderr}"
+        )
+        assert "FAIL" not in doctor.stdout
+
+        # Negative control: an unrelated directory must fail, or the check above
+        # would pass just as happily against a doctor that rubber-stamps.
+        empty = subprocess.run(
+            [str(python.parent / "trace-mcp"), "doctor", str(tmp_path / "TRACE-checkout")],
+            capture_output=True,
+            text=True,
+            timeout=120,
+            env=env,
+        )
+        assert empty.returncode == 1, f"Expected findings for an uninitialized directory: {empty.stdout}"
+        assert "FAIL" in empty.stdout
+
 
 class TestShippedLaunchPath:
     """Resolve every dependency from scratch — the resolution consumers get —

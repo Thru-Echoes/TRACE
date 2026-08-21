@@ -155,12 +155,12 @@ The Claude Code adapter installs four hooks:
 
 | Hook | Event | Purpose |
 |------|-------|---------|
-| `session-reminder.sh` | `SessionStart` | Reminds you to start a TRACE session if one isn't active for the current project. Project detection: `CLAUDE.md` → git repo basename → cwd basename. |
+| `session-reminder.sh` | `SessionStart` | Reminds you to start a TRACE session if one isn't active for the current project. Project detection: `.claude/trace.project` → `CLAUDE.md` → git repo basename → cwd basename. |
 | `prompt-reminder.sh` | `UserPromptSubmit` | Periodic nudge after several prompts without a session. Per-project rate-limited. |
 | `pretool-guard.sh` | `PreToolUse` (`Edit\|Write`) | Warns (or blocks) edits when no TRACE session is active. |
-| `decision-audit.sh` | `PostToolUse` (`trace_end_session`) | Echoes the session-end attribution audit into the conversation. |
+| `decision-audit.sh` | `PostToolUse` (`mcp__trace__trace_end_session`) | Echoes the session-end attribution audit into the conversation. The matcher is the FULL namespaced tool name — a host matches tool names exactly, so a bare `trace_end_session` never fires. |
 
-Project detection uses, in order: a `TRACE project name: "..."` line in `CLAUDE.md`, the git repository basename, then the current working directory basename. Add the explicit marker if your repo name differs from the project name you want logged.
+Project detection uses, in order: the `.claude/trace.project` pin file written by `trace-mcp-init`, a `TRACE project name: "..."` line in `CLAUDE.md` (bold form accepted), the git repository basename, then the current working directory basename. Add the explicit marker if your repo name differs from the project name you want logged.
 
 **Codex** support is scaffolded as a placeholder; see [`src/trace_mcp/adapters/codex/README.md`](https://github.com/Thru-Echoes/TRACE/blob/main/src/trace_mcp/adapters/codex/README.md) for the hook primitives a Codex adapter would need.
 
@@ -175,6 +175,32 @@ Worked examples for logging decisions, corrections, contributions, and decision 
 | `TRACE_PROMPT_COOLDOWN_SEC` | `300` | Wall-clock cooldown between nudges from `prompt-reminder.sh`. |
 | `TRACE_RUNTIME_DIR` | `~/.trace/runtime` | Per-project nudge state (`<project>.state.json`). Safe to delete to reset. |
 | `TRACE_SOURCE_PATH` | _unset_ | Override what `trace-mcp-init` writes into `.mcp.json` as `uvx --from <X>`. Set to a local TRACE clone path. **Required when running init from an installed wheel** — with no override, init fails closed rather than writing the PyPI name `trace-mcp`, which belongs to an unrelated package (dependency confusion). |
+
+### Verify the deployment
+
+A green test suite proves the *source tree* is correct. It cannot prove that a *deployed* project is: hook copies drift a release behind, a matcher stops firing, a pin goes missing, a package cache serves a stale build. `trace-mcp doctor` checks one project directory against the artifacts the installed build actually ships.
+
+```bash
+trace-mcp doctor                 # check the current directory
+trace-mcp doctor /path/to/proj   # check another project
+trace-mcp doctor --live          # also start the configured server and verify what it serves
+trace-mcp doctor --json          # machine-readable report (stable check ids)
+```
+
+Exit codes: `0` clean, `1` findings, `2` usage error — a bad path is not an unhealthy project, and diagnostics go to stderr so `--json` stdout is always a report or empty. What it checks:
+
+| Group | Checks |
+|---|---|
+| `config.*` | `.mcp.json` parses and declares a `trace` server; launched with `uvx`; the `--from` source is something uvx can build (and is not the unrelated PyPI distribution name); the args actually name `trace-mcp` as the command to run; the three trace-learn `--with` extras are present; `--refresh-package trace-mcp` is set. |
+| `hooks.*` | Every shipped hook script is installed, executable, and carries this build's `[trace-hooks vX.Y]` stamp; no TRACE-stamped leftovers from an older release remain; `settings.json` parses; every hook is registered **under its own host event**; the decision-audit hook uses the namespaced matcher that actually fires. |
+| `pin.*` | The pin file, the `.mcp.json` `TRACE_PROJECT` env pin, and the CLAUDE.md pin line all exist and canonicalize to one project key. |
+| `live.*` | With `--live` only: the project's own configured command starts, completes an MCP handshake, reports this build's version, and serves all 22 tools. |
+
+`--live` is opt-in because it **runs the command the project's `.mcp.json` declares** — an action, not an inspection. It is the only check that catches a project whose config, hooks, and pins are all correct while the running server is a stale build; a warm `uv` cache can serve an old wheel for minutes even with `--refresh-package`, and the finding names the remedy (`uv cache clean trace-mcp`, then restart the server).
+
+A finding is `pass`, `fail`, or `skip` — where `skip` means *not evaluated* and always names the upstream check that made evaluation impossible. Exactly one check fails per root cause.
+
+The hook checks describe the Claude Code deployment, which is the only host adapter that installs today. A project set up with `--client none` has no hooks by construction and reports the `hooks.*` checks as failures — deliberately: an MCP server without host-side enforcement is a real gap in the audit trail, not a supported configuration to be waved through.
 
 ### Run a first session
 
@@ -317,6 +343,7 @@ src/trace_mcp/
     project_identity.py    # Canonical project keys + alias registry
     identity_cli.py        # `trace-mcp identity` migration subcommands
     identity_report.py     # Read-only drift and stray-store reporting
+    conformance/           # `trace-mcp doctor`: deployed-state checks (INV-11)
     init_project.py        # `trace-mcp-init`: .mcp.json, pin, adapter dispatch
     validate.py            # `trace-mcp validate` schema conformance CLI
     scratchpad.py          # Session-end scratchpad generator
