@@ -21,6 +21,19 @@ _CLAUDE_BLOCK_SRC = _ASSETS / "CLAUDE_BLOCK.md"
 MARKER_START = "<!-- trace-mcp:claude-code -->"
 MARKER_END = "<!-- /trace-mcp:claude-code -->"
 
+HOOK_ASSETS_DIR = _HOOKS_SRC
+"""The shipped hook scripts — the single source for which hooks a correct
+deployment carries and which version stamp they emit. Read by
+``trace_mcp.conformance`` so the deployed-state checker derives its
+expectations from the same files the installer copies, instead of restating
+them in a second place that can drift."""
+
+SETTINGS_TEMPLATE_PATH = _SETTINGS_SRC
+"""The shipped hook registrations — the single source for which host EVENT each
+hook must be registered under. A hook registered under the wrong event never
+fires for its trigger while still looking installed, so the checker derives the
+event map from this file rather than restating it."""
+
 
 class ClaudeCodeAdapter(Adapter):
     """Claude Code host integration."""
@@ -204,4 +217,4 @@ def _append_claude_block(directory: Path, *, dry_run: bool) -> InstallResult:
     return InstallResult(path=dst, disposition="installed")
 
 
-__all__ = ["ClaudeCodeAdapter", "MARKER_END", "MARKER_START"]
+__all__ = ["HOOK_ASSETS_DIR", "SETTINGS_TEMPLATE_PATH", "ClaudeCodeAdapter", "MARKER_END", "MARKER_START"]
