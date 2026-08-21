@@ -1,31 +1,62 @@
 """Configuration for the trace-learn extension.
 
-Loads settings from environment variables and ~/.trace/.env.
+**A project's OpenAI key lives in that project's own ``.env``.** Each project
+gets its own credential, so one leaked or exhausted key exposes one project
+rather than every project on the machine — the same isolation ADR-006 gives
+sessions and knowledge stores, applied to the credential that reaches a third
+party.
 
-Resolution order for OPENAI_API_KEY and every other setting
-(highest priority first):
-  1. Environment variable (already set in shell)
-  2. ~/.trace/.env (shared across all TRACE projects)
-  3. ./.env in the current working directory
+Resolution order for OPENAI_API_KEY and every other setting (highest priority
+first):
 
-Precedence is a MERGE, not first-match-wins: when the same key is set in more
-than one place, the highest-priority source above supplies its value. Note the
-consequence — the global ~/.trace/.env OVERRIDES a project-local ./.env for a
-shared key, so ./.env is the LOWEST-priority source, not a "project override".
-A project's ./.env can still set keys that ~/.trace/.env does not (e.g.
-TRACE_EMBEDDING_BACKEND, TRACE_LOCAL_ONLY), and those do take effect.
+  1. Environment variable already exported in the process
+  2. ``./.env`` — the project's own file, read from the working directory the
+     host launches the MCP server in
+  3. ``~/.trace/.env`` — machine-wide defaults, a fallback for projects that
+     have not been given their own key
+
+Precedence is a MERGE, not first-match-wins: for a setting present in more than
+one source, the highest-priority source above supplies the value. The more
+specific file wins, which is what "put the key in the project's .env" has to
+mean for it to mean anything.
+
+**One exception — ``TRACE_LOCAL_ONLY`` is a restrict-only ratchet.** It is ORed
+across every source, so a project ``.env`` (or an exported variable) can turn
+the no-egress kill switch ON but can never turn a machine-global one OFF.
+Without that exception, the precedence rule above would hand every project a
+way to opt out of a machine-wide privacy policy. This mirrors the registry
+privacy ratchet in ``effective_learn_config`` (ADR-006).
+
+Configuration is read ONCE, when the extension registers at server start:
+editing a ``.env`` requires restarting the MCP server before the change is
+live.
+
+A key that cannot be found, or that the provider rejects, is reported loudly —
+see ``missing_key_for_cloud``, ``key_search_description`` and
+``ApiKeyRejectedError``. Silence there is the worst outcome available: recall
+still answers, just without the semantic path, and nothing says so.
 """
 
 from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 _TRACE_ENV_PATH = Path.home() / ".trace" / ".env"
+
+
+def _nonempty(values: dict[str, str]) -> dict[str, str]:
+    """Drop blank values, so a placeholder cannot shadow a real setting."""
+    return {k: v for k, v in values.items() if v and v.strip()}
+
+
+def _truthy(value: str | None) -> bool:
+    """Shared truthiness for the string flags every source supplies."""
+    return (value or "").strip().lower() in ("true", "1", "yes")
 
 
 def _parse_dotenv(path: Path) -> dict[str, str]:
@@ -66,12 +97,60 @@ def _parse_dotenv(path: Path) -> dict[str, str]:
     return result
 
 
+_AUTH_ERROR_NAMES = frozenset({"AuthenticationError"})
+_AUTH_STATUS_CODES = frozenset({401})
+
+
+def is_auth_error(exc: BaseException) -> bool:
+    """True when *exc* is the provider rejecting the credential itself (401).
+
+    Deliberately narrow. A 403 (``PermissionDeniedError``) is NOT treated as a
+    rejected key: the provider also returns it for a model the account cannot
+    access, an unsupported region, and a corporate proxy sitting in front of a
+    custom ``base_url``. Reporting those as "your API key was rejected" would
+    misdiagnose them, and raising unconditionally would turn an error that used
+    to degrade gracefully into an outage. A 403 therefore stays on the ordinary
+    strict-mode path — which is loud by default, since strict mode defaults ON
+    whenever a key is configured.
+
+    Matched by HTTP status and by exception class name rather than by importing
+    the SDK's exception types, so this stays correct when ``openai`` is absent
+    (the extension's optional dependency) and when the SDK reorganizes them.
+    """
+    status = getattr(exc, "status_code", None)
+    if status in _AUTH_STATUS_CODES:
+        return True
+    return type(exc).__name__ in _AUTH_ERROR_NAMES
+
+
 class LLMFallbackError(RuntimeError):
     """Raised when an LLM operation fails and strict mode forbids falling back.
 
     In strict mode, the user has signalled that LLM features must work.
     Silent fallback to BM25/rule-based would hide degraded quality, so
     we surface the failure instead.
+    """
+
+
+def redact_key(text: str, api_key: str | None) -> str:
+    """Remove *api_key* from *text* before it reaches a log or a tool response.
+
+    Provider errors sometimes echo the credential they rejected, and these
+    messages are written to logs and returned to clients.
+    """
+    if not api_key or len(api_key) < 8:
+        return text
+    return text.replace(api_key, "<redacted>")
+
+
+class ApiKeyRejectedError(LLMFallbackError):
+    """The provider refused the API key itself (401/403).
+
+    Raised regardless of strict mode, which is the point: strict mode governs
+    whether *degradation* is acceptable, not whether the user is told their
+    credential was refused. Quietly returning keyword results from a rejected
+    key hands back plausible output produced by a broken configuration — the
+    one failure shape this project treats as worse than an error.
     """
 
 
@@ -113,6 +192,39 @@ class LearnConfig:
     # point it at any local server (Ollama / LM Studio / text-embeddings-inference
     # / vLLM). None → the SDK default (api.openai.com or its own OPENAI_BASE_URL).
     embedding_base_url: str | None = None
+    # Where the key came from — "environment", "project", "global", or None.
+    # Reported (never the key itself) so a project silently borrowing the
+    # machine-wide credential is visible rather than assumed intentional.
+    key_source: str | None = None
+    key_source_path: str | None = None
+    # True when a cloud path was asked for (LLM features, or the OpenAI
+    # embedding backend) but no key resolved anywhere. Deliberately offline
+    # setups (TRACE_LOCAL_ONLY) are not flagged — they are not a mistake.
+    missing_key_for_cloud: bool = False
+    project_env_path: str | None = None
+    global_env_path: str | None = None
+
+    def key_search_description(self) -> str:
+        """Every place a key was looked for, in priority order.
+
+        A "no key found" message that does not say where it looked leaves the
+        reader guessing which of three files to edit.
+        """
+        return (
+            f"the OPENAI_API_KEY environment variable, "
+            f"the project's own {self.project_env_path or './.env'}, "
+            f"and the machine-global {self.global_env_path or '~/.trace/.env'}"
+        )
+
+    def key_origin(self) -> str:
+        """One phrase naming where the active key came from."""
+        if self.key_source == "environment":
+            return "the OPENAI_API_KEY environment variable"
+        if self.key_source == "project":
+            return f"this project's {self.project_env_path or './.env'}"
+        if self.key_source == "global":
+            return f"the machine-global {self.global_env_path or '~/.trace/.env'}"
+        return "no source (no key configured)"
 
 
 def load_config() -> LearnConfig:
@@ -127,11 +239,22 @@ def load_config() -> LearnConfig:
     embeddings require an explicit ``TRACE_EMBEDDING_BACKEND=openai``.
     ``TRACE_LOCAL_ONLY=1`` overrides both (no egress anywhere).
     """
-    # Low-priority → high-priority merge
-    project_env = _parse_dotenv(Path.cwd() / ".env")
+    # Low-priority → high-priority merge. The project's own file wins over the
+    # machine-global one: "put the key in the project's .env" has to mean the
+    # project's key is the one used, or it means nothing. (The order was once
+    # reversed, which silently ignored every per-project key.)
+    project_env_path = Path.cwd() / ".env"
+    project_env = _parse_dotenv(project_env_path)
     global_env = _parse_dotenv(_TRACE_ENV_PATH)
 
-    merged = {**project_env, **global_env}
+    # An EMPTY value never overrides a real one. Copying a template that
+    # contains a bare `OPENAI_API_KEY=` would otherwise mask a working key from
+    # a lower-priority source — and, because the same template leaves the cloud
+    # flags off, without tripping the missing-key warning either. Same hazard
+    # for an exported-but-empty variable (`docker run -e OPENAI_API_KEY`).
+    # To deliberately stop a project using an inherited key, set
+    # TRACE_LOCAL_ONLY=true rather than blanking the value.
+    merged = {**_nonempty(global_env), **_nonempty(project_env)}
     for key in (
         "OPENAI_API_KEY",
         "TRACE_LLM_MODEL",
@@ -154,11 +277,27 @@ def load_config() -> LearnConfig:
         "TRACE_OPENAI_BASE_URL",
     ):
         env_val = os.environ.get(key)
-        if env_val is not None:
+        if env_val is not None and env_val.strip():
             merged[key] = env_val
 
     api_key = merged.get("OPENAI_API_KEY") or None
-    local_only = merged.get("TRACE_LOCAL_ONLY", "false").lower() in ("true", "1", "yes")
+
+    # Which source supplied the key. Reported (never the key) so that a project
+    # quietly borrowing the machine-wide credential is visible.
+    key_source: str | None = None
+    key_source_path: str | None = None
+    if api_key:
+        if os.environ.get("OPENAI_API_KEY"):
+            key_source = "environment"
+        elif project_env.get("OPENAI_API_KEY"):
+            key_source, key_source_path = "project", str(project_env_path)
+        else:
+            key_source, key_source_path = "global", str(_TRACE_ENV_PATH)
+
+    # RESTRICT-ONLY RATCHET: any source may switch no-egress ON; none may
+    # switch it OFF. Without this, the precedence flip above would let a
+    # project .env opt out of a machine-wide privacy policy.
+    local_only = any(_truthy(source.get("TRACE_LOCAL_ONLY")) for source in (global_env, project_env, dict(os.environ)))
 
     # Cloud LLM matching/extraction is OPT-IN (local-first): unset means OFF,
     # even when an API key is present. Distinguish "unset" from an explicit
@@ -172,12 +311,30 @@ def load_config() -> LearnConfig:
     strict_default = "true" if api_key else "false"
     strict_llm = merged.get("TRACE_STRICT_LLM", strict_default).lower() in ("true", "1", "yes")
 
-    if llm_enabled and not api_key:
-        # No key at all — this is a legitimate config, not a failure.
-        logger.info(
-            "No OPENAI_API_KEY found (checked env, ~/.trace/.env, ./.env). "
-            "LLM features disabled — using BM25/rule-based matching."
+    embedding_backend_requested = merged.get("TRACE_EMBEDDING_BACKEND", "auto")
+    cloud_requested = llm_enabled or embedding_backend_requested == "openai"
+    # A cloud path was asked for and there is no credential for it. Recorded on
+    # the config rather than swallowed here: registration must still succeed
+    # (a server that refuses to start over a missing optional key is a worse
+    # failure than a loud one), so the callers surface it — the session-start
+    # banner and every learn-tool response that would have used the cloud.
+    # Deliberately-offline setups are not a mistake and are not flagged.
+    missing_key_for_cloud = cloud_requested and not api_key and not local_only
+
+    if missing_key_for_cloud:
+        logger.error(
+            "No OPENAI_API_KEY found, but a cloud path was requested "
+            "(TRACE_LLM_ENABLED=%s, TRACE_EMBEDDING_BACKEND=%s). Looked in: the OPENAI_API_KEY "
+            "environment variable, the project's own %s, and the machine-global %s. "
+            "Falling back to local keyword matching — results will NOT use semantic ranking. "
+            "Put this project's key in %s, then restart the MCP server.",
+            raw_llm_enabled,
+            embedding_backend_requested,
+            project_env_path,
+            _TRACE_ENV_PATH,
+            project_env_path,
         )
+    if llm_enabled and not api_key:
         llm_enabled = False
     elif llm_enabled and api_key and strict_llm:
         logger.warning(
@@ -229,7 +386,24 @@ def load_config() -> LearnConfig:
         embedding_backend=embedding_backend,
         embedding_model=merged.get("TRACE_EMBEDDING_MODEL", "text-embedding-3-small"),
         embedding_base_url=merged.get("TRACE_OPENAI_BASE_URL") or merged.get("OPENAI_BASE_URL") or None,
+        key_source=key_source,
+        key_source_path=key_source_path,
+        missing_key_for_cloud=missing_key_for_cloud,
+        project_env_path=str(project_env_path),
+        global_env_path=str(_TRACE_ENV_PATH),
     )
+
+
+def _clear_cloud_expectation(config: LearnConfig) -> LearnConfig:
+    """Drop the missing-key flag once a config has been ratcheted offline.
+
+    A project the registry forces local-only is not asking for a cloud path, so
+    warning that it has no key for one would be noise on every response — and
+    noise is how a real warning stops being read.
+    """
+    if not config.missing_key_for_cloud:
+        return config
+    return replace(config, missing_key_for_cloud=False)
 
 
 def effective_learn_config(base: LearnConfig, project: str) -> LearnConfig:
@@ -282,13 +456,14 @@ def effective_learn_config(base: LearnConfig, project: str) -> LearnConfig:
     ):
         return base
 
-    from dataclasses import replace
-
     eff = base
     if force_local and not base.local_only:
         # Mirror load_config's own TRACE_LOCAL_ONLY semantics: one switch, all
         # three egress paths.
         eff = replace(eff, local_only=True, llm_enabled=False)
+        # A project ratcheted offline is not asking for a cloud path, so it must
+        # not be warned about lacking a key for one.
+        eff = _clear_cloud_expectation(eff)
         if eff.embedding_backend == "openai":
             eff = replace(eff, embedding_backend="auto")
     if force_llm_off and eff.llm_enabled:

@@ -62,8 +62,7 @@ Both backends are **idempotent** — running extraction twice on the same sessio
 
 Cloud LLM features are **off by default** (local-first): an API key on the
 machine does not, by itself, send any session content to OpenAI. To opt in,
-place your key in `~/.trace/.env` (shared across all TRACE projects) **and**
-set `TRACE_LLM_ENABLED=true`:
+place the key in **this project's own `.env`** and set `TRACE_LLM_ENABLED=true`:
 
 ```bash
 OPENAI_API_KEY=sk-...
@@ -73,7 +72,44 @@ TRACE_LLM_EXTRACTION_MODEL=gpt-5.4-mini  # Model for extraction (can be differen
 TRACE_STRICT_LLM=true                    # Fail loudly on LLM errors (default: true when key set)
 ```
 
-Environment variables take precedence over `.env` file values for CI/container use.
+### Where the key is read from
+
+Highest priority first:
+
+1. an environment variable already exported in the process (CI, containers)
+2. **`./.env` — this project's own file**, read from the directory the host launches the server in
+3. `~/.trace/.env` — machine-wide defaults
+
+**The key belongs in the project's own file.** Each project having its own
+credential means a leaked or exhausted key exposes one project rather than every
+project on the machine. `~/.trace/.env` still works as a fallback, and TRACE
+names it at session start rather than letting a project quietly borrow it.
+
+A **blank value never overrides a real one** in any source, so copying a
+template with a bare `OPENAI_API_KEY=` cannot mask a working key. To stop a
+project using an inherited key, set `TRACE_LOCAL_ONLY=true` instead of blanking
+the value.
+
+`TRACE_LOCAL_ONLY` is the one setting that does not follow that order: it is a
+**restrict-only ratchet**, ORed across sources, so any source may switch the
+no-egress kill switch on and none may switch it off.
+
+Configuration is read **once, at server start** — restart the MCP server after
+editing a `.env`.
+
+### When the key is missing or refused
+
+- **No key, cloud path requested** — reported in the `trace_start_session`
+  banner and in the affected `trace_learn_*` responses (a `warnings` field),
+  naming the three places searched and the file to fix. Recall still answers on
+  BM25 and says so.
+- **Key rejected (401)** — raises `ApiKeyRejectedError` on the matching,
+  extraction, and embedding paths *regardless of* `TRACE_STRICT_LLM`, with the
+  credential scrubbed from the message. Strict mode governs whether degradation
+  is acceptable, not whether you are told your credential was refused. A 403 is
+  deliberately excluded — it also covers model access, region, and proxy
+  failures — and stays on the strict-mode path.
+- **Key borrowed from `~/.trace/.env`** — named at session start.
 
 ### Strict vs permissive LLM mode
 

@@ -114,6 +114,7 @@ class OpenAIEmbeddingProvider:
         model: str = "text-embedding-3-small",
         dimensions: int = 0,
         base_url: str | None = None,
+        key_hint: str | None = None,
     ) -> None:
         if not _HAS_OPENAI:
             raise RuntimeError("openai package is required for OpenAI embeddings")
@@ -131,6 +132,8 @@ class OpenAIEmbeddingProvider:
         self.model_name = model
         self.dimensions = dimensions  # 0 = use model default
         self.base_url = base_url
+        self._api_key = api_key
+        self._key_hint = key_hint or "Check the OpenAI key in this project's .env and restart the MCP server."
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
         # Egress-as-provenance: record the fact of the cloud call before making
@@ -152,7 +155,20 @@ class OpenAIEmbeddingProvider:
         kwargs: dict = {"model": self.model_name, "input": texts}
         if self.dimensions > 0:
             kwargs["dimensions"] = self.dimensions
-        response = await self._client.embeddings.create(**kwargs)
+        try:
+            response = await self._client.embeddings.create(**kwargs)
+        except Exception as exc:
+            from trace_mcp.extensions.learn.config import ApiKeyRejectedError, is_auth_error, redact_key
+
+            if not is_auth_error(exc):
+                raise
+            # A refused credential is a configuration failure, not a provider
+            # hiccup: re-raised as its own type so callers report the file to
+            # fix instead of counting it as one more retryable embedding error.
+            detail = redact_key(str(exc), self._api_key)
+            raise ApiKeyRejectedError(
+                f"OpenAI REJECTED the API key while embedding (model={self.model_name}): {detail}. {self._key_hint}"
+            ) from exc
         return [item.embedding for item in response.data]
 
 
@@ -323,13 +339,17 @@ def get_embedding_provider(config: LearnConfig | None = None) -> EmbeddingProvid
             api_key=config.openai_api_key,
             model=config.embedding_model,
             base_url=config.embedding_base_url,
+            key_hint=(
+                f"The key in use came from {config.key_origin()}. Replace it there and restart the MCP "
+                f"server. Searched, in order: {config.key_search_description()}."
+            ),
         )
     if backend == "openai":
         # User explicitly asked for OpenAI embeddings but they're unavailable.
         msg = (
             f"OpenAI embeddings requested (TRACE_EMBEDDING_BACKEND=openai) but "
             f"unavailable: openai_package={_HAS_OPENAI}, api_key_present="
-            f"{bool(config.openai_api_key)}."
+            f"{bool(config.openai_api_key)}. Searched for a key in: {config.key_search_description()}."
         )
         if config.strict_llm:
             logger.error("%s Refusing to fall back.", msg)

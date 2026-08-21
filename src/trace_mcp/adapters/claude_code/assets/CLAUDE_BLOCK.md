@@ -24,6 +24,15 @@ read as separate projects.
 - Never repair a wrong label by editing a captured session. Add an alias to
   the registry instead — capture records are not rewritten.
 
+**OpenAI key (optional, for semantic recall)**
+
+This project's OpenAI key belongs in its own `.env` file, not in a machine-wide
+one — per-project credentials keep one project's key from covering every
+project on the machine. `~/.trace/.env` is only a fallback, and TRACE reports at
+session start when a project is borrowing it. If a key is missing or refused,
+TRACE says so in the session banner and in the affected tool responses instead
+of quietly returning keyword-ranked results.
+
 **Session lifecycle**
 
 - **Start** a TRACE session at the beginning of any multi-step workflow.

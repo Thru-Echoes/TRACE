@@ -45,6 +45,17 @@ migration tooling (`snapshot`, `scan`, `apply`, `check`, `merge-stores`,
 - **Label repair is alias-table-first** — a mislabelled project is fixed by adding an alias, never by rewriting a capture record. `auto` and `shared` are reserved keys.
 - **Cross-project reads and writes fail closed** when the server is pinned via `TRACE_PROJECT`; `TRACE_REQUIRE_PIN` additionally refuses both session-creation paths on an unpinned process.
 - `server.py` imports `__version__` from `trace_mcp` for startup log
+- **Per-project OpenAI key**: the key lives in the project's own `.env`, which
+  overrides the machine-global `~/.trace/.env` (an exported env var still wins
+  over both). `TRACE_LOCAL_ONLY` is the one exception — a restrict-only ratchet
+  ORed across sources, so no project can switch a machine-wide kill switch off.
+  Config is read once at server start; a `.env` edit needs a server restart.
+- **A missing or refused key is loud**: reported in the `trace_start_session`
+  banner and in the affected `trace_learn_*` responses, and a provider 401/403
+  raises `ApiKeyRejectedError` regardless of `TRACE_STRICT_LLM`. A backend that
+  cannot be built degrades to keyword matching *with a notice* rather than
+  failing registration — an unregistered extension is indistinguishable from an
+  uninstalled one.
 - **Line length**: 120 (ruff configured)
 
 ### Architecture Quick Reference
