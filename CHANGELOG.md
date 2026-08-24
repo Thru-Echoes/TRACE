@@ -14,6 +14,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cross-process concurrency smoke for the knowledge store**
+  (`tests/test_concurrency_smoke.py`). Two real server processes speaking MCP
+  over stdio share one temporary TRACE home and add learnings in interleaved
+  rounds; the test asserts that every learning lands, that ids are unique
+  across writers, that the on-disk store agrees with every response, and that
+  no lock or temp file is left behind. It then SIGKILLs one writer with an add
+  in flight — at a fixed schedule of offsets, and deterministically at the
+  instant it is about to rename its temp file onto the store, where a
+  test-only gate holds that one server — and asserts that the store is
+  exactly the pre-add or the post-add state and that the surviving process
+  keeps adding: a lock orphaned by a dead PID is stolen, while one held by a
+  live PID is never stolen (the peer's add returns an error, and the server
+  log carries the lock's own refusal, rather than writing unlocked). The store
+  lock (INV-8) and the atomic store write were previously pinned only
+  in-process; a migration that consolidates live stores relies on exactly
+  these guarantees across processes, so a green run of this module is a
+  precondition for it — registered as such under INV-8 in
+  `docs/INVARIANTS.md` — alongside the migration's own rehearsal on a cloned
+  home. The module pins behavior across process death and atomic rename
+  visibility only: the store write does not fsync, so it makes no claim about
+  durability across a kernel crash or power loss.
 - **`trace-mcp fleet-check [ROOTS...] [--live] [--json]`.** Runs the deployed-state
   doctor over every project declaring a TRACE server under the given roots and
   rolls failures up by check, which is the view a fleet actually needs: not

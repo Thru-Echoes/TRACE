@@ -32,6 +32,8 @@ pytest_unconfigure); creates a temp directory that outlives the run.
 from __future__ import annotations
 
 import os
+import subprocess
+import sys
 import tempfile
 from pathlib import Path
 
@@ -46,6 +48,28 @@ _ISOLATED_VARS = (
 )
 _REAL_DATA_ENV = "TRACE_REAL_DATA_TESTS"
 _previous_env: dict[str, str | None] = {}
+
+
+def dead_pid() -> int:
+    """A PID that is provably dead: spawn a trivial child and reap it.
+
+    Shared by every test that plants a lock token for a dead holder. Reuse of
+    the reaped PID before the lock's liveness check would require the kernel
+    to wrap its entire PID space within the same second — PIDs are assigned
+    incrementally — which is not a realistic hazard on any supported platform.
+    """
+    for _ in range(3):
+        proc = subprocess.Popen([sys.executable, "-c", "pass"])
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        try:
+            os.kill(proc.pid, 0)
+        except ProcessLookupError:
+            return proc.pid  # the kernel itself reports the PID as gone
+    raise RuntimeError("could not obtain a PID the kernel reports as gone")
 
 
 def real_data_opted_in() -> bool:
