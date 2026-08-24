@@ -20,6 +20,7 @@ python scripts/generate_schema.py   # Regenerate JSON Schema from Pydantic model
 uv build && uv run pytest tests/test_packaging_artifacts.py   # Verify the shipped wheel/sdist before tagging
 trace-mcp identity check            # Report project-identity drift (non-zero exit on findings)
 trace-mcp doctor [DIR] [--live]     # Report deployed-state drift for one project (non-zero exit on findings)
+trace-mcp fleet-check [ROOTS...]    # Same check across every TRACE project under the given roots
 ```
 
 Two console scripts ship with the package: `trace-mcp` (the MCP server) and
@@ -66,7 +67,7 @@ src/trace_mcp/
     project_identity.py    # Canonical project keys + alias registry (~/.trace/projects.json)
     identity_cli.py        # `trace-mcp identity` migration subcommands
     identity_report.py     # Read-only drift/stray-store reporting for the CLI
-    conformance/           # `trace-mcp doctor` — deployed-state checks (INV-11)
+    conformance/           # `trace-mcp doctor` / `fleet-check` — deployed-state checks (INV-11)
     init_project.py        # `trace-mcp-init`: .mcp.json, TRACE_PROJECT pin, adapter dispatch
     scratchpad.py           # Session-end scratchpad generator
     extension_hooks.py     # Hook registry for extension ↔ core integration

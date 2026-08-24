@@ -1001,6 +1001,11 @@ def main() -> None:
 
         raise SystemExit(doctor_main(sys.argv[2:]))
 
+    if len(sys.argv) > 1 and sys.argv[1] == "fleet-check":
+        from trace_mcp.conformance.cli import main_fleet_check
+
+        raise SystemExit(main_fleet_check(sys.argv[2:]))
+
     if len(sys.argv) > 1 and sys.argv[1] == "validate":
         # In-package validator (schema ships as package data) — the previous
         # repo-relative load of scripts/validate_session.py crashed on any

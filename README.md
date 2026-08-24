@@ -198,6 +198,29 @@ Exit codes: `0` clean, `1` findings, `2` usage error — a bad path is not an un
 
 `--live` is opt-in because it **runs the command the project's `.mcp.json` declares** — an action, not an inspection. It is the only check that catches a project whose config, hooks, and pins are all correct while the running server is a stale build; a warm `uv` cache can serve an old wheel for minutes even with `--refresh-package`, and the finding names the remedy (`uv cache clean trace-mcp`, then restart the server).
 
+### Sweep every project
+
+`trace-mcp fleet-check` runs the doctor over every project declaring a TRACE server under the roots you give it, and rolls the failures up by check — the view that turns "23 projects are broken" into "one fix, applied 23 times".
+
+```bash
+trace-mcp fleet-check ~/code ~/work     # sweep these roots
+TRACE_FLEET_ROOTS=~/code trace-mcp fleet-check
+trace-mcp fleet-check ~/code --json     # per-project reports + totals
+```
+
+```
+fleet-check: 1/24 project(s) clean
+  FAIL /path/to/project  (3 finding(s))
+         hooks.stamp: installed hook version differs from this build's [trace-hooks v0.5] ...
+fleet-check: failing checks, most widespread first
+    23 project(s)  pin.trace_project_file
+    14 project(s)  hooks.decision_audit_matcher
+```
+
+No path is compiled in: with no roots and no `TRACE_FLEET_ROOTS`, the command exits `2` rather than guessing a directory to sweep — a checker that assumes one machine's layout would silently survey nothing on another and report a healthy fleet. The walk is depth-capped, skips dependency and VCS directories, does not follow symlinks, and reports a project once however many roots reach it. A root or `.mcp.json` that cannot be read is reported and makes the sweep non-clean, since a partial survey is not a clean bill of health.
+
+`--live` applies the doctor's live probe to every project found — which means **running the server command each of those projects declares**. Because a sweep reaches directories you never named one by one, the first `--live` only lists the commands it would run; adding `--yes` executes them. `--max-depth` raises the walk limit, and the number of branches left un-descended is reported rather than silently omitted.
+
 A finding is `pass`, `fail`, or `skip` — where `skip` means *not evaluated* and always names the upstream check that made evaluation impossible. Exactly one check fails per root cause.
 
 The hook checks describe the Claude Code deployment, which is the only host adapter that installs today. A project set up with `--client none` has no hooks by construction and reports the `hooks.*` checks as failures — deliberately: an MCP server without host-side enforcement is a real gap in the audit trail, not a supported configuration to be waved through.
@@ -369,7 +392,7 @@ src/trace_mcp/
     project_identity.py    # Canonical project keys + alias registry
     identity_cli.py        # `trace-mcp identity` migration subcommands
     identity_report.py     # Read-only drift and stray-store reporting
-    conformance/           # `trace-mcp doctor`: deployed-state checks (INV-11)
+    conformance/           # `trace-mcp doctor` / `fleet-check`: deployed-state checks (INV-11)
     init_project.py        # `trace-mcp-init`: .mcp.json, pin, adapter dispatch
     validate.py            # `trace-mcp validate` schema conformance CLI
     scratchpad.py          # Session-end scratchpad generator

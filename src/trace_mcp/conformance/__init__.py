@@ -11,6 +11,7 @@ expectations.
 Public API:
 
     run_doctor(project_dir, *, live=False) -> DoctorReport
+    run_fleet_check(roots, *, live=False) -> FleetReport
 
 ``DoctorReport.ok`` is False when any check failed; ``skip`` findings name the
 upstream check that made evaluation impossible and never make a report
@@ -37,6 +38,16 @@ from trace_mcp.conformance.expectations import (
     ExpectedServedBuild,
     ExpectedToolSurface,
     Finding,
+)
+from trace_mcp.conformance.fleet import (
+    FLEET_ROOTS_ENV,
+    MAX_DEPTH,
+    Discovery,
+    FleetReport,
+    discover_projects,
+    planned_live_commands,
+    roots_from_env,
+    run_fleet_check,
 )
 from trace_mcp.conformance.probes import (
     CONFIG_CHECKS,
@@ -100,20 +111,28 @@ def _guarded(name: str, owned: tuple[str, ...], probe: Callable[[], list[Finding
 
 __all__ = [
     "CONFIG_CHECKS",
+    "FLEET_ROOTS_ENV",
+    "MAX_DEPTH",
     "CORE_TOOLS",
     "HOOK_CHECKS",
     "LIVE_CHECKS",
     "LEARN_TOOLS",
     "PIN_CHECKS",
     "ConformanceAssetError",
+    "Discovery",
     "DoctorReport",
     "ExpectedHookDeployment",
     "ExpectedServedBuild",
     "ExpectedToolSurface",
     "Finding",
+    "FleetReport",
     "check_config",
     "check_hooks",
     "check_pin_coherence",
     "check_served_build",
+    "discover_projects",
+    "planned_live_commands",
+    "roots_from_env",
     "run_doctor",
+    "run_fleet_check",
 ]
