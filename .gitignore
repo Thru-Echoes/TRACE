@@ -84,6 +84,10 @@ logs/
 .env.local
 .env.*.local
 *.local.json
+# Per-developer session notes / review-persona pointers. Historically excluded
+# only via .git/info/exclude, which does not travel with a clone — so a fresh
+# clone would offer to commit it. Tracked here so every clone ignores it.
+CLAUDE.local.md
 
 # Temporary files
 *.tmp
