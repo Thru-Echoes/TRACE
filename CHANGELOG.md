@@ -14,6 +14,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A golden walkthrough of the provenance loop, generated from one scenario**
+  (`examples/walkthrough/`). A single scenario definition
+  (`scenario.py`) — start a session, propose a decision, a human accepts it,
+  log a contribution and a correction, end the session and read the attribution
+  audit, query the decision back to confirm it was proposed by the AI and
+  resolved by the human, add and extract learnings (idempotently), recall one
+  with a score, and watch a cross-project read *and* write both fail closed
+  with no foreign store created — feeds two consumers that cannot disagree:
+  the committed `WALKTHROUGH.md` a person reads (rendered by
+  `render_walkthrough.py`), and `tests/test_walkthrough_e2e.py`, which drives
+  the same steps against a live server over MCP stdio. A sync test re-renders
+  the scenario and diffs it against the committed markdown, so the manual doc
+  and the automated run can never drift — the exact failure mode a walkthrough
+  is meant to prevent. The run pins a hermetic project with all data
+  directories redirected to a scratch location, so it also serves as the
+  post-deploy canary flow without touching a real `~/.trace`.
 - **Cross-process concurrency smoke for the knowledge store**
   (`tests/test_concurrency_smoke.py`). Two real server processes speaking MCP
   over stdio share one temporary TRACE home and add learnings in interleaved
