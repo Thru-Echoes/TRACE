@@ -1,6 +1,7 @@
 {
-  "include": ["src", "tests", "scripts"],
+  "include": ["src", "tests", "scripts", "examples"],
   "exclude": ["**/__pycache__"],
+  "extraPaths": ["."],
   "pythonVersion": "3.11",
   "typeCheckingMode": "basic",
   "reportMissingImports": true,
