@@ -183,7 +183,13 @@ session lock (INV-1).
 
 **Guard:** `tests/test_invariants.py :: test_inv8_knowledge_lock_is_fail_closed_and_dependency_free`
 (no `filelock` import; `project_lock` uses `exclusive_file_lock`). Behavior
-pinned by `tests/test_learn_containment.py` (lock timeout raises).
+pinned by `tests/test_learn_containment.py` (lock timeout raises) and, across
+real server processes, by `tests/test_concurrency_smoke.py` (interleaved adds
+lose nothing and alias no ids; a writer killed mid-add leaves a parseable
+store; a dead holder's lock is stolen; a live holder's lock is refused, never
+bypassed). A green run of the cross-process module is a precondition for any
+consolidation of live knowledge stores; the consolidation runbook adds its own
+rehearsal on a cloned home.
 
 **Status.** ENFORCED.
 

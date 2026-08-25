@@ -10,13 +10,12 @@ coherence (INV-6), and the ``TRACE_PROJECT`` binding.
 from __future__ import annotations
 
 import json
-import subprocess
-import sys
 import time
 from pathlib import Path
 from typing import cast
 
 import pytest
+from conftest import dead_pid
 
 import trace_mcp.project_identity as pi
 from trace_mcp.storage.base import TraceStorage
@@ -172,10 +171,8 @@ def test_exclusive_lock_timeout_raises_on_live_holder(tmp_path: Path) -> None:
 
 
 def test_exclusive_lock_steals_dead_holder(tmp_path: Path) -> None:
-    proc = subprocess.Popen([sys.executable, "-c", ""])
-    proc.wait()  # now dead and reaped — its pid is provably gone
     lock = tmp_path / "x.lock"
-    lock.write_bytes(f"{proc.pid}:{time.time_ns()}".encode())
+    lock.write_bytes(f"{dead_pid()}:{time.time_ns()}".encode())  # reaped: its pid is provably gone
     with pi.exclusive_file_lock(lock, timeout=0.5):
         pass  # acquired by stealing the dead holder's lock — no TimeoutError
 

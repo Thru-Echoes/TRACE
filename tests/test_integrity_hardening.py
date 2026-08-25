@@ -25,12 +25,11 @@ from __future__ import annotations
 
 import json
 import os
-import subprocess
-import sys
 import time
 from pathlib import Path
 
 import pytest
+from conftest import dead_pid
 
 from trace_mcp.schema import SCHEMA_VERSION
 from trace_mcp.storage.json_file import JsonFileStorage
@@ -232,13 +231,6 @@ async def test_get_session_warns_on_future_schema_version(storage, tmp_path, cap
 # ── additional hardening ────────────────────────────────────────────────
 
 
-def _dead_pid() -> int:
-    """A PID that is guaranteed dead: spawn a trivial child and reap it."""
-    proc = subprocess.Popen([sys.executable, "-c", "pass"])
-    proc.wait()
-    return proc.pid
-
-
 async def test_dead_holder_lock_is_stolen_immediately(storage, tmp_path):
     """A lock whose holder PID is dead is reclaimed at once, regardless of age.
 
@@ -249,7 +241,7 @@ async def test_dead_holder_lock_is_stolen_immediately(storage, tmp_path):
     session_id = "trace_20260616_deadpid"
     storage._ensure_dir()
     lock_path = Path(str(tmp_path)) / f"{session_id}.lock"
-    lock_path.write_text(f"{_dead_pid()}:0")  # fresh mtime, but holder is dead
+    lock_path.write_text(f"{dead_pid()}:0")  # fresh mtime, but holder is dead
 
     async with storage.lock(session_id, timeout=2.0):  # << steal_after (60s)
         pass
