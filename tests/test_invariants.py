@@ -329,23 +329,49 @@ INV12_DUPLICATE_REFUSERS = {
 }
 
 
+_LIST_GROWERS = {"append", "extend", "insert"}
+
+
+def _is_learnings_attr(node: ast.expr) -> bool:
+    return isinstance(node, ast.Attribute) and node.attr == "learnings"
+
+
+def _grows_learnings(sub: ast.AST) -> bool:
+    """True if *sub* adds entries to a ``.learnings`` list.
+
+    Covers ``x.learnings.append/extend/insert(...)``, ``x.learnings += [...]``,
+    and slice assignment ``x.learnings[a:b] = ...``. A local alias
+    (``lst = x.learnings; lst.append(...)``) is beyond a check of this shape; the
+    behavioral tests in tests/test_learn_store.py are the backstop there, and the
+    id-minting assertion below fails for any registered site that stops using the
+    counter regardless of how it appends.
+    """
+    if (
+        isinstance(sub, ast.Call)
+        and isinstance(sub.func, ast.Attribute)
+        and sub.func.attr in _LIST_GROWERS
+        and _is_learnings_attr(sub.func.value)
+    ):
+        return True
+    if isinstance(sub, ast.AugAssign) and _is_learnings_attr(sub.target):
+        return True
+    if isinstance(sub, ast.Assign) and any(
+        isinstance(t, ast.Subscript) and _is_learnings_attr(t.value) for t in sub.targets
+    ):
+        return True
+    return False
+
+
 def _functions_appending_learnings() -> set[tuple[str, str]]:
-    """Every (relpath, function) whose body calls ``….learnings.append(…)``."""
+    """Every (relpath, function) whose body grows a ``.learnings`` list."""
     found: set[tuple[str, str]] = set()
     for path in _src_files():
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
             if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
                 continue
-            for sub in ast.walk(node):
-                if (
-                    isinstance(sub, ast.Call)
-                    and isinstance(sub.func, ast.Attribute)
-                    and sub.func.attr == "append"
-                    and isinstance(sub.func.value, ast.Attribute)
-                    and sub.func.value.attr == "learnings"
-                ):
-                    found.add((_rel(path), node.name))
+            if any(_grows_learnings(sub) for sub in ast.walk(node)):
+                found.add((_rel(path), node.name))
     return found
 
 

@@ -776,3 +776,79 @@ class TestDuplicateIdReporting:
         assert "repair-ids" in out
         assert target.read_bytes() == before, "target must not be rewritten"
         assert (_isolated_home / "knowledge" / "trace.json").exists(), "source must not be consumed"
+
+
+class TestRepairIdsReachesEveryFlaggedStore:
+    """`check` reports duplicates for every store on disk, so the repair must be
+    able to reach the same population — otherwise a flagged store is refused for
+    all writes with no supported fix."""
+
+    def _prepare(self) -> None:
+        _run("snapshot")
+        _enroll("registered-one")
+
+    def test_repairs_a_store_that_is_not_registered(self, _isolated_home: Path) -> None:
+        self._prepare()
+        path = _write_duplicated_store(_isolated_home, "stray-store", project="stray-store")
+        assert _run("check")[0] == 1, "precondition: check flags the stray store"
+
+        code, out = _run("repair-ids", "stray-store")
+        assert code == 0, out
+        ids = [lrn["id"] for lrn in json.loads(path.read_text())["learnings"]]
+        assert len(ids) == len(set(ids))
+
+    def test_unknown_name_with_no_store_still_errors(self, _isolated_home: Path) -> None:
+        self._prepare()
+        code, out = _run("repair-ids", "never-heard-of-it")
+        assert code == 1 and "resolves to no registered project" in out
+
+    def test_an_unrelated_projects_lock_does_not_block_the_repair(self, _isolated_home: Path) -> None:
+        """A stale lock belonging to another store must not wedge the only fix path."""
+        self._prepare()
+        _write_duplicated_store(_isolated_home, "target", project="target")
+        (_isolated_home / "knowledge" / "someone-else.json.lock").write_text("held")
+
+        code, out = _run("repair-ids", "target")
+        assert code == 0, out
+
+
+class TestRepairIdsReferenceScan:
+    def _prepare(self) -> None:
+        _run("snapshot")
+        _enroll("proj")
+
+    def test_a_structured_reference_refuses(self, _isolated_home: Path) -> None:
+        self._prepare()
+        path = _write_duplicated_store(
+            _isolated_home,
+            "proj",
+            project="proj",
+            extra=[
+                {
+                    "id": "lrn_005",
+                    "content": "unrelated text",
+                    "category": "correction",
+                    "corrects_event_ids": ["lrn_002"],
+                }
+            ],
+        )
+        before = path.read_bytes()
+        code, out = _run("repair-ids", "proj")
+        assert code == 1 and "ambiguous" in out.lower() and "lrn_002" in out
+        assert path.read_bytes() == before
+
+    def test_a_prose_mention_warns_but_repairs(self, _isolated_home: Path) -> None:
+        """Free text is not a machine-resolvable reference; refusing on it would
+        leave a store permanently unwritable with hand-editing the only escape."""
+        self._prepare()
+        path = _write_duplicated_store(
+            _isolated_home,
+            "proj",
+            project="proj",
+            extra=[{"id": "lrn_005", "content": "this supersedes lrn_002 in prose", "category": "learning"}],
+        )
+        code, out = _run("repair-ids", "proj")
+        assert code == 0, out
+        assert "lrn_005" in out and "mentions" in out.lower(), "the prose mention must still be reported"
+        ids = [lrn["id"] for lrn in json.loads(path.read_text())["learnings"]]
+        assert len(ids) == len(set(ids))

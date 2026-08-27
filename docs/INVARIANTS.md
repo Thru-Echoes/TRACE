@@ -356,6 +356,20 @@ the store looks wrong afterwards. The same defect shape as the rest of this
 file: a rule (ids identify one record) enforced by a scheme that quietly breaks
 under one operation.
 
+**What "write" means here.** Recall is a read for its caller but persists recall
+counts and lazily-computed embeddings. That bookkeeping mints no id, so on an
+aliased store it is **dropped with a notice on the response**
+(`extensions/learn/__init__.py :: _persist_recall_bookkeeping`) rather than
+failing the recall — otherwise the guard would break reads on exactly the stores
+it exists to protect, inverting its own guarantee.
+
+**Known limitation (downgrade).** A server built before `next_id` existed loads a
+repaired store, drops the field on write, and the counter re-initializes from the
+highest id present on the next load. A forget-then-add across that window can
+still reissue an id, with nothing on disk showing the counter was lost. Consumers
+build from whatever branch is checked out in the shared working tree, so this is
+governed by the standing "keep `main` checked out" rule rather than by code.
+
 **Exhaustive site-set:**
 - Minting — `src/trace_mcp/extensions/learn/models.py` (`KnowledgeStore.next_id`,
   `next_learning_id`, `_raise_counter_above_existing_ids`).
@@ -374,22 +388,34 @@ under one operation.
   (`trace-mcp identity repair-ids <key>`): snapshot-gated, writer-quiescence
   checked, holds the store lock, keeps the first occurrence and renumbers later
   ones in array order, copies the original to `*.json.prerepair-<date>`, records
-  the mapping and before/after digests in `migrations.jsonl`, and **refuses**
-  when a duplicated id is referenced elsewhere rather than guessing which record
-  the reference meant.
+  the mapping and before/after digests in `migrations.jsonl`. It **refuses** when
+  a duplicated id appears in a *structured* field (`_find_id_references`
+  blocking set) rather than guessing which record the reference meant, and merely
+  **reports** a mention in free text — prose is resolved by no code path, and
+  refusing on it would leave a store permanently unwritable with hand-editing as
+  the only escape. When the registry cannot resolve the argument it falls back to
+  the canonical store stem, so the stray and quarantine stores `check` flags can
+  actually be repaired. Quiescence is checked on the target file only
+  (`_preflight_target_quiescent`), so one crashed writer elsewhere cannot wedge
+  the only path out of a store that refuses every write.
 
 **Guard:** `tests/test_invariants.py` —
 `test_inv12_next_learning_id_reads_and_advances_the_persisted_counter` (fails if
 `max()` arithmetic returns, or if the counter is not read and advanced),
 `test_inv12_counter_healing_never_lowers_the_counter`,
-`test_inv12_every_learning_appender_is_registered` (AST enumeration of
-`….learnings.append(…)`, with a positive control against pattern rot and a
-staleness check), `test_inv12_registered_appenders_mint_from_the_counter`, and
+`test_inv12_every_learning_appender_is_registered` (AST enumeration of every site
+that grows a `.learnings` list — `append`/`extend`/`insert`, `+=`, and slice
+assignment — with a positive control against pattern rot and a staleness check;
+a local alias is beyond a static check of this shape, which the id-minting
+assertion and the behavioral tests backstop), `test_inv12_registered_appenders_mint_from_the_counter`, and
 `test_inv12_store_writes_refuse_an_aliased_store`. Behavior pinned by
 `tests/test_learn_models.py :: TestMonotonicIds`,
 `tests/test_learn_store.py :: TestLearningIdReuse` (forget → add → distinct id;
 refusal leaves the file byte-identical), and
-`tests/test_identity_cli.py :: TestRepairIds` / `:: TestDuplicateIdReporting`.
+`tests/test_identity_cli.py :: TestRepairIds`, `:: TestDuplicateIdReporting`,
+`:: TestRepairIdsReachesEveryFlaggedStore`, `:: TestRepairIdsReferenceScan`, and
+`tests/test_learn_aliased_store.py` (reads keep working and every refused write
+names the repair command).
 
 **Status.** ENFORCED.
 

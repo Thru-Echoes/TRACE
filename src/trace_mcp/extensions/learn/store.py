@@ -96,12 +96,20 @@ def _refuse_duplicate_ids(store: KnowledgeStore) -> None:
     duplicates = store.duplicate_learning_ids()
     if not duplicates:
         return
+    # Name the CANONICAL key in the remediation command: `project` is a free-text
+    # display label, and the repair command addresses stores by canonical key.
+    from trace_mcp.project_identity import ProjectKeyError, canonical_project_key
+
+    try:
+        key = canonical_project_key(store.project)
+    except ProjectKeyError:
+        key = store.project
     raise DuplicateLearningIdError(
         f"knowledge store for project {store.project!r} carries aliased learning id(s): "
         f"{', '.join(duplicates)}. Refusing to write — a reference naming one of these ids "
         "cannot be resolved, and writing would spread the aliasing. Repair it with "
         "`trace-mcp identity snapshot` then "
-        f"`trace-mcp identity repair-ids {store.project}`."
+        f"`trace-mcp identity repair-ids {key}`."
     )
 
 

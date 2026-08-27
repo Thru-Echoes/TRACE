@@ -481,6 +481,29 @@ def _preflight_merge(paths: list[Path], out) -> bool:
     return True
 
 
+def _preflight_target_quiescent(path: Path, out) -> bool:
+    """True when *path* has not been touched inside the writer-liveness window.
+
+    Narrower than ``_preflight_merge`` on purpose: it looks only at the file being
+    repaired, so an unrelated project's stale lock cannot block the repair. Lock
+    ownership is enforced by the store lock, which has holder-liveness semantics
+    this timestamp check cannot express.
+    """
+    threshold = float(os.environ.get("TRACE_MERGE_MIN_AGE_SEC", "5"))
+    try:
+        age = datetime.now(UTC).timestamp() - path.stat().st_mtime
+    except OSError:
+        return True
+    if age < threshold:
+        print(
+            f"Error: {path.name} was modified {age:.1f}s ago (< {threshold}s) — a writer may be "
+            "active. Re-run in a moment.",
+            file=out,
+        )
+        return False
+    return True
+
+
 def cmd_merge_stores(args: argparse.Namespace, out) -> int:
     """Consolidate an alias group's knowledge stores into the canonical-key store.
 
@@ -670,33 +693,47 @@ def cmd_merge_stores(args: argparse.Namespace, out) -> int:
 # ── repair-ids ─────────────────────────────────────────────────────────────
 
 
-def _find_ambiguous_references(store: KnowledgeStore, duplicates: set[str]) -> list[str]:
-    """Every place a duplicated id is referenced by something other than its own record.
+# Fields that could structurally hold an identifier. A duplicated id appearing in
+# one of these is a machine-resolvable reference that renumbering would silently
+# repoint, so it blocks the repair. Free text (`content`) is deliberately NOT in
+# this set: prose is not resolved by any code path, and refusing on a passing
+# mention would leave a store permanently unwritable with hand-editing the JSON
+# as the only escape — the guard would have created a worse trap than the defect.
+_REFERENCE_FIELDS = ("source_session", "source_event", "corrects_event_ids", "tags")
 
-    Renumbering is only safe when nothing points at the id being changed. A
-    duplicated id appearing in any other field named one of two records, and
-    nothing on disk says which — so the repair reports these and refuses rather
-    than guessing, in the same spirit as alias-table-first label repair (spec
-    §8.5): never invent an attribution you cannot know.
 
-    Pure; returns [] when the duplicated ids are referenced nowhere.
+def _find_id_references(store: KnowledgeStore, duplicates: set[str]) -> tuple[list[str], list[str]]:
+    """Split references to duplicated ids into blocking and advisory.
+
+    Renumbering is only safe when nothing resolvable points at the id being
+    changed: a duplicated id named one of two records, and nothing on disk says
+    which — so a structured reference refuses the repair rather than guessing, in
+    the spirit of alias-table-first label repair (specification §8.5). A mention
+    inside free text is reported so the operator can update the wording, but it
+    never blocks, because no code resolves it and the pre-repair backup preserves
+    the original ids either way.
+
+    Pure. Returns ``(blocking, advisory)``, each a list of human-readable hits.
     """
-    hits: list[str] = []
+    blocking: list[str] = []
+    advisory: list[str] = []
     for lrn in store.learnings:
-        payload = lrn.model_dump(mode="json", exclude={"id", "embedding"})
-        for field, value in payload.items():
-            if isinstance(value, str):
-                candidates = [value]
-            elif isinstance(value, list):
-                candidates = [item for item in value if isinstance(item, str)]
-            else:
-                continue
+        for field in _REFERENCE_FIELDS:
+            value = getattr(lrn, field, None)
+            items = value if isinstance(value, list) else [value]
+            for item in items:
+                if isinstance(item, str) and item in duplicates:
+                    hit = f"{lrn.id}.{field} == {item}"
+                    if hit not in blocking:
+                        blocking.append(hit)
+        content = getattr(lrn, "content", "")
+        if isinstance(content, str):
             for dup in sorted(duplicates):
-                if any(dup in candidate for candidate in candidates):
-                    hit = f"{lrn.id}.{field} refers to {dup}"
-                    if hit not in hits:
-                        hits.append(hit)
-    return hits
+                if dup in content:
+                    hit = f"{lrn.id}.content mentions {dup}"
+                    if hit not in advisory:
+                        advisory.append(hit)
+    return blocking, advisory
 
 
 def cmd_repair_ids(args: argparse.Namespace, out) -> int:
@@ -724,19 +761,37 @@ def cmd_repair_ids(args: argparse.Namespace, out) -> int:
     try:
         registry = pident.get_registry_cached()
     except pident.RegistryUnavailableError as exc:
-        print(f"Error: registry is unreadable ({exc}); enroll projects before repairing.", file=out)
+        # A damaged registry is fail-closed everywhere else; repairing a store
+        # while identity itself is unreadable could target the wrong file.
+        print(f"Error: registry is unreadable ({exc}); fix it before repairing a store.", file=out)
         return 1
-    if registry is None:
-        print("Error: no registry yet — run scan → apply before repair-ids.", file=out)
-        return 1
-    key = registry.resolve(args.key)
+
+    knowledge = identity_report.knowledge_dir()
+    key = registry.resolve(args.key) if registry is not None else None
     if key is None:
-        print(f"Error: '{args.key}' resolves to no registered project.", file=out)
-        return 1
-    if key != args.key:
+        # `identity check` reports duplicates for EVERY store on disk, including
+        # stray, quarantine, and not-yet-enrolled ones. If the repair could only
+        # reach registered projects, those stores would be flagged and refused for
+        # all writes with no supported fix, so fall back to the canonical store
+        # stem whenever a file actually exists for it.
+        try:
+            candidate = pident.canonical_project_key(args.key)
+        except pident.ProjectKeyError:
+            print(f"Error: '{args.key}' is not a usable project name.", file=out)
+            return 1
+        if not (knowledge / f"{candidate}.json").is_file():
+            print(
+                f"Error: '{args.key}' resolves to no registered project and no knowledge store "
+                f"'{candidate}.json' exists.",
+                file=out,
+            )
+            return 1
+        key = candidate
+        print(f"  '{args.key}' is not registered; repairing the store file '{key}.json' directly.", file=out)
+    elif key != args.key:
         print(f"  '{args.key}' resolved to registered key '{key}'.", file=out)
 
-    path = identity_report.knowledge_dir() / f"{key}.json"
+    path = knowledge / f"{key}.json"
     if not path.is_file():
         print(f"Nothing to repair: no knowledge store for '{key}'.", file=out)
         return 0
@@ -744,7 +799,14 @@ def cmd_repair_ids(args: argparse.Namespace, out) -> int:
         print(f"identity repair-ids: no aliased learning ids in '{key}.json' — nothing to do.", file=out)
         return 0
 
-    if not _preflight_merge([path], out):
+    # Quiescence is checked on the TARGET only. The merge preflight refuses when
+    # ANY lock file exists in the knowledge directory, which cannot tell a stale
+    # lock from a live one and trips on unrelated projects — acceptable for an
+    # optional consolidation, but here it would let one crashed writer wedge the
+    # only path out of a store that refuses every write. Lock contention is left
+    # to the store lock itself, which steals a provably-dead holder's lock and
+    # fails closed on a live one.
+    if not _preflight_target_quiescent(path, out):
         return 1
 
     try:
@@ -756,17 +818,19 @@ def cmd_repair_ids(args: argparse.Namespace, out) -> int:
                 return 1
 
             duplicates = set(store.duplicate_learning_ids())
-            ambiguous = _find_ambiguous_references(store, duplicates)
-            if ambiguous:
+            blocking, advisory = _find_id_references(store, duplicates)
+            if blocking:
                 print(
                     f"Error: '{key}.json' is ambiguous — a duplicated id is referenced elsewhere, "
                     "so renumbering would silently repoint the reference:",
                     file=out,
                 )
-                for hit in ambiguous:
+                for hit in blocking:
                     print(f"    {hit}", file=out)
                 print("  Resolve those references by hand, then re-run. Refusing to guess.", file=out)
                 return 1
+            for hit in advisory:
+                print(f"  note: {hit} — free text is not repointed; review the wording after the repair.", file=out)
 
             sha_before = _sha256(path)
             renumbered: list[dict[str, str]] = []
