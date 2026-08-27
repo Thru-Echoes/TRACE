@@ -336,6 +336,65 @@ breaking exactly one aspect of a fresh install fails exactly one check.
 
 ---
 
+## INV-12 — Learning ids are never reused  · ENFORCED
+
+**Statement.** A learning id is minted from a **persisted monotonic counter**
+(`KnowledgeStore.next_id`), never derived from the ids currently present. The
+counter is consumed on *call* rather than on append, is initialized on load for
+stores written before it existed, and is only ever **raised** — never lowered —
+so an id released by `trace_learn_forget` is never reissued to different
+content. Complementing that, every **write** path refuses a store whose ids are
+already aliased; **reads** stay permissive so an affected store remains
+readable, exportable, and repairable.
+
+**Why this is an integrity invariant.** `next_learning_id()` returned
+`max(existing) + 1`, so forgetting the highest learning and adding another gave
+the new content the old id. Dedup, recall counts, the positionally-aligned
+embedding sidecar, and any recorded reference all key on that id, so the two
+records become mutually unaddressable — and, unlike a lost update, nothing about
+the store looks wrong afterwards. The same defect shape as the rest of this
+file: a rule (ids identify one record) enforced by a scheme that quietly breaks
+under one operation.
+
+**Exhaustive site-set:**
+- Minting — `src/trace_mcp/extensions/learn/models.py` (`KnowledgeStore.next_id`,
+  `next_learning_id`, `_raise_counter_above_existing_ids`).
+- Appenders that must mint from the counter —
+  `src/trace_mcp/extensions/learn/store.py :: add_learning`;
+  `src/trace_mcp/identity_cli.py :: cmd_merge_stores`.
+- Write paths that must refuse an aliased store —
+  `src/trace_mcp/extensions/learn/store.py :: save_store`, `:: add_learning`
+  (single implementation: `_refuse_duplicate_ids`). `cmd_merge_stores` refuses an
+  aliased **target** before grafting, so a merge cannot consume the sources into
+  premerge backups and leave the operator with a hand reconstruction.
+- Detection — `src/trace_mcp/identity_report.py :: find_duplicate_learning_ids`
+  (core, filesystem-only, zero `extensions/` imports per ADR-003), consumed by
+  `trace-mcp identity check`.
+- Repair — `src/trace_mcp/identity_cli.py :: cmd_repair_ids`
+  (`trace-mcp identity repair-ids <key>`): snapshot-gated, writer-quiescence
+  checked, holds the store lock, keeps the first occurrence and renumbers later
+  ones in array order, copies the original to `*.json.prerepair-<date>`, records
+  the mapping and before/after digests in `migrations.jsonl`, and **refuses**
+  when a duplicated id is referenced elsewhere rather than guessing which record
+  the reference meant.
+
+**Guard:** `tests/test_invariants.py` —
+`test_inv12_next_learning_id_reads_and_advances_the_persisted_counter` (fails if
+`max()` arithmetic returns, or if the counter is not read and advanced),
+`test_inv12_counter_healing_never_lowers_the_counter`,
+`test_inv12_every_learning_appender_is_registered` (AST enumeration of
+`….learnings.append(…)`, with a positive control against pattern rot and a
+staleness check), `test_inv12_registered_appenders_mint_from_the_counter`, and
+`test_inv12_store_writes_refuse_an_aliased_store`. Behavior pinned by
+`tests/test_learn_models.py :: TestMonotonicIds`,
+`tests/test_learn_store.py :: TestLearningIdReuse` (forget → add → distinct id;
+refusal leaves the file byte-identical), and
+`tests/test_identity_cli.py :: TestRepairIds` / `:: TestDuplicateIdReporting`.
+
+**Status.** ENFORCED.
+
+---
+
 *To add an invariant: give it the next `INV-N`, state it, enumerate the
 exhaustive site-set, name the guard + test, and add a check that fails when a
 new site violates it — in `tests/test_invariants.py` for the AST/enumeration

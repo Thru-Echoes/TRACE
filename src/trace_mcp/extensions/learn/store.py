@@ -2,6 +2,10 @@
 
 Stores per-project knowledge as JSON in ~/.trace/knowledge/{project}.json.
 Uses atomic writes (write to temp file, then rename) to prevent corruption.
+
+Reads are permissive and writes are fail-closed: a store whose learning ids are
+already aliased still loads, lists, and exports, but every write path refuses
+until `trace-mcp identity repair-ids` renumbers it (INV-12).
 """
 
 from __future__ import annotations
@@ -72,6 +76,35 @@ class StoreLoadError(Exception):
     """Raised when a knowledge store file exists but cannot be parsed."""
 
 
+class DuplicateLearningIdError(Exception):
+    """Raised when a WRITE is attempted on a store carrying aliased learning ids."""
+
+
+def _refuse_duplicate_ids(store: KnowledgeStore) -> None:
+    """Fail closed before any write to a store whose ids are already aliased.
+
+    Reads are deliberately unaffected (``load_store`` never raises on duplicates)
+    so an aliased store stays recoverable, exportable, and searchable. Writing,
+    though, extends the damage: dedup, recall counts, the positional embedding
+    sidecar, and every recorded reference key on the id, so a second learning
+    under an existing id makes both unaddressable. Raising here turns a silent
+    corruption into an operator task with a named fix (INV-12).
+
+    Raises:
+        DuplicateLearningIdError: at least one id is carried by two learnings.
+    """
+    duplicates = store.duplicate_learning_ids()
+    if not duplicates:
+        return
+    raise DuplicateLearningIdError(
+        f"knowledge store for project {store.project!r} carries aliased learning id(s): "
+        f"{', '.join(duplicates)}. Refusing to write — a reference naming one of these ids "
+        "cannot be resolved, and writing would spread the aliasing. Repair it with "
+        "`trace-mcp identity snapshot` then "
+        f"`trace-mcp identity repair-ids {store.project}`."
+    )
+
+
 def _assert_store_identity(ks: KnowledgeStore, project: str, path: Path) -> None:
     """Fail closed if a store's own project disagrees with the key it loaded as.
 
@@ -131,6 +164,11 @@ def save_store(store: KnowledgeStore, directory: str | None = None) -> Path:
     Writes to a temporary file in the same directory then renames, so a
     crash mid-write can never leave a half-written store file.
     """
+    # Fail closed BEFORE touching the filesystem: an aliased store must not be
+    # rewritten under any caller (INV-12). This is the single choke point every
+    # write path funnels through, so no future writer can bypass the check.
+    _refuse_duplicate_ids(store)
+
     path = _store_path(store.project, directory)
     path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -170,7 +208,16 @@ def add_learning(
     extraction_method: Literal["llm", "rule-based", "manual"] | None = None,
     generated_by: str | None = None,
 ) -> Learning:
-    """Add a learning to the store and return it."""
+    """Add a learning to the store and return it.
+
+    Side effect: appends to ``store.learnings`` and consumes one id from the
+    store's monotonic counter.
+
+    Raises:
+        DuplicateLearningIdError: the store already carries aliased ids, so the
+            caller is told at the point of the attempt rather than at save time.
+    """
+    _refuse_duplicate_ids(store)
     learning = Learning(
         id=store.next_learning_id(),
         content=content,

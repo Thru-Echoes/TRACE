@@ -310,3 +310,115 @@ def test_inv9_learn_tools_guard_reserved_projects() -> None:
         f"call _resolve_project at entry: {sorted(missing)}. A foreign label could bypass the TRACE_PROJECT "
         "pin, or a reserved-key label could reach a store."
     )
+
+
+# ── INV-12: learning ids are never reused ────────────────────────────────
+# `next_learning_id` used to return max(existing) + 1, so forgetting the highest
+# learning handed its id to different content on the next add — aliasing every
+# reference that named it. The durable fix is a PERSISTED counter plus a refusal
+# to write an already-aliased store; these guards fail if either half regresses
+# or if a new appender mints ids some other way.
+INV12_LEARNING_APPENDERS = {
+    ("extensions/learn/store.py", "add_learning"),
+    ("identity_cli.py", "cmd_merge_stores"),
+}
+
+INV12_DUPLICATE_REFUSERS = {
+    ("extensions/learn/store.py", "save_store"),
+    ("extensions/learn/store.py", "add_learning"),
+}
+
+
+def _functions_appending_learnings() -> set[tuple[str, str]]:
+    """Every (relpath, function) whose body calls ``….learnings.append(…)``."""
+    found: set[tuple[str, str]] = set()
+    for path in _src_files():
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for sub in ast.walk(node):
+                if (
+                    isinstance(sub, ast.Call)
+                    and isinstance(sub.func, ast.Attribute)
+                    and sub.func.attr == "append"
+                    and isinstance(sub.func.value, ast.Attribute)
+                    and sub.func.value.attr == "learnings"
+                ):
+                    found.add((_rel(path), node.name))
+    return found
+
+
+def _knowledge_store_method(name: str) -> ast.FunctionDef:
+    tree = ast.parse((SRC / "extensions" / "learn" / "models.py").read_text())
+    fn = next(
+        (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name),
+        None,
+    )
+    assert fn is not None, f"KnowledgeStore.{name} disappeared — INV-12's guard has nothing to check."
+    return fn
+
+
+def test_inv12_next_learning_id_reads_and_advances_the_persisted_counter() -> None:
+    """The id must come from ``next_id``, never from arithmetic over existing ids."""
+    fn = _knowledge_store_method("next_learning_id")
+    calls = {_call_name(c) for c in ast.walk(fn) if isinstance(c, ast.Call)}
+    assert "max" not in calls, (
+        "INV-12 violation: next_learning_id derives an id from max() over existing ids again. "
+        "Forgetting the highest learning then re-adding reissues its id, aliasing every "
+        "reference that named it. Mint from the persisted next_id counter instead."
+    )
+    assert any(isinstance(n, ast.Attribute) and n.attr == "next_id" for n in ast.walk(fn)), (
+        "INV-12 violation: next_learning_id no longer reads the persisted next_id counter."
+    )
+    assert any(
+        isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Attribute) and n.target.attr == "next_id"
+        for n in ast.walk(fn)
+    ), "INV-12 violation: next_learning_id does not advance next_id, so two calls can collide."
+
+
+def test_inv12_counter_healing_never_lowers_the_counter() -> None:
+    """The load-time validator may only raise the counter — lowering it reissues ids."""
+    fn = _knowledge_store_method("_raise_counter_above_existing_ids")
+    assigns = [
+        n
+        for n in ast.walk(fn)
+        if isinstance(n, ast.Assign) and any(isinstance(t, ast.Attribute) and t.attr == "next_id" for t in n.targets)
+    ]
+    assert assigns, "INV-12 violation: the counter validator no longer initializes next_id."
+    for node in assigns:
+        assert isinstance(node.value, ast.BinOp) and isinstance(node.value.op, ast.Add), (
+            "INV-12 violation: next_id is assigned something other than <highest existing> + 1; "
+            "the validator must only ever raise the counter."
+        )
+
+
+def test_inv12_every_learning_appender_is_registered() -> None:
+    appenders = _functions_appending_learnings()
+    assert appenders, "the learnings-append detector matched nothing — the AST pattern has rotted."
+    unregistered = appenders - INV12_LEARNING_APPENDERS
+    assert not unregistered, (
+        f"INV-12 violation (docs/INVARIANTS.md): unregistered learning appender(s): {sorted(unregistered)}. "
+        "Mint the id with KnowledgeStore.next_learning_id() and register the site in "
+        "INV12_LEARNING_APPENDERS."
+    )
+    stale = INV12_LEARNING_APPENDERS - appenders
+    assert not stale, f"INV-12 registry is stale — these no longer append learnings: {sorted(stale)}."
+
+
+def test_inv12_registered_appenders_mint_from_the_counter() -> None:
+    minters = _functions_calling("next_learning_id")
+    missing = INV12_LEARNING_APPENDERS - minters
+    assert not missing, (
+        f"INV-12 violation: these append learnings without minting an id from the store counter: {sorted(missing)}."
+    )
+
+
+def test_inv12_store_writes_refuse_an_aliased_store() -> None:
+    """Reads stay permissive; every write path must fail closed on duplicate ids."""
+    refusers = _functions_calling("_refuse_duplicate_ids")
+    missing = INV12_DUPLICATE_REFUSERS - refusers
+    assert not missing, (
+        f"INV-12 violation: these write paths no longer refuse an aliased store: {sorted(missing)}. "
+        "Writing to a store with duplicate learning ids spreads the aliasing."
+    )

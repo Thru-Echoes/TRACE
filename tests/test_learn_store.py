@@ -13,6 +13,7 @@ import pytest
 from trace_mcp.extensions.learn.models import KnowledgeStore
 from trace_mcp.extensions.learn.store import (
     DedupResult,
+    DuplicateLearningIdError,
     StoreLoadError,
     add_learning,
     add_learning_dedup,
@@ -290,3 +291,83 @@ class TestStorePathSanitized:
         path.write_text("{broken json!!!", encoding="utf-8")
         with pytest.raises(StoreLoadError, match="Corrupt JSON"):
             load_store("corrupt", directory=str(tmp_path))
+
+
+class TestLearningIdReuse:
+    """Forgetting the highest id must never recycle it, and a duplicated store
+    must fail closed on WRITE while still serving reads (INV-12)."""
+
+    def test_forget_then_add_does_not_reuse_the_id(self, tmp_path):
+        """The reproduction: remove the highest id, add again, expect a fresh id."""
+        ks = load_store("reuse", directory=str(tmp_path))
+        first = add_learning(ks, content="first insight")
+        second = add_learning(ks, content="second insight")
+        save_store(ks, directory=str(tmp_path))
+
+        ks = load_store("reuse", directory=str(tmp_path))
+        assert remove_learning(ks, second.id)
+        save_store(ks, directory=str(tmp_path))
+
+        ks = load_store("reuse", directory=str(tmp_path))
+        third = add_learning(ks, content="third insight")
+        assert third.id not in {first.id, second.id}
+
+    def test_legacy_store_on_disk_gains_a_counter(self, tmp_path):
+        """A store written before the counter existed initializes it on load."""
+        path = tmp_path / "legacy.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "project": "legacy",
+                    "learnings": [{"id": "lrn_001", "content": "a"}, {"id": "lrn_004", "content": "b"}],
+                }
+            )
+        )
+        ks = load_store("legacy", directory=str(tmp_path))
+        assert ks.next_id == 5
+        save_store(ks, directory=str(tmp_path))
+        assert json.loads(path.read_text())["next_id"] == 5
+
+    def _duplicated_store(self, tmp_path):
+        path = tmp_path / "dupes.json"
+        path.write_text(
+            json.dumps(
+                {
+                    "project": "dupes",
+                    "learnings": [
+                        {"id": "lrn_001", "content": "a"},
+                        {"id": "lrn_002", "content": "b"},
+                        {"id": "lrn_002", "content": "c"},
+                    ],
+                }
+            )
+        )
+        return path
+
+    def test_reads_still_work_on_a_duplicated_store(self, tmp_path):
+        """Loading must not raise — a duplicated store stays readable and exportable."""
+        self._duplicated_store(tmp_path)
+        ks = load_store("dupes", directory=str(tmp_path))
+        assert len(list_learnings(ks)) == 3
+        assert ks.duplicate_learning_ids() == ["lrn_002"]
+
+    def test_save_refuses_while_duplicates_are_present(self, tmp_path):
+        self._duplicated_store(tmp_path)
+        ks = load_store("dupes", directory=str(tmp_path))
+        with pytest.raises(DuplicateLearningIdError) as exc:
+            save_store(ks, directory=str(tmp_path))
+        assert "repair-ids" in str(exc.value)
+
+    def test_add_learning_refuses_while_duplicates_are_present(self, tmp_path):
+        self._duplicated_store(tmp_path)
+        ks = load_store("dupes", directory=str(tmp_path))
+        with pytest.raises(DuplicateLearningIdError):
+            add_learning(ks, content="would alias an existing id")
+
+    def test_refusal_leaves_the_file_untouched(self, tmp_path):
+        path = self._duplicated_store(tmp_path)
+        before = path.read_bytes()
+        ks = load_store("dupes", directory=str(tmp_path))
+        with pytest.raises(DuplicateLearningIdError):
+            save_store(ks, directory=str(tmp_path))
+        assert path.read_bytes() == before

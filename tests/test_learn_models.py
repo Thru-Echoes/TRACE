@@ -229,3 +229,81 @@ class TestRecallTrackingFields:
         restored = Learning.model_validate(data)
         assert restored.recall_count == 3
         assert restored.last_surfaced is not None
+
+
+class TestMonotonicIds:
+    """``next_id`` is a persisted counter, so a forgotten id is never reused (INV-12)."""
+
+    def test_repeated_calls_return_distinct_ids(self):
+        """The counter advances on call, not on append — two calls can never collide."""
+        ks = KnowledgeStore(project="test")
+        assert ks.next_learning_id() == "lrn_001"
+        assert ks.next_learning_id() == "lrn_002"
+
+    def test_legacy_store_initializes_the_counter_above_the_max(self):
+        ks = KnowledgeStore.model_validate(
+            {
+                "project": "legacy",
+                "learnings": [
+                    {"id": "lrn_001", "content": "a"},
+                    {"id": "lrn_007", "content": "b"},
+                ],
+            }
+        )
+        assert ks.next_id == 8
+        assert ks.next_learning_id() == "lrn_008"
+
+    def test_counter_survives_a_json_roundtrip(self):
+        ks = KnowledgeStore(project="test")
+        ks.next_learning_id()
+        restored = KnowledgeStore.model_validate(json.loads(ks.model_dump_json()))
+        assert restored.next_id == 2
+
+    def test_counter_self_heals_upward(self):
+        """A stale counter below the highest existing id is raised, never trusted."""
+        ks = KnowledgeStore.model_validate(
+            {
+                "project": "test",
+                "next_id": 2,
+                "learnings": [{"id": "lrn_009", "content": "a"}],
+            }
+        )
+        assert ks.next_id == 10
+
+    def test_counter_is_never_lowered(self):
+        """A counter ahead of the learnings (the forget case) is preserved as-is."""
+        ks = KnowledgeStore.model_validate(
+            {
+                "project": "test",
+                "next_id": 50,
+                "learnings": [{"id": "lrn_001", "content": "a"}],
+            }
+        )
+        assert ks.next_id == 50
+        assert ks.next_learning_id() == "lrn_050"
+
+    def test_duplicate_ids_are_reported_not_raised(self):
+        """Loading a duplicated store must succeed — reads keep working; writes refuse."""
+        ks = KnowledgeStore.model_validate(
+            {
+                "project": "test",
+                "learnings": [
+                    {"id": "lrn_002", "content": "a"},
+                    {"id": "lrn_002", "content": "b"},
+                    {"id": "lrn_003", "content": "c"},
+                ],
+            }
+        )
+        assert ks.duplicate_learning_ids() == ["lrn_002"]
+
+    def test_clean_store_reports_no_duplicates(self):
+        ks = KnowledgeStore(project="test", learnings=[Learning(id="lrn_001", content="a")])
+        assert ks.duplicate_learning_ids() == []
+
+    def test_unset_ids_are_not_reported_as_aliases(self):
+        """Several not-yet-added learnings legitimately carry no id at all."""
+        ks = KnowledgeStore(
+            project="test",
+            learnings=[Learning(content="a"), Learning(content="b")],
+        )
+        assert ks.duplicate_learning_ids() == []
