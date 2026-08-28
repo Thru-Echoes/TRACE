@@ -12,6 +12,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Learning ids are no longer reused after a delete.** `KnowledgeStore` now
+  carries a persisted monotonic counter (`next_id`) and mints ids from it, so
+  forgetting the highest learning and adding another gives the new content a
+  fresh id instead of the released one. Previously the next id was
+  `max(existing) + 1`, which handed a recycled id to different content and left
+  dedup, recall counts, the positional embedding sidecar, and every recorded
+  reference pointing at two records with no way to tell them apart. Stores
+  written before the counter existed initialize it on load; a counter found
+  below the highest id present is raised (never lowered) and the anomaly is
+  logged. Registered as INV-12 in `docs/INVARIANTS.md` with an enumeration guard
+  over every site that appends a learning.
+
+### Added
+
+- **`trace-mcp identity repair-ids <key>`** renumbers a store that already
+  carries aliased ids. The first occurrence keeps its id and later ones take
+  fresh ids in array order; the original is copied to
+  `*.json.prerepair-<date>`, the mapping and before/after digests are appended
+  to `migrations.jsonl`, and `--dry-run` reports the mapping without writing.
+  It is snapshot-gated, checks that the target store is quiescent, holds the
+  store lock, and **refuses outright** when a duplicated id appears in a
+  structured field rather than guessing which record the reference meant; a
+  mention in free text is reported but does not block. When the registry cannot
+  resolve the argument it falls back to the canonical store stem, so stray and
+  quarantine stores — which `identity check` also flags — can be repaired.
+- **`trace-mcp identity check` reports duplicate learning ids** per store,
+  naming the repair command. Detection lives in the core identity report
+  (filesystem-only, no extension import), so the CLI and any future core caller
+  cannot disagree about the same file.
+
+### Changed
+
+- **Knowledge-store writes fail closed on aliased ids.** `save_store` and
+  `add_learning` raise `DuplicateLearningIdError`, and `identity merge-stores`
+  refuses an aliased target before grafting anything, so a merge can no longer
+  consume its sources into premerge backups while spreading the aliasing. Reads
+  are deliberately unchanged: an affected store still loads, lists, and exports,
+  which is what keeps it repairable. Recall keeps working too — its recall-count
+  and lazy-embedding bookkeeping is dropped with a notice on the response instead
+  of failing the call, since that write mints no id. Every learn tool reports a
+  refused write as `duplicate_learning_ids` with the repair command in `detail`,
+  rather than the generic failure a bare handler would return.
+
 ### Added
 
 - **A golden walkthrough of the provenance loop, generated from one scenario**

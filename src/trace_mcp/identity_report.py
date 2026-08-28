@@ -13,11 +13,13 @@ extension absent and never triggers a store load.
 Exports:
     ``registry_status`` — ``"ok"`` / ``"absent"`` / ``"unavailable"``.
     ``find_stray_stores`` — knowledge-store stems not backed by a registered key.
+    ``find_duplicate_learning_ids`` — stores whose learning ids are aliased.
     ``knowledge_dir`` — the knowledge directory path (env-aware, no side effects).
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Literal
 
@@ -96,3 +98,49 @@ def find_stray_stores(
             continue
         stray.append(path.stem)
     return sorted(stray)
+
+
+def find_duplicate_learning_ids(directory: str | None = None) -> dict[str, list[str]]:
+    """Map each knowledge-store stem to the learning ids it carries more than once.
+
+    Aliased ids are an integrity fault, not cosmetics: dedup, recall counts, the
+    positional embedding sidecar, and any recorded reference all key on the id, so
+    two learnings sharing one make both unaddressable. Detection lives here — core,
+    filesystem-only, zero imports from ``extensions/`` (ADR-003) — so the CLI and
+    any future core caller can never disagree about the same file, exactly as with
+    ``find_stray_stores``.
+
+    Reads each store as raw JSON rather than validating it, so an unreadable or
+    unexpectedly-shaped file is skipped (other checks report those) instead of
+    aborting the scan. Stores with no duplicates are absent from the result.
+
+    No side effects.
+    """
+    kdir = knowledge_dir(directory)
+    if not kdir.is_dir():
+        return {}
+    duplicates: dict[str, list[str]] = {}
+    for path in sorted(kdir.glob("*.json")):
+        try:
+            raw = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        learnings = raw.get("learnings") if isinstance(raw, dict) else None
+        if not isinstance(learnings, list):
+            continue
+        seen: set[str] = set()
+        aliased: set[str] = set()
+        for entry in learnings:
+            if not isinstance(entry, dict):
+                continue
+            learning_id = entry.get("id")
+            # An unset id is not an alias: only assigned ids can collide.
+            if not isinstance(learning_id, str) or not learning_id:
+                continue
+            if learning_id in seen:
+                aliased.add(learning_id)
+            else:
+                seen.add(learning_id)
+        if aliased:
+            duplicates[path.stem] = sorted(aliased)
+    return duplicates

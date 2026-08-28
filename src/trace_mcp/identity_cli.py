@@ -1,7 +1,7 @@
 """``trace-mcp identity`` — provenance-honest project-identity migration tooling (ADR-006 S6).
 
 Core module (stdlib + core identity types; the learn extension is imported lazily
-inside ``merge-stores`` only, per ADR-003). Seven subcommands turn the enforcement
+inside ``merge-stores`` only, per ADR-003). Eight subcommands turn the enforcement
 machinery of ADR-006 into an operator can actually run against an existing store
 that predates canonical identity:
 
@@ -10,6 +10,7 @@ that predates canonical identity:
     apply         mint the human-approved plan into the registry
     check         report drift; non-zero exit on findings
     merge-stores  consolidate an alias group's knowledge stores (reversible)
+    repair-ids    renumber aliased learning ids in one store (reversible)
     adopt         re-home an ``auto`` session into a real project (append-shaped)
     bundle        export one project as a self-contained tarball
 
@@ -34,15 +35,19 @@ import asyncio
 import hashlib
 import json
 import os
+import shutil
 import sys
 import tarfile
 from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from trace_mcp import identity_report
 from trace_mcp import project_identity as pident
+
+if TYPE_CHECKING:  # type-only: the learn extension stays a runtime-optional import (ADR-003)
+    from trace_mcp.extensions.learn.models import KnowledgeStore
 
 # ── Paths ──────────────────────────────────────────────────────────────────
 
@@ -401,6 +406,18 @@ def cmd_check(args: argparse.Namespace, out) -> int:
     if stray:
         findings.append(f"{len(stray)} knowledge store(s) not backed by a registered key: {', '.join(stray)}")
 
+    # Aliased learning ids are an integrity fault independent of the registry, so
+    # this runs even before any project is enrolled. Writes to an affected store
+    # are refused (INV-12), which makes this finding actionable rather than
+    # advisory: the named command is the way back to a writable store.
+    duplicate_ids = identity_report.find_duplicate_learning_ids()
+    if duplicate_ids:
+        detail = "; ".join(f"{stem}: {', '.join(ids)}" for stem, ids in sorted(duplicate_ids.items()))
+        findings.append(
+            f"{len(duplicate_ids)} knowledge store(s) carry duplicate learning ids ({detail}) — "
+            "writes to them are refused until `trace-mcp identity repair-ids <key>` renumbers them"
+        )
+
     if registry is not None:
         unknown_labels: dict[str, int] = {}
         for path in _iter_session_files():
@@ -461,6 +478,29 @@ def _preflight_merge(paths: list[Path], out) -> bool:
                 file=out,
             )
             return False
+    return True
+
+
+def _preflight_target_quiescent(path: Path, out) -> bool:
+    """True when *path* has not been touched inside the writer-liveness window.
+
+    Narrower than ``_preflight_merge`` on purpose: it looks only at the file being
+    repaired, so an unrelated project's stale lock cannot block the repair. Lock
+    ownership is enforced by the store lock, which has holder-liveness semantics
+    this timestamp check cannot express.
+    """
+    threshold = float(os.environ.get("TRACE_MERGE_MIN_AGE_SEC", "5"))
+    try:
+        age = datetime.now(UTC).timestamp() - path.stat().st_mtime
+    except OSError:
+        return True
+    if age < threshold:
+        print(
+            f"Error: {path.name} was modified {age:.1f}s ago (< {threshold}s) — a writer may be "
+            "active. Re-run in a moment.",
+            file=out,
+        )
+        return False
     return True
 
 
@@ -562,6 +602,19 @@ def cmd_merge_stores(args: argparse.Namespace, out) -> int:
                 except learn_store.StoreLoadError as exc:
                     print(f"Error: target store for '{key}' is unreadable ({exc}). Repair or move it first.", file=out)
                     return 1
+                # Refuse an aliased TARGET before grafting anything: the merge
+                # would write the store (spreading the aliasing) and consume the
+                # sources into premerge backups, turning a one-command repair
+                # into a hand reconstruction (INV-12).
+                target_duplicates = target_store.duplicate_learning_ids()
+                if target_duplicates:
+                    print(
+                        f"Error: target store for '{key}' carries duplicate learning id(s) "
+                        f"({', '.join(target_duplicates)}). Run `trace-mcp identity repair-ids {key}` "
+                        "first — merging would write the aliased store and consume the sources.",
+                        file=out,
+                    )
+                    return 1
                 before_target = len(target_store.learnings)
                 merge_records: list[dict[str, Any]] = []
                 for src in source_paths:
@@ -634,6 +687,198 @@ def cmd_merge_stores(args: argparse.Namespace, out) -> int:
 
     if not merged_any:
         print("Nothing to merge: no aliased source stores found for the target key(s).", file=out)
+    return 0
+
+
+# ── repair-ids ─────────────────────────────────────────────────────────────
+
+
+# Fields that could structurally hold an identifier. A duplicated id appearing in
+# one of these is a machine-resolvable reference that renumbering would silently
+# repoint, so it blocks the repair. Free text (`content`) is deliberately NOT in
+# this set: prose is not resolved by any code path, and refusing on a passing
+# mention would leave a store permanently unwritable with hand-editing the JSON
+# as the only escape — the guard would have created a worse trap than the defect.
+_REFERENCE_FIELDS = ("source_session", "source_event", "corrects_event_ids", "tags")
+
+
+def _find_id_references(store: KnowledgeStore, duplicates: set[str]) -> tuple[list[str], list[str]]:
+    """Split references to duplicated ids into blocking and advisory.
+
+    Renumbering is only safe when nothing resolvable points at the id being
+    changed: a duplicated id named one of two records, and nothing on disk says
+    which — so a structured reference refuses the repair rather than guessing, in
+    the spirit of alias-table-first label repair (specification §8.5). A mention
+    inside free text is reported so the operator can update the wording, but it
+    never blocks, because no code resolves it and the pre-repair backup preserves
+    the original ids either way.
+
+    Pure. Returns ``(blocking, advisory)``, each a list of human-readable hits.
+    """
+    blocking: list[str] = []
+    advisory: list[str] = []
+    for lrn in store.learnings:
+        for field in _REFERENCE_FIELDS:
+            value = getattr(lrn, field, None)
+            items = value if isinstance(value, list) else [value]
+            for item in items:
+                if isinstance(item, str) and item in duplicates:
+                    hit = f"{lrn.id}.{field} == {item}"
+                    if hit not in blocking:
+                        blocking.append(hit)
+        content = getattr(lrn, "content", "")
+        if isinstance(content, str):
+            for dup in sorted(duplicates):
+                if dup in content:
+                    hit = f"{lrn.id}.content mentions {dup}"
+                    if hit not in advisory:
+                        advisory.append(hit)
+    return blocking, advisory
+
+
+def cmd_repair_ids(args: argparse.Namespace, out) -> int:
+    """Renumber aliased learning ids in one project's store (reversible).
+
+    The first occurrence of each duplicated id keeps it and every later one takes
+    a fresh id from the store's monotonic counter — array order, so the outcome
+    is deterministic and needs no timestamp heuristics. The original file is
+    copied to ``*.json.prerepair-<date>`` before the write and the mapping is
+    recorded in the append-only migrations log, so the repair is itself auditable.
+
+    Requires a snapshot marker, refuses while a writer may be active, and holds
+    the store lock across the whole load→renumber→save span.
+
+    Side effects: writes the store, a pre-repair backup, and a migrations record.
+    """
+    if not _require_snapshot(out):
+        return 1
+    try:
+        from trace_mcp.extensions.learn import store as learn_store
+    except ImportError as exc:
+        print(f"Error: the trace-learn extension is unavailable ({exc}); cannot repair ids.", file=out)
+        return 1
+
+    try:
+        registry = pident.get_registry_cached()
+    except pident.RegistryUnavailableError as exc:
+        # A damaged registry is fail-closed everywhere else; repairing a store
+        # while identity itself is unreadable could target the wrong file.
+        print(f"Error: registry is unreadable ({exc}); fix it before repairing a store.", file=out)
+        return 1
+
+    knowledge = identity_report.knowledge_dir()
+    key = registry.resolve(args.key) if registry is not None else None
+    if key is None:
+        # `identity check` reports duplicates for EVERY store on disk, including
+        # stray, quarantine, and not-yet-enrolled ones. If the repair could only
+        # reach registered projects, those stores would be flagged and refused for
+        # all writes with no supported fix, so fall back to the canonical store
+        # stem whenever a file actually exists for it.
+        try:
+            candidate = pident.canonical_project_key(args.key)
+        except pident.ProjectKeyError:
+            print(f"Error: '{args.key}' is not a usable project name.", file=out)
+            return 1
+        if not (knowledge / f"{candidate}.json").is_file():
+            print(
+                f"Error: '{args.key}' resolves to no registered project and no knowledge store "
+                f"'{candidate}.json' exists.",
+                file=out,
+            )
+            return 1
+        key = candidate
+        print(f"  '{args.key}' is not registered; repairing the store file '{key}.json' directly.", file=out)
+    elif key != args.key:
+        print(f"  '{args.key}' resolved to registered key '{key}'.", file=out)
+
+    path = knowledge / f"{key}.json"
+    if not path.is_file():
+        print(f"Nothing to repair: no knowledge store for '{key}'.", file=out)
+        return 0
+    if not identity_report.find_duplicate_learning_ids().get(path.stem):
+        print(f"identity repair-ids: no aliased learning ids in '{key}.json' — nothing to do.", file=out)
+        return 0
+
+    # Quiescence is checked on the TARGET only. The merge preflight refuses when
+    # ANY lock file exists in the knowledge directory, which cannot tell a stale
+    # lock from a live one and trips on unrelated projects — acceptable for an
+    # optional consolidation, but here it would let one crashed writer wedge the
+    # only path out of a store that refuses every write. Lock contention is left
+    # to the store lock itself, which steals a provably-dead holder's lock and
+    # fails closed on a live one.
+    if not _preflight_target_quiescent(path, out):
+        return 1
+
+    try:
+        with learn_store.project_lock(key):
+            try:
+                store = learn_store.load_store(key)
+            except learn_store.StoreLoadError as exc:
+                print(f"Error: store for '{key}' is unreadable ({exc}). Repair or move it first.", file=out)
+                return 1
+
+            duplicates = set(store.duplicate_learning_ids())
+            blocking, advisory = _find_id_references(store, duplicates)
+            if blocking:
+                print(
+                    f"Error: '{key}.json' is ambiguous — a duplicated id is referenced elsewhere, "
+                    "so renumbering would silently repoint the reference:",
+                    file=out,
+                )
+                for hit in blocking:
+                    print(f"    {hit}", file=out)
+                print("  Resolve those references by hand, then re-run. Refusing to guess.", file=out)
+                return 1
+            for hit in advisory:
+                print(f"  note: {hit} — free text is not repointed; review the wording after the repair.", file=out)
+
+            sha_before = _sha256(path)
+            renumbered: list[dict[str, str]] = []
+            seen: set[str] = set()
+            for lrn in store.learnings:
+                if lrn.id in seen:
+                    new_id = store.next_learning_id()
+                    renumbered.append({"old": lrn.id, "new": new_id})
+                    lrn.id = new_id
+                seen.add(lrn.id)
+
+            if args.dry_run:
+                print(
+                    f"identity repair-ids (dry run): '{key}.json' would renumber {len(renumbered)} learning(s):",
+                    file=out,
+                )
+                for mapping in renumbered:
+                    print(f"    {mapping['old']} → {mapping['new']}", file=out)
+                return 0
+
+            backup = path.with_name(f"{path.name}.prerepair-{_today()}")
+            suffix = 1
+            while backup.exists():
+                backup = path.with_name(f"{path.name}.prerepair-{_today()}-{suffix}")
+                suffix += 1
+            shutil.copy2(path, backup)
+
+            # save_store refuses an aliased store (INV-12); by here the ids are
+            # unique, so this write is exactly what lifts the refusal.
+            learn_store.save_store(store)
+    except TimeoutError as exc:
+        print(f"Error: could not acquire the store lock for '{key}' ({exc}). Aborting.", file=out)
+        return 1
+
+    _append_migration(
+        {
+            "op": "repair-ids",
+            "key": key,
+            "renumbered": renumbered,
+            "sha256_before": sha_before,
+            "sha256_after": _sha256(path),
+            "prerepair_file": backup.name,
+        }
+    )
+    print(f"  repaired '{key}.json': renumbered {len(renumbered)} aliased learning id(s)", file=out)
+    for mapping in renumbered:
+        print(f"    {mapping['old']} → {mapping['new']}", file=out)
+    print(f"  pre-repair copy kept as {backup.name}", file=out)
     return 0
 
 
@@ -870,6 +1115,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_merge = sub.add_parser("merge-stores", help="consolidate an alias group's knowledge stores (reversible)")
     p_merge.add_argument("--key", default=None, help="a single canonical key to merge (default: every registered key)")
 
+    p_repair = sub.add_parser("repair-ids", help="renumber aliased learning ids in one project's store")
+    p_repair.add_argument("key", help="canonical key (or any alias/display label) of the project to repair")
+    p_repair.add_argument("--dry-run", action="store_true", help="report the renumbering without writing")
+
     p_adopt = sub.add_parser("adopt", help="re-home an 'auto' session into a real project")
     p_adopt.add_argument("session_id", help="the auto session to adopt")
     p_adopt.add_argument("--project", required=True, help="target project name")
@@ -888,6 +1137,7 @@ _COMMANDS = {
     "apply": cmd_apply,
     "check": cmd_check,
     "merge-stores": cmd_merge_stores,
+    "repair-ids": cmd_repair_ids,
     "adopt": cmd_adopt,
     "bundle": cmd_bundle,
 }
