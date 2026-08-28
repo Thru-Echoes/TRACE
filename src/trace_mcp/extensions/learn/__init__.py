@@ -39,6 +39,37 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def _aliased_store_error(exc: Exception, project: str | None) -> str:
+    """Response for a write refused because the store's learning ids are aliased.
+
+    The refusal composes a message naming the repair command; a bare
+    ``except Exception`` would discard it and hand back a generic failure, so the
+    first person to meet the guard would never learn a fix exists (INV-12).
+    """
+    logger.error("Refused a write to %r: %s", project, exc)
+    return json.dumps({"error": "duplicate_learning_ids", "detail": str(exc), "project": project})
+
+
+def _persist_recall_bookkeeping(ks: KnowledgeStore, project: str) -> str | None:
+    """Persist recall counts and lazily-computed embeddings; return a notice if skipped.
+
+    Recall is a read for its caller but writes bookkeeping back. On a store whose
+    ids are aliased that write is refused (INV-12) — and failing the recall there
+    would invert the guard's own guarantee, since reads are meant to keep working
+    so the store stays searchable until it is repaired. The bookkeeping is
+    therefore dropped rather than forced, and the reason is returned for the
+    response instead of being swallowed.
+
+    Side effect: writes the store unless the write is refused.
+    """
+    try:
+        store.save_store(ks)
+        return None
+    except store.DuplicateLearningIdError as exc:
+        logger.warning("Recall bookkeeping not persisted for %r: %s", project, exc)
+        return f"Recall counts and embeddings were not saved: {exc}"
+
+
 def _resolve_project(project: str | None) -> tuple[str, str | None]:
     """Resolve *project* against the process pin; ``(label, None)`` or ``("", error-JSON)``.
 
@@ -282,7 +313,7 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                 decay_config=_decay_params,
             )
             if results or embedded:
-                store.save_store(ks)
+                _persist_recall_bookkeeping(ks, project)
             return results
 
     async def _extract_hook(project: str, session_id: str) -> list[str]:
@@ -400,15 +431,19 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                     backend=backend,
                     decay_config=_decay_params,
                 )
+                bookkeeping_notice: str | None = None
                 if results or embedded:
-                    store.save_store(ks)
+                    bookkeeping_notice = _persist_recall_bookkeeping(ks, project)
                 payload: dict[str, Any] = {
                     "project": project,
                     "results": results,
                     "total": len(results),
                     "backend": matching.describe_backend(backend),
                 }
-                if notices := _key_notices(_eff):
+                notices = _key_notices(_eff)
+                if bookkeeping_notice:
+                    notices.append(bookkeeping_notice)
+                if notices:
                     payload["warnings"] = notices
                 return json.dumps(payload)
         except pident.RegistryUnavailableError as exc:
@@ -431,6 +466,8 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                         "project": project,
                     }
                 )
+            if isinstance(exc, store.DuplicateLearningIdError):
+                return _aliased_store_error(exc, project)
             logger.exception("Error recalling learnings")
             return json.dumps({"error": "Failed to recall learnings", "project": project})
 
@@ -524,6 +561,8 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                         "project": project,
                     }
                 )
+            if isinstance(exc, store.DuplicateLearningIdError):
+                return _aliased_store_error(exc, project)
             logger.exception("Error adding learning")
             return json.dumps({"error": "Failed to add learning", "project": project})
 
@@ -575,6 +614,8 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                     return json.dumps({"removed": False, "error": f"Learning '{learning_id}' not found"})
                 store.save_store(ks)
                 return json.dumps({"removed": True, "learning_id": learning_id})
+        except store.DuplicateLearningIdError as exc:
+            return _aliased_store_error(exc, project)
         except Exception:
             logger.exception("Error removing learning")
             return json.dumps({"error": "Failed to remove learning", "project": project})
@@ -673,5 +714,7 @@ def register(mcp: FastMCP, storage: TraceStorage) -> None:
                         "project": project,
                     }
                 )
+            if isinstance(exc, store.DuplicateLearningIdError):
+                return _aliased_store_error(exc, project)
             logger.exception("Error extracting learnings")
             return json.dumps({"error": "Failed to extract learnings", "project": project})

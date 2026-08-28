@@ -620,3 +620,235 @@ class TestSnapshotExternalKnowledge:
             assert any("waggle.json" in n for n in tar.getnames()), (
                 "the external knowledge store was counted but not archived"
             )
+
+
+def _write_duplicated_store(
+    home: Path,
+    stem: str,
+    *,
+    project: str | None = None,
+    extra: list[dict] | None = None,
+) -> Path:
+    """A store carrying the live-data shape: two learnings sharing one id."""
+    learnings = [
+        {"id": "lrn_001", "content": "unique first", "category": "learning"},
+        {"id": "lrn_002", "content": "kept — first occurrence", "category": "learning"},
+        {"id": "lrn_003", "content": "unique third", "category": "learning"},
+        {"id": "lrn_002", "content": "renumbered — later occurrence", "category": "gotcha"},
+    ]
+    if extra:
+        learnings.extend(extra)
+    path = home / "knowledge" / f"{stem}.json"
+    path.write_text(json.dumps({"project": project or stem, "learnings": learnings}, indent=2))
+    return path
+
+
+class TestRepairIds:
+    def _prepare(self) -> None:
+        _run("snapshot")
+        _enroll("trace-mcp", display="trace-mcp", aliases=["TRACE"])
+
+    def test_requires_a_snapshot_marker(self, _isolated_home: Path) -> None:
+        _enroll("trace-mcp")
+        _write_duplicated_store(_isolated_home, "trace-mcp")
+        code, out = _run("repair-ids", "trace-mcp")
+        assert code == 1 and "snapshot" in out.lower()
+
+    def test_unknown_key_errors(self, _isolated_home: Path) -> None:
+        self._prepare()
+        code, out = _run("repair-ids", "never-enrolled")
+        assert code == 1 and "resolves to no registered project" in out
+
+    def test_clean_store_is_a_no_op(self, _isolated_home: Path) -> None:
+        self._prepare()
+        _write_store(_isolated_home, "trace-mcp", learnings=["a", "b"], project="trace-mcp")
+        code, out = _run("repair-ids", "trace-mcp")
+        assert code == 0 and "no aliased" in out.lower()
+        assert not list((_isolated_home / "knowledge").glob("*.prerepair-*"))
+
+    def test_renumbers_later_duplicates_and_keeps_the_first(self, _isolated_home: Path) -> None:
+        self._prepare()
+        path = _write_duplicated_store(_isolated_home, "trace-mcp", project="trace-mcp")
+
+        code, out = _run("repair-ids", "trace-mcp")
+        assert code == 0, out
+
+        repaired = json.loads(path.read_text())
+        ids = [lrn["id"] for lrn in repaired["learnings"]]
+        assert len(ids) == len(set(ids)), "duplicates survived the repair"
+        by_content = {lrn["content"]: lrn["id"] for lrn in repaired["learnings"]}
+        assert by_content["kept — first occurrence"] == "lrn_002", "first occurrence must keep its id"
+        assert by_content["renumbered — later occurrence"] == "lrn_004", "later duplicate takes a fresh id"
+        assert repaired["next_id"] == 5, "the counter must advance past the ids it handed out"
+
+    def test_writes_a_prerepair_backup(self, _isolated_home: Path) -> None:
+        self._prepare()
+        path = _write_duplicated_store(_isolated_home, "trace-mcp", project="trace-mcp")
+        before = path.read_bytes()
+
+        assert _run("repair-ids", "trace-mcp")[0] == 0
+        backups = list((_isolated_home / "knowledge").glob("trace-mcp.json.prerepair-*"))
+        assert len(backups) == 1, "the pre-repair copy is the operator's undo"
+        assert backups[0].read_bytes() == before
+
+    def test_records_the_repair_in_the_migrations_log(self, _isolated_home: Path) -> None:
+        self._prepare()
+        _write_duplicated_store(_isolated_home, "trace-mcp", project="trace-mcp")
+        assert _run("repair-ids", "trace-mcp")[0] == 0
+
+        records = [
+            json.loads(line) for line in (_isolated_home / "migrations.jsonl").read_text().splitlines() if line.strip()
+        ]
+        repair = [r for r in records if r.get("op") == "repair-ids"]
+        assert len(repair) == 1, "the repair must be recorded in the append-only log"
+        entry = repair[0]
+        assert entry["key"] == "trace-mcp"
+        assert entry["renumbered"] == [{"old": "lrn_002", "new": "lrn_004"}]
+        assert entry["sha256_before"] != entry["sha256_after"]
+
+    def test_dry_run_reports_without_writing(self, _isolated_home: Path) -> None:
+        self._prepare()
+        path = _write_duplicated_store(_isolated_home, "trace-mcp", project="trace-mcp")
+        before = path.read_bytes()
+
+        code, out = _run("repair-ids", "trace-mcp", "--dry-run")
+        assert code == 0
+        assert "lrn_002" in out and "lrn_004" in out
+        assert path.read_bytes() == before, "dry run must not write"
+        assert not list((_isolated_home / "knowledge").glob("*.prerepair-*"))
+        logged = (_isolated_home / "migrations.jsonl").read_text()
+        assert "repair-ids" not in logged, "a dry run must record nothing"
+
+    def test_refuses_when_a_duplicated_id_is_referenced_elsewhere(self, _isolated_home: Path) -> None:
+        """Ambiguity is refused, never guessed: which of the two did the reference mean?"""
+        self._prepare()
+        path = _write_duplicated_store(
+            _isolated_home,
+            "trace-mcp",
+            project="trace-mcp",
+            extra=[
+                {
+                    "id": "lrn_005",
+                    "content": "supersedes lrn_002",
+                    "category": "correction",
+                    "corrects_event_ids": ["lrn_002"],
+                }
+            ],
+        )
+        before = path.read_bytes()
+
+        code, out = _run("repair-ids", "trace-mcp")
+        assert code == 1
+        assert "lrn_002" in out and "ambiguous" in out.lower()
+        assert path.read_bytes() == before, "an ambiguous store must be left untouched"
+
+    def test_repaired_store_accepts_writes_again(self, _isolated_home: Path) -> None:
+        self._prepare()
+        _write_duplicated_store(_isolated_home, "trace-mcp", project="trace-mcp")
+        assert _run("repair-ids", "trace-mcp")[0] == 0
+
+        from trace_mcp.extensions.learn import store as learn_store
+
+        ks = learn_store.load_store("trace-mcp")
+        added = learn_store.add_learning(ks, content="post-repair write")
+        learn_store.save_store(ks)
+        assert added.id == "lrn_005", "the counter continues past the renumbered ids"
+
+
+class TestDuplicateIdReporting:
+    def test_check_flags_duplicate_learning_ids(self, _isolated_home: Path) -> None:
+        _enroll("trace-mcp")
+        _write_duplicated_store(_isolated_home, "trace-mcp", project="trace-mcp")
+        code, out = _run("check")
+        assert code == 1
+        assert "lrn_002" in out and "duplicate" in out.lower()
+        assert "repair-ids" in out
+
+    def test_merge_stores_refuses_a_duplicated_target(self, _isolated_home: Path) -> None:
+        _run("snapshot")
+        _enroll("trace-mcp", display="trace-mcp", aliases=["TRACE"])
+        target = _write_duplicated_store(_isolated_home, "trace-mcp", project="trace-mcp")
+        _write_store(_isolated_home, "trace", learnings=["source only"], project="TRACE")
+        before = target.read_bytes()
+
+        code, out = _run("merge-stores", "--key", "trace-mcp")
+        assert code == 1
+        assert "repair-ids" in out
+        assert target.read_bytes() == before, "target must not be rewritten"
+        assert (_isolated_home / "knowledge" / "trace.json").exists(), "source must not be consumed"
+
+
+class TestRepairIdsReachesEveryFlaggedStore:
+    """`check` reports duplicates for every store on disk, so the repair must be
+    able to reach the same population — otherwise a flagged store is refused for
+    all writes with no supported fix."""
+
+    def _prepare(self) -> None:
+        _run("snapshot")
+        _enroll("registered-one")
+
+    def test_repairs_a_store_that_is_not_registered(self, _isolated_home: Path) -> None:
+        self._prepare()
+        path = _write_duplicated_store(_isolated_home, "stray-store", project="stray-store")
+        assert _run("check")[0] == 1, "precondition: check flags the stray store"
+
+        code, out = _run("repair-ids", "stray-store")
+        assert code == 0, out
+        ids = [lrn["id"] for lrn in json.loads(path.read_text())["learnings"]]
+        assert len(ids) == len(set(ids))
+
+    def test_unknown_name_with_no_store_still_errors(self, _isolated_home: Path) -> None:
+        self._prepare()
+        code, out = _run("repair-ids", "never-heard-of-it")
+        assert code == 1 and "resolves to no registered project" in out
+
+    def test_an_unrelated_projects_lock_does_not_block_the_repair(self, _isolated_home: Path) -> None:
+        """A stale lock belonging to another store must not wedge the only fix path."""
+        self._prepare()
+        _write_duplicated_store(_isolated_home, "target", project="target")
+        (_isolated_home / "knowledge" / "someone-else.json.lock").write_text("held")
+
+        code, out = _run("repair-ids", "target")
+        assert code == 0, out
+
+
+class TestRepairIdsReferenceScan:
+    def _prepare(self) -> None:
+        _run("snapshot")
+        _enroll("proj")
+
+    def test_a_structured_reference_refuses(self, _isolated_home: Path) -> None:
+        self._prepare()
+        path = _write_duplicated_store(
+            _isolated_home,
+            "proj",
+            project="proj",
+            extra=[
+                {
+                    "id": "lrn_005",
+                    "content": "unrelated text",
+                    "category": "correction",
+                    "corrects_event_ids": ["lrn_002"],
+                }
+            ],
+        )
+        before = path.read_bytes()
+        code, out = _run("repair-ids", "proj")
+        assert code == 1 and "ambiguous" in out.lower() and "lrn_002" in out
+        assert path.read_bytes() == before
+
+    def test_a_prose_mention_warns_but_repairs(self, _isolated_home: Path) -> None:
+        """Free text is not a machine-resolvable reference; refusing on it would
+        leave a store permanently unwritable with hand-editing the only escape."""
+        self._prepare()
+        path = _write_duplicated_store(
+            _isolated_home,
+            "proj",
+            project="proj",
+            extra=[{"id": "lrn_005", "content": "this supersedes lrn_002 in prose", "category": "learning"}],
+        )
+        code, out = _run("repair-ids", "proj")
+        assert code == 0, out
+        assert "lrn_005" in out and "mentions" in out.lower(), "the prose mention must still be reported"
+        ids = [lrn["id"] for lrn in json.loads(path.read_text())["learnings"]]
+        assert len(ids) == len(set(ids))
