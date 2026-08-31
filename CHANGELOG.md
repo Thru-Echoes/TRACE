@@ -12,6 +12,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Streamable HTTP transport.** `trace-mcp --transport streamable-http
+  [--host 127.0.0.1] [--port 8765]` serves the MCP tool surface at
+  `http://HOST:PORT/mcp` for consumers that connect to a running endpoint
+  instead of spawning a stdio process — agent runtimes with an MCP service
+  registry, or any client on the same machine that outlives one editor
+  session. Default behavior is unchanged (`trace-mcp` with no flags still
+  serves stdio); an unknown flag or transport exits non-zero instead of
+  silently starting a stdio server. Binding a non-loopback host logs a loud
+  warning, since TRACE tools carry no authentication layer. One caveat is
+  inherent to the current design: the server keeps a single current-session
+  pointer, so concurrent HTTP clients that do not pass `session_id`
+  explicitly on every call will interleave into one session — pass
+  `session_id`, or run one server instance per consumer.
+
 ### Fixed
 
 - **Learning ids are no longer reused after a delete.** `KnowledgeStore` now
