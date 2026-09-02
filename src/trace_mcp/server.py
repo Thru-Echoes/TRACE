@@ -7,6 +7,7 @@ research workflows.
 
 from __future__ import annotations
 
+import argparse
 import json
 import logging
 import os
@@ -1014,10 +1015,79 @@ def main() -> None:
 
         raise SystemExit(validate_main(sys.argv[2:]))
 
+    args = _parse_server_args(sys.argv[1:])
+
     _load_extensions()
 
-    logger.info("Starting TRACE MCP server v%s", __version__)
+    if args.transport == "streamable-http":
+        _LOOPBACK_HOSTS = ("127.0.0.1", "localhost", "::1")
+        if args.host not in _LOOPBACK_HOSTS:
+            # Loud, not fatal: TRACE tools carry no authentication layer, so a
+            # non-loopback bind hands session write access to the network. An
+            # operator doing this deliberately (e.g. inside a container) should
+            # see exactly what they opted into.
+            logger.warning(
+                "Binding to %s exposes TRACE tools to the network WITHOUT authentication; "
+                "prefer 127.0.0.1 and a local consumer unless this host is otherwise isolated.",
+                args.host,
+            )
+        mcp.settings.host = args.host
+        mcp.settings.port = args.port
+        logger.info(
+            "Starting TRACE MCP server v%s at http://%s:%d%s (transport=streamable-http)",
+            __version__,
+            args.host,
+            args.port,
+            mcp.settings.streamable_http_path,
+        )
+        mcp.run(transport="streamable-http")
+        return
+
+    logger.info("Starting TRACE MCP server v%s (transport=stdio)", __version__)
     mcp.run(transport="stdio")
+
+
+def _parse_server_args(argv: list[str]) -> argparse.Namespace:
+    """Parse server-mode CLI flags for the default (serve) invocation.
+
+    Inputs: ``argv`` without the program name, after the named subcommands
+    (``init``, ``identity``, ``doctor``, ...) have been dispatched. Outputs: a
+    namespace with ``transport``, ``host``, and ``port``. Side effects: none on
+    valid input; argparse prints usage and exits non-zero on an unknown flag,
+    which is the fail-loud behavior we want: a typo'd invocation must never
+    silently start a stdio server that a Streamable HTTP consumer then waits on.
+
+    ``--host`` and ``--port`` only take effect with
+    ``--transport streamable-http``; the stdio transport has no socket. The
+    HTTP path is FastMCP's ``streamable_http_path`` default (``/mcp``).
+    """
+    parser = argparse.ArgumentParser(
+        prog="trace-mcp",
+        description=(
+            "Run the TRACE MCP server. With no flags, serves over stdio for a "
+            "spawning MCP client. --transport streamable-http serves HTTP at "
+            "http://HOST:PORT/mcp for clients that connect over the network, "
+            "such as an agent runtime's MCP service registry."
+        ),
+    )
+    parser.add_argument(
+        "--transport",
+        choices=("stdio", "streamable-http"),
+        default="stdio",
+        help="MCP transport to serve (default: stdio).",
+    )
+    parser.add_argument(
+        "--host",
+        default="127.0.0.1",
+        help="Bind address for streamable-http (default: 127.0.0.1).",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8765,
+        help="TCP port for streamable-http (default: 8765).",
+    )
+    return parser.parse_args(argv)
 
 
 if __name__ == "__main__":

@@ -143,6 +143,33 @@ Two parts of that config are easy to omit and worth keeping:
 - **The three `--with` packages are what make this a 22-tool server.** They are the optional dependencies of the trace-learn extension. Without them the server still starts and still records provenance, but the extension does not load and you get the 17 core tools with no error to tell you why.
 - **`TRACE_PROJECT` pins the process to one project.** With it set you omit `project` from `trace_start_session`, and cross-project reads and writes fail closed. Without it, pass `project="..."` explicitly on every session start — an unpinned server rejects the call rather than guessing.
 
+### Serve over Streamable HTTP
+
+The config above spawns TRACE as a stdio subprocess, which is what editor-style
+clients do. A client that instead connects to an endpoint it did not spawn (an
+agent runtime with an MCP service registry, or any consumer that outlives one
+editor session) needs the HTTP transport:
+
+```bash
+trace-mcp --transport streamable-http --port 8765   # serves http://127.0.0.1:8765/mcp
+```
+
+`--host` (default `127.0.0.1`) and `--port` (default `8765`) apply only to this
+transport. Plain `trace-mcp` still serves stdio, and an unknown flag or
+transport exits non-zero rather than falling back to stdio while an HTTP
+consumer waits on a socket that never opens.
+
+Two things to know before pointing a runtime at it:
+
+- **There is no authentication layer.** Anything that can reach the port can
+  write to your session store, so keep the bind on loopback unless the host is
+  isolated by other means. A non-loopback bind logs a warning at startup.
+- **Pass `session_id` on every call** when more than one client shares the
+  endpoint. The process keeps a single current-session pointer (see [Known
+  limitations](#known-limitations)), so concurrent clients that rely on it
+  interleave into one session. One server instance per consumer avoids the
+  question entirely.
+
 ### Install hooks
 
 `trace-mcp-init` installs the host-side enforcement: hook scripts under `.claude/hooks/`, registrations merged into `.claude/settings.json`, and a marker block appended to `CLAUDE.md`.
