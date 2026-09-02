@@ -2,14 +2,14 @@
 
 Two layers:
 
-1. Unit tests for `_parse_server_args` — defaults, explicit flags, and the
+1. Unit tests for `_parse_server_args`: defaults, explicit flags, and the
    fail-loud exits on unknown transports or flags (a typo'd invocation must
    never silently start a stdio server that an HTTP consumer then waits on).
 2. One end-to-end test that starts the real server as a subprocess on an
    ephemeral port and drives a full session lifecycle (start → annotate → end)
    through the `mcp` Streamable HTTP client, then asserts the session JSON
    landed in the isolated sessions dir. This is the consumer's-eye check for
-   agent runtimes that reach MCP services over HTTP — registry-style consumers
+   agent runtimes that reach MCP services over HTTP: registry-style consumers
    that connect to a running endpoint instead of spawning a stdio process.
 
 Side effects: the E2E test binds a loopback TCP port and spawns one
@@ -53,9 +53,7 @@ class TestParseServerArgs:
         assert args.port == 8765
 
     def test_streamable_http_with_host_and_port(self) -> None:
-        args = _parse_server_args(
-            ["--transport", "streamable-http", "--host", "0.0.0.0", "--port", "9000"]
-        )
+        args = _parse_server_args(["--transport", "streamable-http", "--host", "0.0.0.0", "--port", "9000"])
         assert args.transport == "streamable-http"
         assert args.host == "0.0.0.0"
         assert args.port == 9000
@@ -213,9 +211,7 @@ async def test_streamable_http_full_session_lifecycle(tmp_path: Path) -> None:
                     session.call_tool("trace_end_session", {"session_id": session_id}),
                     timeout=_REQUEST_TIMEOUT,
                 )
-                assert session_id in _result_text(end_result) or "ended" in _result_text(
-                    end_result
-                )
+                assert session_id in _result_text(end_result) or "ended" in _result_text(end_result)
 
         session_files = sorted(sessions_dir.glob("trace_*.json"))
         assert session_files, f"No session file written under {sessions_dir}"

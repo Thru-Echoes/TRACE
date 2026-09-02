@@ -1054,7 +1054,7 @@ def _parse_server_args(argv: list[str]) -> argparse.Namespace:
     (``init``, ``identity``, ``doctor``, ...) have been dispatched. Outputs: a
     namespace with ``transport``, ``host``, and ``port``. Side effects: none on
     valid input; argparse prints usage and exits non-zero on an unknown flag,
-    which is the fail-loud behavior we want — a typo'd invocation must never
+    which is the fail-loud behavior we want: a typo'd invocation must never
     silently start a stdio server that a Streamable HTTP consumer then waits on.
 
     ``--host`` and ``--port`` only take effect with
