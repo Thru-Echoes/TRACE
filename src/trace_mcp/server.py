@@ -1007,6 +1007,20 @@ def main() -> None:
 
         raise SystemExit(main_fleet_check(sys.argv[2:]))
 
+    if len(sys.argv) > 1 and sys.argv[1] == "import":
+        # Imported lazily like the other subcommands: an importer pulls in
+        # foreign-format models the running server must never depend on.
+        source = sys.argv[2] if len(sys.argv) > 2 else ""
+        if source == "gents":
+            from trace_mcp.importers.gents import main as gents_import_main
+
+            raise SystemExit(gents_import_main(sys.argv[3:]))
+        print(
+            f"Unknown import source {source!r}. Usage: trace-mcp import gents <timeline.json> --project NAME",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
     if len(sys.argv) > 1 and sys.argv[1] == "validate":
         # In-package validator (schema ships as package data) — the previous
         # repo-relative load of scripts/validate_session.py crashed on any
