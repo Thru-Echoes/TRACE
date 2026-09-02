@@ -170,9 +170,9 @@ Two things to know before pointing a runtime at it:
   interleave into one session. One server instance per consumer avoids the
   question entirely.
 
-[docs/integrations/gents.md](docs/integrations/gents.md) works this through end
-to end for one such runtime, including what to put in the agent's prompt so it
-knows what is worth recording.
+[docs/integrations/gents.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/integrations/gents.md)
+works this through end to end for one such runtime, including what to put in the
+agent's prompt so it knows what is worth recording.
 
 ### Install hooks
 
