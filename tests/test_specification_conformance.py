@@ -1350,3 +1350,19 @@ class TestSpecDocumentCompleteness:
         assert "0.2.0" in spec_text
         assert "0.3.0" in spec_text
         assert "0.4.1" in spec_text
+
+
+def test_spec_documents_decision_confidence(spec_text: str) -> None:
+    assert "#### 3.6.1 Decision Confidence" in spec_text
+    assert "| `confidence` |" in spec_text
+    assert "### 4.6 Decision Confidence" in spec_text
+    assert "`trace:confidenceLow`" in spec_text and "`trace:confidenceDirection`" in spec_text
+    assert "It is never a probability that the decision was correct" in spec_text
+    assert "does not interpret" in spec_text
+    assert "verdict rule" not in spec_text.lower()
+
+
+def test_prov_mapping_registers_confidence_terms() -> None:
+    from trace_mcp.schema.prov_mapping import PROV_MAPPING
+
+    assert "DecisionData.confidence" in PROV_MAPPING and "DecisionData.confidence.evidence[]" in PROV_MAPPING
