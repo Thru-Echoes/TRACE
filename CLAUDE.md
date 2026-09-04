@@ -3,7 +3,7 @@
 > **Full documentation**: [README.md](README.md) (architecture, tools, configuration, changelog)
 > **Orientation**: [docs/ONBOARDING.md](docs/ONBOARDING.md) (dev + user onboarding) · [docs/WHAT-IS-TRACE.md](docs/WHAT-IS-TRACE.md) (non-technical explainer)
 > **Formal specification**: [docs/specification.md](docs/specification.md)
-> **Version**: 0.5.0 (package) · protocol/schema v0.5.1
+> **Version**: 0.5.1 (package) · protocol/schema v0.5.1
 > **TRACE project name**: "trace-mcp" (canonical project key: `trace-mcp`)
 
 ---
@@ -86,11 +86,12 @@ provides a `register(mcp, storage)` function.
 
 Correctness invariants are registered in [`docs/INVARIANTS.md`](docs/INVARIANTS.md)
 — one entry per invariant with its exhaustive site-set and enforcing test.
-Eleven are registered and enforced (INV-1 … INV-11), covering session writes,
+Twelve are registered and enforced (INV-1 … INV-12), covering session writes,
 completed-session immutability, decision validation, canonical-key project
 scoping, cloud-egress attestation, project/session coherence, registry writes,
 the knowledge-store lock, learn-tool label guarding, version-declaration
-consistency, and conformance of a freshly initialized project.
+consistency, conformance of a freshly initialized project, and learning-id
+uniqueness.
 `tests/test_invariants.py` runs as a dedicated CI step and **fails when a new
 site appears that is not registered** — a new `storage.update_session` caller
 outside `locked_disk_session`, a new OpenAI call site that does not

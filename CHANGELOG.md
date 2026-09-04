@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.1] — 2026-09-04
+
 ### Added
 
 - **Decision confidence.** A decision event may now carry a `confidence`
@@ -29,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   field load as before; a v0.5.0 document that used `decision.confidence` as an
   untyped extra with a different shape no longer loads. Specification §3.6.1,
   §4.6, §6; ADR 007.
+
 - **Streamable HTTP transport.** `trace-mcp --transport streamable-http
   [--host 127.0.0.1] [--port 8765]` serves the MCP tool surface at
   `http://HOST:PORT/mcp` for consumers that connect to a running endpoint
@@ -64,22 +67,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project's provenance. Pinned by a real v0.14.0 export in
   `tests/fixtures/gents_timeline_v0_14_0.json`.
 
-### Fixed
-
-- **Learning ids are no longer reused after a delete.** `KnowledgeStore` now
-  carries a persisted monotonic counter (`next_id`) and mints ids from it, so
-  forgetting the highest learning and adding another gives the new content a
-  fresh id instead of the released one. Previously the next id was
-  `max(existing) + 1`, which handed a recycled id to different content and left
-  dedup, recall counts, the positional embedding sidecar, and every recorded
-  reference pointing at two records with no way to tell them apart. Stores
-  written before the counter existed initialize it on load; a counter found
-  below the highest id present is raised (never lowered) and the anomaly is
-  logged. Registered as INV-12 in `docs/INVARIANTS.md` with an enumeration guard
-  over every site that appends a learning.
-
-### Added
-
 - **`trace-mcp identity repair-ids <key>`** renumbers a store that already
   carries aliased ids. The first occurrence keeps its id and later ones take
   fresh ids in array order; the original is copied to
@@ -91,25 +78,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   mention in free text is reported but does not block. When the registry cannot
   resolve the argument it falls back to the canonical store stem, so stray and
   quarantine stores — which `identity check` also flags — can be repaired.
+
 - **`trace-mcp identity check` reports duplicate learning ids** per store,
   naming the repair command. Detection lives in the core identity report
   (filesystem-only, no extension import), so the CLI and any future core caller
   cannot disagree about the same file.
-
-### Changed
-
-- **Knowledge-store writes fail closed on aliased ids.** `save_store` and
-  `add_learning` raise `DuplicateLearningIdError`, and `identity merge-stores`
-  refuses an aliased target before grafting anything, so a merge can no longer
-  consume its sources into premerge backups while spreading the aliasing. Reads
-  are deliberately unchanged: an affected store still loads, lists, and exports,
-  which is what keeps it repairable. Recall keeps working too — its recall-count
-  and lazy-embedding bookkeeping is dropped with a notice on the response instead
-  of failing the call, since that write mints no id. Every learn tool reports a
-  refused write as `duplicate_learning_ids` with the repair command in `detail`,
-  rather than the generic failure a bare handler would return.
-
-### Added
 
 - **A golden walkthrough of the provenance loop, generated from one scenario**
   (`examples/walkthrough/`). A single scenario definition
@@ -127,6 +100,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is meant to prevent. The run pins a hermetic project with all data
   directories redirected to a scratch location, so it also serves as the
   post-deploy canary flow without touching a real `~/.trace`.
+
 - **Cross-process concurrency smoke for the knowledge store**
   (`tests/test_concurrency_smoke.py`). Two real server processes speaking MCP
   over stdio share one temporary TRACE home and add learnings in interleaved
@@ -148,6 +122,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   home. The module pins behavior across process death and atomic rename
   visibility only: the store write does not fsync, so it makes no claim about
   durability across a kernel crash or power loss.
+
 - **`trace-mcp fleet-check [ROOTS...] [--live] [--json]`.** Runs the deployed-state
   doctor over every project declaring a TRACE server under the given roots and
   rolls failures up by check, which is the view a fleet actually needs: not
@@ -167,32 +142,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the limit. `--live` lists the commands it would run and requires `--yes` before
   executing any of them, since a sweep reaches directories the operator never
   named individually.
-
-### Changed
-
-- **The OpenAI API key is now per project: `./.env` overrides `~/.trace/.env`.**
-  The precedence was inverted — the machine-global file shadowed every
-  project's own file — so a key placed in a project was silently ignored, which
-  is indistinguishable from having no key at all. An exported environment
-  variable still wins over both. Each project having its own credential means a
-  leaked or exhausted key exposes one project rather than every project on the
-  machine, the same isolation TRACE already gives sessions and knowledge stores.
-  `~/.trace/.env` remains a fallback for projects with no key of their own, and
-  that fallback is now announced instead of assumed. A committed `.env.example`
-  documents the file.
-- **A blank value never overrides a real one, in any source.** A copied
-  template containing a bare `OPENAI_API_KEY=` would otherwise mask a working
-  key from a lower-priority file — and, because such a template also leaves the
-  cloud flags off, without tripping the missing-key warning either. The same
-  applies to an exported-but-empty variable (`docker run -e OPENAI_API_KEY`).
-  To stop a project using an inherited key, set `TRACE_LOCAL_ONLY=true` rather
-  than blanking the value.
-- **`TRACE_LOCAL_ONLY` is a restrict-only ratchet.** It is ORed across every
-  configuration source: any source may switch the no-egress kill switch on, and
-  none may switch it off. Without this, the precedence change above would let a
-  project `.env` opt out of a machine-wide privacy policy.
-
-### Added
 
 - **`trace-mcp doctor [DIR] [--live] [--json]` — deployed-state conformance
   (INV-11).** The unit suite proves the source tree is correct; it cannot prove
@@ -214,6 +163,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A hook is checked under **its own host event** — one registered under the
   wrong event is installed, current, executable, and still never fires — and
   TRACE-stamped scripts this build no longer ships are reported as leftovers.
+
 - **A missing or refused OpenAI key is now loud.** Cloud access requested with
   no key resolvable is reported in the `trace_start_session` banner and in every
   affected `trace_learn_*` response, naming the three places searched and the
@@ -227,12 +177,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the user is told their credential was refused — silently returning
   keyword-ranked results from a broken configuration hands back plausible output
   and looks exactly like success.
-- **The trace-learn extension no longer fails to register when its configured
-  backend cannot be built.** Strict mode's refusal to degrade previously escaped
-  into the extension loader, so the server came up with the 17 core tools and no
-  explanation — the same silent-degradation shape the refusal exists to prevent.
-  It now registers with keyword matching and repeats the reason on every
-  affected response.
+
 - **INV-11 — a freshly initialized project is conformance-clean.** A new
   registry row binds the installer's output to the checker's expectations, so
   template rot (a hook matcher that never fires, a stale asset, a launch config
@@ -240,7 +185,69 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   months later on a consumer's machine. The guard is parametrized over the
   adapter registry: a new host adapter is checked the moment it ships.
 
+- **Orientation docs.** [`docs/ONBOARDING.md`](docs/ONBOARDING.md) maps the
+  codebase for a developer and the tool surface for a user;
+  [`docs/WHAT-IS-TRACE.md`](docs/WHAT-IS-TRACE.md) explains the project in
+  plain language for a reader who does not write code. A guide for running
+  TRACE beside the Gents agent runtime ships alongside the importer.
+
+### Changed
+
+- **Knowledge-store writes fail closed on aliased ids.** `save_store` and
+  `add_learning` raise `DuplicateLearningIdError`, and `identity merge-stores`
+  refuses an aliased target before grafting anything, so a merge can no longer
+  consume its sources into premerge backups while spreading the aliasing. Reads
+  are deliberately unchanged: an affected store still loads, lists, and exports,
+  which is what keeps it repairable. Recall keeps working too — its recall-count
+  and lazy-embedding bookkeeping is dropped with a notice on the response instead
+  of failing the call, since that write mints no id. Every learn tool reports a
+  refused write as `duplicate_learning_ids` with the repair command in `detail`,
+  rather than the generic failure a bare handler would return.
+
+- **The OpenAI API key is now per project: `./.env` overrides `~/.trace/.env`.**
+  The precedence was inverted — the machine-global file shadowed every
+  project's own file — so a key placed in a project was silently ignored, which
+  is indistinguishable from having no key at all. An exported environment
+  variable still wins over both. Each project having its own credential means a
+  leaked or exhausted key exposes one project rather than every project on the
+  machine, the same isolation TRACE already gives sessions and knowledge stores.
+  `~/.trace/.env` remains a fallback for projects with no key of their own, and
+  that fallback is now announced instead of assumed. A committed `.env.example`
+  documents the file.
+
+- **A blank value never overrides a real one, in any source.** A copied
+  template containing a bare `OPENAI_API_KEY=` would otherwise mask a working
+  key from a lower-priority file — and, because such a template also leaves the
+  cloud flags off, without tripping the missing-key warning either. The same
+  applies to an exported-but-empty variable (`docker run -e OPENAI_API_KEY`).
+  To stop a project using an inherited key, set `TRACE_LOCAL_ONLY=true` rather
+  than blanking the value.
+
+- **`TRACE_LOCAL_ONLY` is a restrict-only ratchet.** It is ORed across every
+  configuration source: any source may switch the no-egress kill switch on, and
+  none may switch it off. Without this, the precedence change above would let a
+  project `.env` opt out of a machine-wide privacy policy.
+
 ### Fixed
+
+- **The trace-learn extension no longer fails to register when its configured
+  backend cannot be built.** Strict mode's refusal to degrade previously escaped
+  into the extension loader, so the server came up with the 17 core tools and no
+  explanation — the same silent-degradation shape the refusal exists to prevent.
+  It now registers with keyword matching and repeats the reason on every
+  affected response.
+
+- **Learning ids are no longer reused after a delete.** `KnowledgeStore` now
+  carries a persisted monotonic counter (`next_id`) and mints ids from it, so
+  forgetting the highest learning and adding another gives the new content a
+  fresh id instead of the released one. Previously the next id was
+  `max(existing) + 1`, which handed a recycled id to different content and left
+  dedup, recall counts, the positional embedding sidecar, and every recorded
+  reference pointing at two records with no way to tell them apart. Stores
+  written before the counter existed initialize it on load; a counter found
+  below the highest id present is raised (never lowered) and the anomaly is
+  logged. Registered as INV-12 in `docs/INVARIANTS.md` with an enumeration guard
+  over every site that appends a learning.
 
 - **Learn tools now enforce the `TRACE_PROJECT` pin (INV-9, ADR-006).** All
   five `trace_learn_*` tools resolve their `project` argument through the same
@@ -255,6 +262,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   differs from the pinned key, the operation is keyed to the pinned project's
   store — an accepted alias can never open a different store file than the
   project it was authorized against.
+
 - **`trace_learn_recall` no longer returns unranked listings dressed as
   results.** A call with neither `context`/`query` nor `tags` previously
   returned the store's first N learnings in insertion order under a
@@ -268,11 +276,99 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so a degraded backend configuration is visible to the caller. This is a
   protocol-visible behavioral change: a caller that relied on the no-query
   listing must switch to `trace_learn_list`.
+
 - **`trace_learn_recall` accepts `query` as an alias for `context`.** MCP
   argument models silently drop unknown fields, so a client sending
   `query=...` used to have its query text ignored entirely (surfacing as
   insertion-order "results"). Either name works now; passing both with
   different values is an error, never a silent preference.
+
+- **`trace-mcp-init` now generates a config that loads the trace-learn
+  extension.** The launch entry it wrote carried no `--with` packages, so the
+  extension could not import its optional dependencies and did not register:
+  the server started, recorded provenance, and exposed 17 tools where the
+  documentation promises 22, with nothing reporting the gap — a missing
+  optional dependency is not an error, so the five tools were simply absent.
+  This was reached by the documented onboarding path, which made it the first
+  experience of the project for anyone following the README. The canonical
+  entry now carries `openai`, `numpy`, and `model2vec`. They stay `--with`
+  flags rather than hard dependencies, so a core install remains `mcp` +
+  `pydantic`, and installing `openai` does not enable cloud calls — LLM
+  matching and extraction remain opt-in behind `TRACE_LLM_ENABLED` and a key.
+  Re-running init drops packages the fresh arguments already carry, so a
+  config that already lists the extras does not accumulate a second copy of
+  each on every run.
+
+- **The decision-audit hook now fires, because its matcher is derived from the
+  MCP server key.** Claude Code hook matchers match the full tool name exactly
+  — a plain string is not a substring pattern — and hosts namespace MCP tools
+  as `mcp__<server-key>__<tool>`. The settings template registered the
+  PostToolUse decision-audit hook under the bare matcher `trace_end_session`,
+  which matches no real tool name, so the hook never fired in a project
+  installed from the template. The `mcpServers` key is now a single shared
+  constant (`adapters.base.MCP_SERVER_KEY`): `trace-mcp-init` writes
+  `.mcp.json` entries under it and the installer derives the matcher from it at
+  install time, so the two cannot drift. Re-running install migrates a stale
+  registration in place — removed only when it runs the installer's own hook
+  commands *and* carries a matcher form the installer is known to have shipped
+  — while an entry whose fields a user tuned is respected rather than reset or
+  duplicated, and a malformed settings shape is skipped in place. Existing
+  consumers pick this up when `trace-mcp-init` runs again against their
+  project; a server rebuild alone does not rewrite `.claude/settings.json`.
+
+- **The MCP initialize handshake reports trace-mcp's own version.** FastMCP
+  exposes no version parameter and defaults the underlying server's version to
+  the `mcp` library's, so `serverInfo` told clients they were talking to, say,
+  `1.29.0` when the running server was trace-mcp — a misleading signal for
+  fleet health probes and client-side diagnostics, and the field a live probe
+  relies on to tell a warm cached wheel from a current one. The package version
+  is stamped on the underlying server at import time. The stamp targets a
+  private FastMCP attribute, so it is wrapped defensively: a future `mcp` 1.x
+  release that moves the attribute degrades the cosmetic misreport to a logged
+  warning instead of an import-time crash that would take every consumer down
+  on its next cold-resolved server start.
+
+- **`trace-mcp validate` applies the specification's semantic rules, not only
+  the schema.** Validation checked a document against the published JSON Schema
+  and stopped there, so it reported PASS on records the specification calls
+  invalid. The schema cannot express the cross-field rules of §4: it declares
+  `resolved_by` optional and every event-data field optional, so a decision
+  claiming `accepted` with no resolver (§4.2) and an event whose type
+  contradicts its populated data field (§4.1) both satisfy it. A validator that
+  passes those tells a producer its output conforms when it does not, which is
+  the failure that matters most for a format meant to be written by
+  implementations other than this one. Validation is now two passes: the schema
+  for structure, then the models for the semantic rules. A semantic failure
+  reports the field path that carried it and, like an unreadable file, does not
+  stop a multi-file run.
+
+- **Learn extraction never draws on imported records or machine-measured
+  decisions.** A session an importer built from another system's data is
+  provenance, not a learning source, and a decision made by a machine gate is
+  not conversation; both were being turned into knowledge-store entries. The
+  cost is concrete: a gate's revert decisions are one template filled with
+  identifiers and numbers, so near-identical ones score 0.54–0.64 Jaccard
+  against a 0.85 dedup threshold — N reverts become N entries, each naming a
+  version identifier meaningful only inside one run, and each then riding in
+  the dedup prompt of every later extraction in that project. Two pure
+  predicates decide it: an imported record is a session whose metadata carries
+  both a source and an importer as non-empty strings, and a machine-measured
+  decision is one whose typed confidence block carries the contract key, read
+  through the set of fields the document actually supplied. An imported record
+  yields nothing from either backend, and the LLM path returns on an empty
+  event block before it attests any egress, so such a record never reaches a
+  cloud provider. A machine-measured decision is skipped wherever it appears,
+  so a human annotation logged beside one still extracts.
+
+- **INV-10 guards every restatement of the wire version, not three of them.**
+  The spec/wire site-set registered the specification heading, the schema
+  filename, and its `$id`, while five further prose restatements went
+  unchecked: the README and project-instruction version banners, the onboarding
+  state line, the specification's own §3.1 default that tells a producer what
+  to stamp into `trace_version`, and the Appendix A example people copy. A
+  `SCHEMA_VERSION` bump could therefore ship with the front door and the
+  specification's producer guidance still naming the previous wire version —
+  the shape the registry exists to close.
 
 ## [0.5.0] — 2026-07-30
 
@@ -923,7 +1019,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tool-call logging, session and event queries.
 - Knowledge persistence, behavioral checks, checkpoints.
 
-[Unreleased]: https://github.com/Thru-Echoes/TRACE/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Thru-Echoes/TRACE/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/Thru-Echoes/TRACE/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Thru-Echoes/TRACE/compare/v0.2.0...v0.3.0

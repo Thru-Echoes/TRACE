@@ -16,11 +16,13 @@ authors:
     orcid: "https://orcid.org/0000-0002-5967-1314"
 license: Apache-2.0
 repository-code: "https://github.com/Thru-Echoes/TRACE"
-version: 0.5.0
-date-released: 2026-07-30
+version: 0.5.1
+date-released: 2026-09-04
 # The concept DOI resolves to the most recent archived version, so a citation
-# made with it stays valid across releases. The version-specific DOI for v0.5.0
-# is listed under identifiers for anyone pinning to this exact archive.
+# made with it stays valid across releases. Version-specific DOIs are listed
+# under identifiers for anyone pinning to one exact archive; a release's own
+# version DOI is added here once the archive that mints it exists, so this file
+# never names a DOI that does not resolve.
 doi: "10.5281/zenodo.21711455"
 identifiers:
   - type: doi
