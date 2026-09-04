@@ -608,6 +608,12 @@ class TestDecisionConfidence:
             {"statistic": ""},
             {"statistic": "mean\npaired"},
             {"unit": "game\tscore"},
+            {"statistic": "mean" + chr(0x85) + "paired"},
+            {"statistic": "mean" + chr(0x2028) + "paired"},
+            {"unit": "game" + chr(0x2029) + "score"},
+            {"method": {"name": "percentile" + chr(0x9B) + "bootstrap"}},
+            {"evidence": [{"role": "parent", "locator": "a" + chr(0x85) + "b", "sha256": "a" * 64}]},
+            {"evidence": [{"role": "parent", "locator": "x", "sha256": "a" * 64 + "\n"}]},
             {"direction": "up"},
             {"evidence": [{"role": "parent", "locator": "x", "sha256": "not-hex"}]},
             {"evidence": [{"role": "parent", "locator": "x", "sha256": "A" * 64}]},
@@ -622,6 +628,21 @@ class TestDecisionConfidence:
     def test_structural_violations_are_rejected(self, overrides: dict[str, object]) -> None:
         with pytest.raises(ValueError):
             DecisionConfidence.model_validate(_block(**overrides))
+
+    @pytest.mark.parametrize("estimate", [9999.0, -9999.0])
+    def test_an_estimate_outside_its_interval_is_recorded_not_refused(self, estimate: float) -> None:
+        """Deliberate: percentile bootstrap can place the point estimate outside the resampled
+        bounds, so a containment rule would refuse valid records. This pins that choice."""
+        c = DecisionConfidence.model_validate(_block(estimate=estimate))
+        assert c.estimate == estimate
+
+    def test_identifier_fields_reject_every_line_breaking_character(self) -> None:
+        """Whatever the class admits, no recorded identifier may render as two lines."""
+        for code_point in (0x0A, 0x0D, 0x1F, 0x7F, 0x85, 0x9B, 0x2028, 0x2029):
+            value = "mean" + chr(code_point) + "delta"
+            assert len(value.splitlines()) >= 1
+            with pytest.raises(ValueError):
+                DecisionConfidence.model_validate(_block(statistic=value))
 
     def test_minimal_block_from_another_producer(self) -> None:
         """Only the measurement is required; a producer without digests or a contract is fine."""

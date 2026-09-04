@@ -17,8 +17,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from trace_mcp.schema import Session
-from trace_mcp.schema.events import DecisionData
+from trace_mcp.schema import DecisionData, Session
 
 logger = logging.getLogger(__name__)
 

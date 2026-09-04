@@ -2,7 +2,7 @@
 
 ## Specification v0.5.1
 
-**Status**: Stable — additive (backward-compatible with v0.3.x / v0.4.x). The package version may run ahead of this spec/wire version for hardening releases that change no schema fields.
+**Status**: Stable. Every revision through v0.5.0 is additive and backward-compatible with v0.3.x / v0.4.x; v0.5.1 is additive except that it narrows the previously open name `decision.confidence` (Appendix B). The package version may run ahead of this spec/wire version for hardening releases that change no schema fields.
 **Last Updated**: 2026-09-03
 **JSON Schema**: [`trace-v0.5.json`](../schemas/trace-v0.5.json)
 **W3C PROV Namespace**: `https://trace-protocol.org/ns/v0.3#`
@@ -318,7 +318,7 @@ A decision driven by a measurement MAY carry that measurement, so a consumer can
 | `evidence_digests` | object | MAY | `{role: "sha256:<64 hex>"}`, one entry per evidence role, each equal to that entry's digest; when present, evidence roles MUST be unique. Present for consumers that read digests by role. |
 | `contract` | string | MAY | Identifier of the producer contract that governs any additional keys on this object. |
 
-Identifier-valued fields (`statistic`, `unit`, `method.name`, `method.algorithm`, `contract`, `role`, `locator`) MUST NOT contain control characters.
+Identifier-valued fields (`statistic`, `unit`, `method.name`, `method.algorithm`, `contract`, `role`, `locator`) MUST NOT contain a C0 or C1 control character, DEL, or a Unicode line or paragraph separator (U+2028, U+2029). All of these end a line in common text handling, so admitting one would let a single recorded value render as two lines.
 
 **Rule state is not typed here.** A producer's decision rule (a minimum effect, a verdict, a held-out check, a confirmation policy) MAY travel on this object as additional keys governed by the contract `contract` names. A conforming consumer MUST preserve those keys unchanged (7.3) and MUST NOT interpret them; this specification does not interpret them and does not project them into the PROV mapping of §6. The producer's own verifier is the authority for them. Producer-authored free text elsewhere on the decision, such as `rationale`, is ordinary text and may name such a rule's outcome.
 
@@ -562,7 +562,7 @@ This specification maps to the [W3C PROV Data Model](https://www.w3.org/TR/prov-
 | Canonical project key | `trace:projectKey` | An additive sibling literal on the session activity carrying the canonical key (§3.2.2). (v0.5+) |
 | Project | `prov:Entity` (optional) | A project MAY be reified as an entity `trace:project_<key>` carrying `trace:projectKey`, its current `trace:project` display label, and one `trace:aliasLabel` per historical label — so a consumer holding an artifact stamped with an old label can discover that it names the same project. (v0.5+) |
 | Decision confidence | `trace:confidence*` literals | The measurement is projected as scalar literals on the decision activity: `trace:confidenceStatistic`, `trace:confidenceDirection`, `trace:confidenceEstimate`, `trace:confidenceLow`, `trace:confidenceHigh`, `trace:confidenceLevel`, `trace:confidenceMethod`, `trace:confidenceSampleSize`, and when present `trace:confidenceAlgorithm`, `trace:confidenceResamples`, `trace:confidenceSeed`, `trace:confidenceUnit`, `trace:confidenceContract`. The bounds are two literals rather than one array because a bare JSON-LD array is a set and a processor may reorder it. Rule-state keys are not projected. (v0.5.1+) |
-| Decision evidence | `prov:Entity` + `prov:used` | Each `evidence[]` entry is an entity `trace:<event id>_evidence_<16 hex>` (a content hash of role, locator and digest, so two locators for the same bytes stay distinct and a reordered list keeps its identities) with `trace:kind` `Evidence`, `trace:role`, `prov:atLocation` (the locator) and `trace:sha256`; the decision activity `prov:used` it. As with tool inputs, the relation records the producer's assertion; this specification requires no digest verification. (v0.5.1+) |
+| Decision evidence | `prov:Entity` + `prov:used` | Each `evidence[]` entry is an entity `trace:<event id>_evidence_<32 hex>` (a content hash of role, locator and digest, so two locators for the same bytes stay distinct and a reordered list keeps its identities) with `trace:kind` `Evidence`, `trace:role`, `prov:atLocation` (the locator) and `trace:sha256`; the decision activity `prov:used` it. As with tool inputs, the relation records the producer's assertion; this specification requires no digest verification. (v0.5.1+) |
 
 The v0.5 and v0.5.1 additions above are new terms **within the frozen `ns/v0.3#` namespace**: additive
 extensions are valid within an existing namespace, so no `@context` change is required and

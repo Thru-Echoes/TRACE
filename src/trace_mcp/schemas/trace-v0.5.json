@@ -168,6 +168,8 @@
           "anyOf": [
             {
               "additionalProperties": {
+                "maxLength": 71,
+                "minLength": 71,
                 "pattern": "^sha256:[0-9a-f]{64}$",
                 "type": "string"
               },
@@ -183,7 +185,7 @@
         "contract": {
           "anyOf": [
             {
-              "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\u2028\u2029]+$",
               "type": "string"
             },
             {
@@ -194,14 +196,14 @@
           "title": "Contract"
         },
         "statistic": {
-          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+          "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\u2028\u2029]+$",
           "title": "Statistic",
           "type": "string"
         },
         "unit": {
           "anyOf": [
             {
-              "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\u2028\u2029]+$",
               "type": "string"
             },
             {
@@ -465,16 +467,18 @@
       "description": "A file a measurement rests on, by role, locator and SHA-256 (v0.5.1).\n\nA matching digest shows that a holder's bytes match the recorded digest. It does not show that\nthe measurement was computed from those bytes, who produced the file, or that it is authentic.",
       "properties": {
         "role": {
-          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+          "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\u2028\u2029]+$",
           "title": "Role",
           "type": "string"
         },
         "locator": {
-          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+          "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\u2028\u2029]+$",
           "title": "Locator",
           "type": "string"
         },
         "sha256": {
+          "maxLength": 64,
+          "minLength": 64,
           "pattern": "^[0-9a-f]{64}$",
           "title": "Sha256",
           "type": "string"
@@ -520,14 +524,14 @@
       "description": "How an interval was computed (v0.5.1).\n\n``name`` is a free identifier; consumers MUST NOT reject an unknown one. ``algorithm`` names the\nexact procedure when the producer has one.",
       "properties": {
         "name": {
-          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+          "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\u2028\u2029]+$",
           "title": "Name",
           "type": "string"
         },
         "algorithm": {
           "anyOf": [
             {
-              "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+              "pattern": "^[^\\x00-\\x1f\\x7f-\\x9f\u2028\u2029]+$",
               "type": "string"
             },
             {

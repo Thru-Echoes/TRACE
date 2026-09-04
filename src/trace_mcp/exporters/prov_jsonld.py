@@ -206,7 +206,7 @@ def export_prov_jsonld(session: Session) -> str:
                         sort_keys=True,
                         separators=(",", ":"),
                     )
-                    ev_id = f"{aid}_evidence_{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+                    ev_id = f"{aid}_evidence_{hashlib.sha256(key.encode()).hexdigest()[:32]}"
                     ent = node(ev_id, "prov:Entity")
                     ent["trace:kind"] = "Evidence"
                     ent["trace:role"] = ev.role

@@ -368,7 +368,7 @@ class TestMarkdownEdgeCases:
 def _evidence_id(activity_id: str, role: str, locator: str, sha256: str) -> str:
     """Mirror of the exporter's evidence-entity id: activity id plus a content hash of the reference."""
     key = json.dumps({"locator": locator, "role": role, "sha256": sha256}, sort_keys=True, separators=(",", ":"))
-    return f"{activity_id}_evidence_{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+    return f"{activity_id}_evidence_{hashlib.sha256(key.encode()).hexdigest()[:32]}"
 
 
 @pytest.fixture

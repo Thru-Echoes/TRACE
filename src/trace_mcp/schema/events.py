@@ -55,11 +55,17 @@ class ToolCallData(TraceModel):
 
 _HEX_DIGEST = r"^[0-9a-f]{64}$"
 _PREFIXED_DIGEST = r"^sha256:[0-9a-f]{64}$"
-# Identifier-like strings: non-empty, no control characters (so a value can never break a rendered
-# line or an identifier built from it). Everything else about them is the producer's business.
-_TEXT = r"^[^\x00-\x1f\x7f]+$"
+# Identifier-like strings: non-empty, and free of every character that can break a rendered line or
+# an identifier built from one. That is the C0 controls and DEL, the C1 controls, and the Unicode
+# line and paragraph separators — ``str.splitlines()`` splits on U+0085, U+2028 and U+2029 just as it
+# does on a newline, so admitting them would let one recorded value become two rendered lines.
+# Everything else about these strings is the producer's business.
+_TEXT = "^[^\\x00-\\x1f\\x7f-\\x9f\u2028\u2029]+$"
 Text = Annotated[str, StringConstraints(pattern=_TEXT)]
-PrefixedDigest = Annotated[str, StringConstraints(pattern=_PREFIXED_DIGEST)]
+# Length bounds as well as a pattern: a JSON Schema ``pattern`` is matched with Python's ``re``, whose
+# ``$`` also matches before a trailing newline, so pattern alone would let the published schema accept
+# a digest this model refuses. The bounds make the two agree exactly.
+PrefixedDigest = Annotated[str, StringConstraints(pattern=_PREFIXED_DIGEST, min_length=71, max_length=71)]
 
 
 class MeasurementInterval(TraceModel):
@@ -98,7 +104,7 @@ class EvidenceRef(TraceModel):
 
     role: Text
     locator: Text
-    sha256: str = Field(pattern=_HEX_DIGEST)
+    sha256: str = Field(pattern=_HEX_DIGEST, min_length=64, max_length=64)
 
 
 class DecisionConfidence(TraceModel):

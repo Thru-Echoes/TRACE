@@ -665,6 +665,25 @@ class TestPublishedSchemaChecksConfidence:
         with pytest.raises(jsonschema.ValidationError):
             jsonschema.validate(_with_confidence(block), schema)
 
+    @pytest.mark.parametrize(
+        "block",
+        [
+            {**_VALID_CONFIDENCE, "evidence": [{"role": "p", "locator": "x", "sha256": "a" * 64 + "\n"}]},
+            {
+                **_VALID_CONFIDENCE,
+                "evidence": [{"role": "p", "locator": "x", "sha256": "a" * 64}],
+                "evidence_digests": {"p": "sha256:" + "a" * 64 + "\n"},
+            },
+        ],
+        ids=["evidence-digest", "digest-map"],
+    )
+    def test_published_schema_rejects_a_digest_with_a_trailing_newline(self, schema: dict, block: Any) -> None:
+        """A JSON Schema `pattern` is matched with Python's `re`, whose `$` also matches before a
+        trailing newline. Length bounds are what make the published file as strict as the model, so a
+        producer validating against the file alone is not told a malformed digest conforms."""
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(_with_confidence(block), schema)
+
     def test_published_schema_accepts_the_golden_with_extras(self, schema: dict) -> None:
         golden = json.loads(
             (Path(__file__).parent / "fixtures" / "decision_log_v1" / "expected_session.json").read_text(
