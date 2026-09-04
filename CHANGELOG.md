@@ -28,6 +28,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   explicitly on every call will interleave into one session. Pass
   `session_id`, or run one server instance per consumer.
 
+- **`trace-mcp import gents <timeline.json> --project NAME`** builds a TRACE
+  session from a [Gents](https://github.com/source-inc/gents) run timeline
+  (`gents trace timeline`), so a run driven by that agent runtime can be read
+  with the same tools as any other TRACE record. Tool calls map to `tool_call`
+  events with `host="mcp"` when the runtime routed them to a registered MCP
+  service and `host="internal"` otherwise; request, response, and goal
+  transitions map to `state_change`; message bodies, rendered prompts, and
+  inference payloads are counted in metadata but never copied, since they are
+  model input and output rather than provenance. A tool approval maps to a
+  `state_change` stamped with the fact that the approver identity is claimed
+  rather than verified, and **no decision is ever synthesized**: an execution
+  trace does not record who proposed a step or whether a human accepted it, and
+  inventing that is the fabrication the protocol exists to prevent. Unknown
+  event kinds raise rather than being skipped, so a Gents release that adds an
+  event type is reported instead of silently dropped; unknown *fields* are
+  tolerated, because an additive release cannot corrupt a mapping that reads by
+  name. The importer writes to stdout or `--output` and never into the session
+  store, so an imported record is reviewable before it becomes part of a
+  project's provenance. Pinned by a real v0.14.0 export in
+  `tests/fixtures/gents_timeline_v0_14_0.json`.
+
 ### Fixed
 
 - **Learning ids are no longer reused after a delete.** `KnowledgeStore` now
