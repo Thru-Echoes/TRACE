@@ -5,7 +5,7 @@ tool. It assumes no prior context. Read [README.md](../README.md) for the
 reference tables and [docs/specification.md](specification.md) for the
 authoritative data model; this file is the map that makes those readable.
 
-**Current state**: package `0.5.0`, protocol/schema `0.5.1`, 22 MCP tools, 11
+**Current state**: package `0.5.1`, protocol/schema `0.5.1`, 22 MCP tools, 12
 registered invariants. Not published to PyPI (see [Distribution](#distribution)).
 
 ---
@@ -226,11 +226,12 @@ one more copy to rot.
 ## 10. Invariants
 
 [`docs/INVARIANTS.md`](INVARIANTS.md) is the registry of correctness properties,
-each with its **exhaustive site-set** and the test that enforces it. Eleven are
-registered (INV-1 … INV-11): locked session writes, completed-session
+each with its **exhaustive site-set** and the test that enforces it. Twelve are
+registered (INV-1 … INV-12): locked session writes, completed-session
 immutability, decision validation, canonical-key scoping, egress attestation,
 project/session coherence, registry writes, the knowledge lock, learn-tool
-scoping, version-declaration consistency, and conformance of a fresh install.
+scoping, version-declaration consistency, conformance of a fresh install, and
+learning-id uniqueness.
 
 The point is the defect *class*: every serious bug here has been *an invariant
 enforced in one place but not uniformly*. `tests/test_invariants.py` fails when

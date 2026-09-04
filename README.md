@@ -35,7 +35,7 @@ TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy 
 
 > **New here?** [docs/ONBOARDING.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/ONBOARDING.md) is the map for a developer or a user — the mental model, the attribution rules, project identity, hooked-vs-bare projects, and the dev workflow. [docs/WHAT-IS-TRACE.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/WHAT-IS-TRACE.md) explains the same thing without assuming a technical background.
 
-**Version:** 0.5.0 | **Spec:** v0.5.1 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
+**Version:** 0.5.1 | **Spec:** v0.5.1 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
 
 > The schema URI is an identifier (per W3C PROV convention) and is not currently a resolvable URL. The machine-readable JSON Schema lives at [`schemas/trace-v0.5.json`](https://github.com/Thru-Echoes/TRACE/blob/main/schemas/trace-v0.5.json) in this repository.
 
