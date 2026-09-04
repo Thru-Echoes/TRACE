@@ -149,6 +149,99 @@
       "title": "ContributionData",
       "type": "object"
     },
+    "DecisionConfidence": {
+      "additionalProperties": true,
+      "description": "The producer-recorded measurement that motivated a decision (v0.5.1): the estimated effect,\nits interval, the method, the sample size, and the files it rests on.\n\nA positive ``estimate`` favours the option the decision describes; the producer orients the\nstatistic that way. ``direction`` records the native sense of the underlying raw metric\n(``\"lower\"`` means the raw metric is better when smaller) so a reader can relate the estimate\nback to it. This object carries the measurement only. A producer's decision rule (a minimum\neffect, a verdict, a held-out check, a confirmation policy) travels as preserved extra keys\nidentified by ``contract``; TRACE stores those untouched and never interprets them. Nothing\nhere says whether the decision was right.\n\nField order follows the contract's section 2 listing.",
+      "properties": {
+        "interval": {
+          "$ref": "#/$defs/MeasurementInterval"
+        },
+        "method": {
+          "$ref": "#/$defs/MeasurementMethod"
+        },
+        "sample_size": {
+          "minimum": 1,
+          "title": "Sample Size",
+          "type": "integer"
+        },
+        "evidence_digests": {
+          "anyOf": [
+            {
+              "additionalProperties": {
+                "pattern": "^sha256:[0-9a-f]{64}$",
+                "type": "string"
+              },
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Digests"
+        },
+        "contract": {
+          "anyOf": [
+            {
+              "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Contract"
+        },
+        "statistic": {
+          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+          "title": "Statistic",
+          "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Unit"
+        },
+        "direction": {
+          "enum": [
+            "higher",
+            "lower"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "estimate": {
+          "title": "Estimate",
+          "type": "number"
+        },
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/EvidenceRef"
+          },
+          "title": "Evidence",
+          "type": "array"
+        }
+      },
+      "required": [
+        "interval",
+        "method",
+        "sample_size",
+        "statistic",
+        "direction",
+        "estimate"
+      ],
+      "title": "DecisionConfidence",
+      "type": "object"
+    },
     "DecisionData": {
       "additionalProperties": true,
       "description": "Records a decision with full attribution and resolution status.",
@@ -248,6 +341,17 @@
           },
           "title": "Warnings",
           "type": "array"
+        },
+        "confidence": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DecisionConfidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
         }
       },
       "required": [
@@ -354,6 +458,115 @@
         }
       },
       "title": "EventContext",
+      "type": "object"
+    },
+    "EvidenceRef": {
+      "additionalProperties": true,
+      "description": "A file a measurement rests on, by role, locator and SHA-256 (v0.5.1).\n\nA matching digest shows that a holder's bytes match the recorded digest. It does not show that\nthe measurement was computed from those bytes, who produced the file, or that it is authentic.",
+      "properties": {
+        "role": {
+          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+          "title": "Role",
+          "type": "string"
+        },
+        "locator": {
+          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+          "title": "Locator",
+          "type": "string"
+        },
+        "sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "title": "Sha256",
+          "type": "string"
+        }
+      },
+      "required": [
+        "role",
+        "locator",
+        "sha256"
+      ],
+      "title": "EvidenceRef",
+      "type": "object"
+    },
+    "MeasurementInterval": {
+      "additionalProperties": true,
+      "description": "An interval on a measured effect: lower and upper bounds and the nominal coverage (v0.5.1).",
+      "properties": {
+        "lower": {
+          "title": "Lower",
+          "type": "number"
+        },
+        "upper": {
+          "title": "Upper",
+          "type": "number"
+        },
+        "level": {
+          "exclusiveMaximum": 1.0,
+          "exclusiveMinimum": 0.0,
+          "title": "Level",
+          "type": "number"
+        }
+      },
+      "required": [
+        "lower",
+        "upper",
+        "level"
+      ],
+      "title": "MeasurementInterval",
+      "type": "object"
+    },
+    "MeasurementMethod": {
+      "additionalProperties": true,
+      "description": "How an interval was computed (v0.5.1).\n\n``name`` is a free identifier; consumers MUST NOT reject an unknown one. ``algorithm`` names the\nexact procedure when the producer has one.",
+      "properties": {
+        "name": {
+          "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+          "title": "Name",
+          "type": "string"
+        },
+        "algorithm": {
+          "anyOf": [
+            {
+              "pattern": "^[^\\x00-\\x1f\\x7f]+$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Algorithm"
+        },
+        "resamples": {
+          "anyOf": [
+            {
+              "minimum": 1,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resamples"
+        },
+        "seed": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Seed"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "title": "MeasurementMethod",
       "type": "object"
     },
     "SessionMetadata": {
@@ -725,7 +938,7 @@
     }
   },
   "additionalProperties": true,
-  "description": "JSON Schema for a session document conforming to the Decision Provenance for AI-Assisted Workflows specification v0.5.0. See: https://trace-protocol.org/v0.3 (namespace URI kept at v0.3# per ADR 002 D6 \u2014 additive extensions are valid within the same namespace).",
+  "description": "JSON Schema for a session document conforming to the Decision Provenance for AI-Assisted Workflows specification v0.5.1. See: https://trace-protocol.org/v0.3 (namespace URI kept at v0.3# per ADR 002 D6 \u2014 additive extensions are valid within the same namespace).",
   "properties": {
     "context": {
       "default": "https://trace-protocol.org/v0.3",
@@ -733,7 +946,7 @@
       "type": "string"
     },
     "trace_version": {
-      "default": "0.5.0",
+      "default": "0.5.1",
       "description": "Wire/schema format version this record conforms to. Decoupled from the package version (trace_mcp.__version__): wire-compatible releases keep this at the schema version. See SCHEMA_VERSION.",
       "title": "Trace Version",
       "type": "string"
@@ -797,7 +1010,7 @@
     "id",
     "metadata"
   ],
-  "title": "Decision Provenance Session Document v0.5.0",
+  "title": "Decision Provenance Session Document v0.5.1",
   "type": "object",
   "$id": "https://trace-protocol.org/schemas/trace-v0.5.json"
 }

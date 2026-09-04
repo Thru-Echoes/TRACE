@@ -3,7 +3,7 @@
 > **Full documentation**: [README.md](README.md) (architecture, tools, configuration, changelog)
 > **Orientation**: [docs/ONBOARDING.md](docs/ONBOARDING.md) (dev + user onboarding) · [docs/WHAT-IS-TRACE.md](docs/WHAT-IS-TRACE.md) (non-technical explainer)
 > **Formal specification**: [docs/specification.md](docs/specification.md)
-> **Version**: 0.5.0 (package) · protocol/schema v0.5.0
+> **Version**: 0.5.0 (package) · protocol/schema v0.5.1
 > **TRACE project name**: "trace-mcp" (canonical project key: `trace-mcp`)
 
 ---

@@ -5,7 +5,7 @@ tool. It assumes no prior context. Read [README.md](../README.md) for the
 reference tables and [docs/specification.md](specification.md) for the
 authoritative data model; this file is the map that makes those readable.
 
-**Current state**: package `0.5.0`, protocol/schema `0.5.0`, 22 MCP tools, 11
+**Current state**: package `0.5.0`, protocol/schema `0.5.1`, 22 MCP tools, 11
 registered invariants. Not published to PyPI (see [Distribution](#distribution)).
 
 ---

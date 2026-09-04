@@ -627,6 +627,54 @@ class TestSchemaConformance:
         jsonschema.validate(doc, schema)
 
 
+_VALID_CONFIDENCE: dict[str, Any] = {
+    "interval": {"lower": -30.0, "upper": 583.75, "level": 0.9},
+    "method": {"name": "percentile_bootstrap"},
+    "sample_size": 8,
+    "statistic": "mean_paired_delta",
+    "direction": "higher",
+    "estimate": 260.0,
+}
+
+
+def _with_confidence(block: Any) -> dict[str, Any]:
+    """The handcrafted document with ``block`` inserted as the first decision's confidence."""
+    doc = _handcrafted_session()
+    decision = next(e for e in doc["events"] if e["type"] == "decision")
+    decision["decision"]["confidence"] = block
+    return doc
+
+
+class TestPublishedSchemaChecksConfidence:
+    """The published schema, on its own, must carry the confidence block's structural rules —
+    a producer validating against the file gets them without running this implementation."""
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            {**_VALID_CONFIDENCE, "interval": {"lower": -30.0, "upper": 583.75, "level": 1.0}},
+            {**_VALID_CONFIDENCE, "sample_size": 0},
+            {**_VALID_CONFIDENCE, "evidence": [{"role": "parent", "locator": "x", "sha256": "zz"}]},
+            {**_VALID_CONFIDENCE, "direction": "up"},
+            {**_VALID_CONFIDENCE, "evidence_digests": {"parent": "a" * 64}},
+            {k: v for k, v in _VALID_CONFIDENCE.items() if k != "direction"},
+        ],
+        ids=["level-at-one", "sample-size-zero", "bad-digest", "bad-direction", "unprefixed-digest", "no-direction"],
+    )
+    def test_published_schema_rejects_structural_violations(self, schema: dict, block: Any) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(_with_confidence(block), schema)
+
+    def test_published_schema_accepts_the_golden_with_extras(self, schema: dict) -> None:
+        golden = json.loads(
+            (Path(__file__).parent / "fixtures" / "decision_log_v1" / "expected_session.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        block = next(e for e in golden["events"] if e.get("decision"))["decision"]["confidence"]
+        jsonschema.validate(_with_confidence(block), schema)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Part 2: Structural equivalence — both documents cover the same spec surface
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -1,9 +1,9 @@
 # Decision Provenance for AI-Assisted Workflows
 
-## Specification v0.5.0
+## Specification v0.5.1
 
 **Status**: Stable — additive (backward-compatible with v0.3.x / v0.4.x). The package version may run ahead of this spec/wire version for hardening releases that change no schema fields.
-**Last Updated**: 2026-07-22
+**Last Updated**: 2026-09-03
 **JSON Schema**: [`trace-v0.5.json`](../schemas/trace-v0.5.json)
 **W3C PROV Namespace**: `https://trace-protocol.org/ns/v0.3#`
 
@@ -79,7 +79,7 @@ A session document is the top-level unit of this specification. Each document de
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `context` | string | SHOULD | URI identifying the specification version. Default: `"https://trace-protocol.org/v0.3"`. |
-| `trace_version` | string | SHOULD | Semantic version of the specification. Default: `"0.5.0"`. |
+| `trace_version` | string | SHOULD | Semantic version of the specification. Default: `"0.5.1"`. |
 | `id` | string | MUST | Unique identifier for this session. |
 | `created` | datetime | MUST | UTC ISO 8601 timestamp of session start. |
 | `ended` | datetime | MAY | UTC ISO 8601 timestamp of session end. Null while active. |
@@ -701,7 +701,7 @@ rather than reconstructing an attribution it cannot know.
 ```json
 {
   "context": "https://trace-protocol.org/v0.3",
-  "trace_version": "0.5.0",
+  "trace_version": "0.5.1",
   "id": "trace_20260205_a1b2c3",
   "created": "2026-02-05T14:30:00Z",
   "ended": "2026-02-05T15:45:00Z",
