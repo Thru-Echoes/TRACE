@@ -17,7 +17,7 @@ import os
 import tempfile
 from pathlib import Path
 
-from trace_mcp.schema import Session
+from trace_mcp.schema import DecisionData, Session
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,18 @@ def _scratchpad_path(project_key: str | None = None) -> Path:
 
 
 # ── Session Summary Builder ──────────────────────────────────────────────
+
+
+def _confidence_suffix(d: DecisionData) -> str:
+    """Compact measurement for the scratchpad; empty when there is none. Side effects: none."""
+    if d.confidence is None:
+        return ""
+    c = d.confidence
+    unit = f" {c.unit}" if c.unit else ""
+    return (
+        f" [{c.estimate:+}{unit}; {c.interval.level * 100:.10g}% nominal interval "
+        f"[{c.interval.lower:+}, {c.interval.upper:+}]; n={c.sample_size}]"
+    )
 
 
 def _build_session_section(session: Session) -> str:
@@ -112,7 +124,10 @@ def _build_session_section(session: Session) -> str:
             assert d is not None
             stype = f", suggestion={d.suggestion_type}" if d.suggestion_type else ""
             note = f" — {d.revision_note}" if d.revision_note else ""
-            lines.append(f"- **[{d.disposition}]** {d.description} (proposed_by={d.proposed_by.type}{stype}){note}")
+            lines.append(
+                f"- **[{d.disposition}]** {d.description} "
+                f"(proposed_by={d.proposed_by.type}{stype}){note}{_confidence_suffix(d)}"
+            )
 
     # ── Open items (unresolved decisions) ────────────────────────────
     unresolved = [e for e in decisions if e.decision and e.decision.disposition == "proposed"]
@@ -123,7 +138,7 @@ def _build_session_section(session: Session) -> str:
         for e in unresolved:
             d = e.decision
             assert d is not None
-            lines.append(f"- [ ] {d.description} (`{e.id}`)")
+            lines.append(f"- [ ] {d.description} (`{e.id}`){_confidence_suffix(d)}")
 
     # ── Gotchas & Corrections ────────────────────────────────────────
     gotchas = [

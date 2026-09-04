@@ -13,3 +13,4 @@ superseded, write a new ADR that cites the old one.
 | [004](004-telemetry-sidecar.md) | Telemetry sidecar — carbon & token-cost as an optional, estimate-provenanced layer | accepted |
 | [005](005-capture-time-integrity.md) | Capture-time integrity via hash-chained, append-only session records | proposed |
 | [006](006-project-identity-and-isolation.md) | Project identity and cross-project isolation | accepted |
+| [007](007-decision-confidence.md) | Decision confidence: a typed measurement behind a decision | accepted |

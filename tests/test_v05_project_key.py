@@ -48,7 +48,7 @@ def _enroll(key: str, *, display: str | None = None, aliases: list[str] | None =
 
 class TestSchemaShape:
     def test_schema_version_is_v05(self) -> None:
-        assert SCHEMA_VERSION == "0.5.0"
+        assert SCHEMA_VERSION == "0.5.1"
 
     def test_project_key_is_optional_and_unconstrained(self) -> None:
         """A pattern here would retroactively invalidate live documents."""

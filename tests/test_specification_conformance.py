@@ -627,6 +627,73 @@ class TestSchemaConformance:
         jsonschema.validate(doc, schema)
 
 
+_VALID_CONFIDENCE: dict[str, Any] = {
+    "interval": {"lower": -30.0, "upper": 583.75, "level": 0.9},
+    "method": {"name": "percentile_bootstrap"},
+    "sample_size": 8,
+    "statistic": "mean_paired_delta",
+    "direction": "higher",
+    "estimate": 260.0,
+}
+
+
+def _with_confidence(block: Any) -> dict[str, Any]:
+    """The handcrafted document with ``block`` inserted as the first decision's confidence."""
+    doc = _handcrafted_session()
+    decision = next(e for e in doc["events"] if e["type"] == "decision")
+    decision["decision"]["confidence"] = block
+    return doc
+
+
+class TestPublishedSchemaChecksConfidence:
+    """The published schema, on its own, must carry the confidence block's structural rules —
+    a producer validating against the file gets them without running this implementation."""
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            {**_VALID_CONFIDENCE, "interval": {"lower": -30.0, "upper": 583.75, "level": 1.0}},
+            {**_VALID_CONFIDENCE, "sample_size": 0},
+            {**_VALID_CONFIDENCE, "evidence": [{"role": "parent", "locator": "x", "sha256": "zz"}]},
+            {**_VALID_CONFIDENCE, "direction": "up"},
+            {**_VALID_CONFIDENCE, "evidence_digests": {"parent": "a" * 64}},
+            {k: v for k, v in _VALID_CONFIDENCE.items() if k != "direction"},
+        ],
+        ids=["level-at-one", "sample-size-zero", "bad-digest", "bad-direction", "unprefixed-digest", "no-direction"],
+    )
+    def test_published_schema_rejects_structural_violations(self, schema: dict, block: Any) -> None:
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(_with_confidence(block), schema)
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            {**_VALID_CONFIDENCE, "evidence": [{"role": "p", "locator": "x", "sha256": "a" * 64 + "\n"}]},
+            {
+                **_VALID_CONFIDENCE,
+                "evidence": [{"role": "p", "locator": "x", "sha256": "a" * 64}],
+                "evidence_digests": {"p": "sha256:" + "a" * 64 + "\n"},
+            },
+        ],
+        ids=["evidence-digest", "digest-map"],
+    )
+    def test_published_schema_rejects_a_digest_with_a_trailing_newline(self, schema: dict, block: Any) -> None:
+        """A JSON Schema `pattern` is matched with Python's `re`, whose `$` also matches before a
+        trailing newline. Length bounds are what make the published file as strict as the model, so a
+        producer validating against the file alone is not told a malformed digest conforms."""
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(_with_confidence(block), schema)
+
+    def test_published_schema_accepts_the_golden_with_extras(self, schema: dict) -> None:
+        golden = json.loads(
+            (Path(__file__).parent / "fixtures" / "decision_log_v1" / "expected_session.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        block = next(e for e in golden["events"] if e.get("decision"))["decision"]["confidence"]
+        jsonschema.validate(_with_confidence(block), schema)
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # Part 2: Structural equivalence — both documents cover the same spec surface
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1302,3 +1369,19 @@ class TestSpecDocumentCompleteness:
         assert "0.2.0" in spec_text
         assert "0.3.0" in spec_text
         assert "0.4.1" in spec_text
+
+
+def test_spec_documents_decision_confidence(spec_text: str) -> None:
+    assert "#### 3.6.1 Decision Confidence" in spec_text
+    assert "| `confidence` |" in spec_text
+    assert "### 4.6 Decision Confidence" in spec_text
+    assert "`trace:confidenceLow`" in spec_text and "`trace:confidenceDirection`" in spec_text
+    assert "It is never a probability that the decision was correct" in spec_text
+    assert "does not interpret" in spec_text
+    assert "verdict rule" not in spec_text.lower()
+
+
+def test_prov_mapping_registers_confidence_terms() -> None:
+    from trace_mcp.schema.prov_mapping import PROV_MAPPING
+
+    assert "DecisionData.confidence" in PROV_MAPPING and "DecisionData.confidence.evidence[]" in PROV_MAPPING

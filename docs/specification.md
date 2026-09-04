@@ -1,9 +1,9 @@
 # Decision Provenance for AI-Assisted Workflows
 
-## Specification v0.5.0
+## Specification v0.5.1
 
-**Status**: Stable — additive (backward-compatible with v0.3.x / v0.4.x). The package version may run ahead of this spec/wire version for hardening releases that change no schema fields.
-**Last Updated**: 2026-07-22
+**Status**: Stable. Every revision through v0.5.0 is additive and backward-compatible with v0.3.x / v0.4.x; v0.5.1 is additive except that it narrows the previously open name `decision.confidence` (Appendix B). The package version may run ahead of this spec/wire version for hardening releases that change no schema fields.
+**Last Updated**: 2026-09-03
 **JSON Schema**: [`trace-v0.5.json`](../schemas/trace-v0.5.json)
 **W3C PROV Namespace**: `https://trace-protocol.org/ns/v0.3#`
 
@@ -79,7 +79,7 @@ A session document is the top-level unit of this specification. Each document de
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `context` | string | SHOULD | URI identifying the specification version. Default: `"https://trace-protocol.org/v0.3"`. |
-| `trace_version` | string | SHOULD | Semantic version of the specification. Default: `"0.5.0"`. |
+| `trace_version` | string | SHOULD | Semantic version of the specification. Default: `"0.5.1"`. |
 | `id` | string | MUST | Unique identifier for this session. |
 | `created` | datetime | MUST | UTC ISO 8601 timestamp of session start. |
 | `ended` | datetime | MAY | UTC ISO 8601 timestamp of session end. Null while active. |
@@ -267,6 +267,7 @@ Records a methodological choice with full attribution and a defined lifecycle. T
 | `suggestion_type` | enum | MAY | One of: `"proactive"` (AI volunteered), `"requested"` (human asked), `"collaborative"` (emerged from discussion). |
 | `tags` | string[] | MAY | Domain-specific tags for categorization. |
 | `warnings` | string[] | MAY | Guard-rail warnings surfaced during proposal (e.g., relevant past corrections). |
+| `confidence` | DecisionConfidence | MAY | The producer-recorded measurement that motivated the decision (see 3.6.1). Absent when the decision was not driven by a measurement. |
 
 **Decision lifecycle**:
 
@@ -299,6 +300,29 @@ Disambiguation table for canonical patterns:
 The disambiguating test: copy the proposal's `description` text back into the conversation log and ask *which message in the transcript does it most closely paraphrase?* The actor of that message is the proposer. If `description` paraphrases the AI's reply to a human question, `proposed_by` is the AI even though the human spoke last.
 
 **What constitutes a decision**: Methodological choices that affect outcomes — which algorithm to use, what threshold to set, how to handle missing data, which data to include or exclude, how to interpret ambiguous results. NOT: trivial implementation choices (variable naming, file organization) or navigation decisions (which file to read next).
+
+#### 3.6.1 Decision Confidence (v0.5.1+)
+
+A decision driven by a measurement MAY carry that measurement, so a consumer can inspect the producer-recorded point estimate, nominal interval, method, sample size and evidence behind the choice. The `confidence` object describes the **measured effect** (for example, a candidate's mean improvement over its parent on an evaluation set). It is never a probability that the decision was correct, and never a claim about data the decider did not see.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `interval` | object | MUST | `{lower, upper, level}`: the bounds, lower first, both finite, and the nominal coverage strictly between 0 and 1. |
+| `method` | object | MUST | `{name, algorithm?, resamples?, seed?}`: how the interval was computed. `name` is a non-empty identifier that consumers MUST NOT reject when unrecognized; `algorithm` names the exact procedure when the producer has one; `resamples`, when present, is at least 1. |
+| `sample_size` | integer | MUST | Number of observations behind the estimate; at least 1. |
+| `statistic` | string | MUST | What was estimated (e.g., `mean_paired_delta`). Non-empty. |
+| `direction` | enum | MUST | `higher` or `lower`: the native sense of the raw metric the statistic was derived from (`higher`: larger raw values are better). Producers MUST orient `statistic` so that a positive `estimate` favours the option the decision describes, whatever `direction` says; `direction` is recorded so a reader can relate the estimate back to the raw metric. |
+| `estimate` | number | MUST | The point estimate. Finite. Recorded, not asserted to lie inside `interval`; some interval methods place it outside. |
+| `unit` | string | MAY | Unit of the statistic. |
+| `evidence` | EvidenceRef[] | SHOULD | Files the estimate rests on, each `{role, locator, sha256}` with non-empty `role` and `locator` and a 64-character lowercase hexadecimal SHA-256. A matching digest shows a holder's bytes match the recorded digest; it does not show the estimate was computed from them. `locator` SHOULD be a relative path or URI; an absolute filesystem path leaks machine detail into every export. |
+| `evidence_digests` | object | MAY | `{role: "sha256:<64 hex>"}`, one entry per evidence role, each equal to that entry's digest; when present, evidence roles MUST be unique. Present for consumers that read digests by role. |
+| `contract` | string | MAY | Identifier of the producer contract that governs any additional keys on this object. |
+
+Identifier-valued fields (`statistic`, `unit`, `method.name`, `method.algorithm`, `contract`, `role`, `locator`) MUST NOT contain a C0 or C1 control character, DEL, or a Unicode line or paragraph separator (U+2028, U+2029). All of these end a line in common text handling, so admitting one would let a single recorded value render as two lines.
+
+**Rule state is not typed here.** A producer's decision rule (a minimum effect, a verdict, a held-out check, a confirmation policy) MAY travel on this object as additional keys governed by the contract `contract` names. A conforming consumer MUST preserve those keys unchanged (7.3) and MUST NOT interpret them; this specification does not interpret them and does not project them into the PROV mapping of §6. The producer's own verifier is the authority for them. Producer-authored free text elsewhere on the decision, such as `rationale`, is ordinary text and may name such a rule's outcome.
+
+**What it is not.** The object is not a signature, not an attestation that the evidence files were produced by any particular party, not a probability that the decision was right, and not a statement about how many candidates were examined, whether observations were reused across decisions, or whether the interval's nominal coverage holds under the producer's design. `level` is the nominal coverage of one interval; across many decisions it makes no family-wise claim. One-sided bounds are out of scope: a producer holding only one bound MUST NOT substitute a sentinel value.
 
 ### 3.7 Annotation (`annotation`)
 
@@ -457,6 +481,12 @@ Each event MUST populate exactly one type-specific data field, and it MUST match
 
 ---
 
+### 4.6 Decision Confidence
+
+When `decision.confidence` is present: every number in it MUST be finite; `interval.lower` MUST NOT exceed `interval.upper`; `interval.level` MUST satisfy `0 < level < 1`; `sample_size` MUST be at least 1; `method.resamples`, when present, MUST be at least 1; `statistic` and `method.name` MUST be non-empty and identifier-valued fields MUST NOT contain control characters; every `evidence[]` entry MUST have a non-empty `role` and `locator` and a 64-character lowercase hexadecimal `sha256`; when `evidence_digests` is present, evidence roles MUST be unique, its keys MUST equal the set of roles, and each value MUST equal `"sha256:"` followed by that entry's `sha256`. The JSON Schema expresses the per-field constraints; the cross-field rules are semantic and MUST be checked by the producer before writing and by a validating consumer after the schema check. Consumers MUST ignore the field's absence, and MUST NOT validate or interpret keys beyond the table in 3.6.1.
+
+---
+
 ## 5. Decision Provenance
 
 This section describes the provenance patterns that distinguish this specification from flat event logs.
@@ -531,8 +561,10 @@ This specification maps to the [W3C PROV Data Model](https://www.w3.org/TR/prov-
 | Project display label | `trace:project` | A literal on the session activity. Retains its display-label meaning permanently: already-published exports carry drifted labels under this predicate, and re-meaning it would silently reinterpret them. |
 | Canonical project key | `trace:projectKey` | An additive sibling literal on the session activity carrying the canonical key (§3.2.2). (v0.5+) |
 | Project | `prov:Entity` (optional) | A project MAY be reified as an entity `trace:project_<key>` carrying `trace:projectKey`, its current `trace:project` display label, and one `trace:aliasLabel` per historical label — so a consumer holding an artifact stamped with an old label can discover that it names the same project. (v0.5+) |
+| Decision confidence | `trace:confidence*` literals | The measurement is projected as scalar literals on the decision activity: `trace:confidenceStatistic`, `trace:confidenceDirection`, `trace:confidenceEstimate`, `trace:confidenceLow`, `trace:confidenceHigh`, `trace:confidenceLevel`, `trace:confidenceMethod`, `trace:confidenceSampleSize`, and when present `trace:confidenceAlgorithm`, `trace:confidenceResamples`, `trace:confidenceSeed`, `trace:confidenceUnit`, `trace:confidenceContract`. The bounds are two literals rather than one array because a bare JSON-LD array is a set and a processor may reorder it. Rule-state keys are not projected. (v0.5.1+) |
+| Decision evidence | `prov:Entity` + `prov:used` | Each `evidence[]` entry is an entity `trace:<event id>_evidence_<32 hex>` (a content hash of role, locator and digest, so two locators for the same bytes stay distinct and a reordered list keeps its identities) with `trace:kind` `Evidence`, `trace:role`, `prov:atLocation` (the locator) and `trace:sha256`; the decision activity `prov:used` it. As with tool inputs, the relation records the producer's assertion; this specification requires no digest verification. (v0.5.1+) |
 
-The v0.5 additions above are new terms **within the frozen `ns/v0.3#` namespace**: additive
+The v0.5 and v0.5.1 additions above are new terms **within the frozen `ns/v0.3#` namespace**: additive
 extensions are valid within an existing namespace, so no `@context` change is required and
 previously exported documents remain valid and unchanged. Exports are never regenerated to
 add `trace:projectKey`; historical artifacts resolve through the published alias table.
@@ -701,7 +733,7 @@ rather than reconstructing an attribution it cannot know.
 ```json
 {
   "context": "https://trace-protocol.org/v0.3",
-  "trace_version": "0.5.0",
+  "trace_version": "0.5.1",
   "id": "trace_20260205_a1b2c3",
   "created": "2026-02-05T14:30:00Z",
   "ended": "2026-02-05T15:45:00Z",
@@ -848,3 +880,4 @@ Contrast with evt_001 (`suggestion_type="proactive"` — AI volunteered) and evt
 | 0.3.0 | 2026-03-05 | Added: `warnings` on decisions, attribution audit at session end, path sanitization for session IDs. Removed: deprecated `verification` field on events, `parent_event_id` from event context. |
 | 0.4.1 | 2026-05-14 | **Additive, fully backwards compatible with v0.3.x and v0.4.0.** Added: **Proposer Identity Rule** (§3.6) — `proposed_by` identifies the author of proposal content, not the speaker of the resolving directive; `discovery` annotation category (§3.7) — non-trivial findings from autonomous work; §3.7.1 **External References in `corrects_event_ids`** with URI-form scheme (`external:`, `jsonl:`, `subagent:`, `tool-result:`); `host` and `parent_event_id` fields on `tool_call` (§3.5) to cover MCP, external non-MCP, and host-internal tools; normative MUST clause on `conversation_snippet` for contributions and corrections with absence-marker convention (§3.4.1); real-time logging guidance + autonomous-execution-window detection (§8.1); question→AI-proposal→accept recognition rows (§8.2). Changed: PROV-LD correction mapping split — event-ID targets emit `prov:wasInvalidatedBy`, URI-form targets emit qualified `prov:wasInfluencedBy` with `prov:atLocation` (§6); dispatch chains emit `prov:wasInformedBy`. Schema additions are optional with defaults that preserve v0.3.0 / v0.4.0 semantics. |
 | 0.5.0 | 2026-07-22 | **Additive, fully backwards compatible with v0.3.x and v0.4.x.** Added: **canonical project identity** — §3.2.2 defines the canonical key algorithm (spec-defined and independent of any implementation's filename sanitization), key immutability, the many-labels-to-one-key alias relation, the resolution order for documents lacking a key, and the reserved `auto`/`shared` keys; optional `metadata.project_key` (§3.2), authoritative when present, with `project` unchanged and still unconstrained as the display label; §4.5 validation rules forbidding consumers from splitting one project across equal-key labels or merging distinct keys, with the documented-divergence pattern covering pre-v0.5 sessions; §6 PROV additions `trace:projectKey` and an optional reified project entity carrying `trace:aliasLabel`, both new terms within the **frozen** `ns/v0.3#` namespace so existing exports are neither invalidated nor regenerated; §7.2 documents the published project registry and its independently versioned `trace-projects-v1.json` interchange schema; §8 records that label repair MUST be alias-table-first, never a rewrite of capture records. Schema file renamed to `trace-v0.5.json` with the `$id` cascade; the `Session.context` spec URL and the PROV namespace URI remain at v0.3. |
+| 0.5.1 | 2026-09-03 | **Schema addition with a narrowing of one previously open name.** Added the optional `confidence` field on decisions (§3.6, §3.6.1): the producer-recorded measurement that motivated the decision (statistic, the raw metric's direction, estimate, interval with coverage, method, sample size, digest-bound evidence), with any producer rule state preserved uninterpreted under a `contract` key; validation rules in §4.6; PROV projection in §6. When the field is present, six of its fields are required. Documents that do not use `decision.confidence` load unchanged; a v0.5.0 document that used that name with a different shape no longer loads. Schema file name unchanged (`trace-v0.5.json`, regenerated). |

@@ -145,6 +145,13 @@ def search_events(
                 searchable.append(evt.decision.rationale)
             if evt.decision.revision_note:
                 searchable.append(evt.decision.revision_note)
+            if evt.decision.confidence is not None:
+                c = evt.decision.confidence
+                searchable.extend([c.statistic, c.method.name])
+                if c.unit:
+                    searchable.append(c.unit)
+                if c.contract:
+                    searchable.append(c.contract)
         if evt.annotation:
             searchable.append(evt.annotation.content)
             searchable.extend(evt.annotation.tags)

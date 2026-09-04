@@ -1,0 +1,294 @@
+{
+  "context": "https://trace-protocol.org/v0.3",
+  "created": "2026-09-03T18:01:00+00:00",
+  "ended": "2026-09-03T18:03:00+00:00",
+  "events": [
+    {
+      "actor": {
+        "id": "claude-code:claude-opus-5",
+        "role": "rollout-agent",
+        "type": "ai"
+      },
+      "annotation": null,
+      "context": {
+        "conversation_snippet": null,
+        "conversation_turn": null,
+        "reasoning_summary": null,
+        "related_event_ids": []
+      },
+      "contribution": null,
+      "decision": {
+        "confidence": {
+          "contract": "rsi-exam-decision-log/v1",
+          "direction": "higher",
+          "estimate": -318.75,
+          "evidence": [
+            {
+              "locator": "results/v1/visible_result.json",
+              "role": "parent",
+              "sha256": "a9fbeefee5519f92a3786b1ce1958637a8e9f92e6ac5a62ceae24aafad795afe"
+            },
+            {
+              "locator": "results/v2/visible_result.json",
+              "role": "candidate",
+              "sha256": "2b989bb0748aa05e8828a3b68f2074968994d70118a09956db5fdfc45fa3da8a"
+            }
+          ],
+          "evidence_digests": {
+            "candidate": "sha256:2b989bb0748aa05e8828a3b68f2074968994d70118a09956db5fdfc45fa3da8a",
+            "parent": "sha256:a9fbeefee5519f92a3786b1ce1958637a8e9f92e6ac5a62ceae24aafad795afe"
+          },
+          "holdout": null,
+          "interval": {
+            "level": 0.9,
+            "lower": -382.5,
+            "upper": -258.75
+          },
+          "method": {
+            "algorithm": "rsi-exam-gate/percentile-bootstrap/1",
+            "name": "percentile_bootstrap",
+            "resamples": 5000,
+            "seed": 20260902
+          },
+          "min_effect": 0.0,
+          "sample_size": 8,
+          "statistic": "mean_paired_delta",
+          "unit": "game_score",
+          "verdict": "below"
+        },
+        "description": "Revert v2 (parent v1)",
+        "disposition": "rejected",
+        "proposed_by": {
+          "id": "claude-code:claude-opus-5",
+          "role": "rollout-agent",
+          "type": "ai"
+        },
+        "rationale": "Mean paired delta -318.8 game_score (n=8); 90 percent percentile bootstrap interval [-382.5, -258.8]; verdict below.",
+        "resolved_by": {
+          "id": "rsi-exam-gate/decide.py",
+          "role": "decision-gate",
+          "type": "system"
+        },
+        "revises_event_id": null,
+        "revision_note": "Interval entirely below zero.",
+        "suggestion_type": "proactive",
+        "tags": [
+          "rsi-exam",
+          "decision-gate",
+          "v2"
+        ],
+        "warnings": []
+      },
+      "id": "evt_001",
+      "session_id": "rsiexam_fixture-rollout",
+      "state_change": null,
+      "timestamp": "2026-09-03T18:01:00+00:00",
+      "tool_call": null,
+      "type": "decision"
+    },
+    {
+      "actor": {
+        "id": "claude-code:claude-opus-5",
+        "role": "rollout-agent",
+        "type": "ai"
+      },
+      "annotation": null,
+      "context": {
+        "conversation_snippet": null,
+        "conversation_turn": null,
+        "reasoning_summary": null,
+        "related_event_ids": []
+      },
+      "contribution": null,
+      "decision": {
+        "confidence": {
+          "contract": "rsi-exam-decision-log/v1",
+          "direction": "higher",
+          "estimate": 260.0,
+          "evidence": [
+            {
+              "locator": "results/v1/visible_result.json",
+              "role": "parent",
+              "sha256": "a9fbeefee5519f92a3786b1ce1958637a8e9f92e6ac5a62ceae24aafad795afe"
+            },
+            {
+              "locator": "results/v3/visible_result.json",
+              "role": "candidate",
+              "sha256": "9cbcf78d6fe4dbcceebdbc9b2ea7c61d8ef749f31d6759301a683ad010fc678e"
+            }
+          ],
+          "evidence_digests": {
+            "candidate": "sha256:9cbcf78d6fe4dbcceebdbc9b2ea7c61d8ef749f31d6759301a683ad010fc678e",
+            "parent": "sha256:a9fbeefee5519f92a3786b1ce1958637a8e9f92e6ac5a62ceae24aafad795afe"
+          },
+          "holdout": null,
+          "interval": {
+            "level": 0.9,
+            "lower": -30.0,
+            "upper": 583.75
+          },
+          "method": {
+            "algorithm": "rsi-exam-gate/percentile-bootstrap/1",
+            "name": "percentile_bootstrap",
+            "resamples": 5000,
+            "seed": 20260902
+          },
+          "min_effect": 0.0,
+          "sample_size": 8,
+          "statistic": "mean_paired_delta",
+          "unit": "game_score",
+          "verdict": "inconclusive"
+        },
+        "description": "Keep v3 provisionally (parent v1)",
+        "disposition": "accepted",
+        "proposed_by": {
+          "id": "claude-code:claude-opus-5",
+          "role": "rollout-agent",
+          "type": "ai"
+        },
+        "rationale": "Mean paired delta +260.0 game_score (n=8); 90 percent percentile bootstrap interval [-30.0, +583.8]; verdict inconclusive.",
+        "resolved_by": {
+          "id": "rsi-exam-gate/decide.py",
+          "role": "decision-gate",
+          "type": "system"
+        },
+        "revises_event_id": null,
+        "revision_note": "Resolved by replication evt_003.",
+        "suggestion_type": "proactive",
+        "tags": [
+          "rsi-exam",
+          "decision-gate",
+          "v3"
+        ],
+        "warnings": []
+      },
+      "id": "evt_002",
+      "session_id": "rsiexam_fixture-rollout",
+      "state_change": null,
+      "timestamp": "2026-09-03T18:02:00+00:00",
+      "tool_call": null,
+      "type": "decision"
+    },
+    {
+      "actor": {
+        "id": "claude-code:claude-opus-5",
+        "role": "rollout-agent",
+        "type": "ai"
+      },
+      "annotation": null,
+      "context": {
+        "conversation_snippet": null,
+        "conversation_turn": null,
+        "reasoning_summary": null,
+        "related_event_ids": []
+      },
+      "contribution": null,
+      "decision": {
+        "confidence": {
+          "contract": "rsi-exam-decision-log/v1",
+          "direction": "higher",
+          "estimate": 518.75,
+          "evidence": [
+            {
+              "locator": "results/v3/replication/parent_result.json",
+              "role": "parent",
+              "sha256": "a9fbeefee5519f92a3786b1ce1958637a8e9f92e6ac5a62ceae24aafad795afe"
+            },
+            {
+              "locator": "results/v3/replication/candidate_result.json",
+              "role": "candidate",
+              "sha256": "e5fa01d7052b712e4f16d06cce0384ba23d591570ee9af0e93950fdf5b6c2d33"
+            }
+          ],
+          "evidence_digests": {
+            "candidate": "sha256:e5fa01d7052b712e4f16d06cce0384ba23d591570ee9af0e93950fdf5b6c2d33",
+            "parent": "sha256:a9fbeefee5519f92a3786b1ce1958637a8e9f92e6ac5a62ceae24aafad795afe"
+          },
+          "holdout": null,
+          "interval": {
+            "level": 0.9,
+            "lower": 467.5,
+            "upper": 575.0
+          },
+          "method": {
+            "algorithm": "rsi-exam-gate/percentile-bootstrap/1",
+            "name": "percentile_bootstrap",
+            "resamples": 5000,
+            "seed": 20260902
+          },
+          "min_effect": 0.0,
+          "sample_size": 8,
+          "statistic": "mean_paired_delta",
+          "unit": "game_score",
+          "verdict": "clears"
+        },
+        "description": "Replication of v3 on fresh seeds (parent v1)",
+        "disposition": "accepted",
+        "proposed_by": {
+          "id": "claude-code:claude-opus-5",
+          "role": "rollout-agent",
+          "type": "ai"
+        },
+        "rationale": "Mean paired delta +518.8 game_score (n=8); 90 percent percentile bootstrap interval [+467.5, +575.0]; verdict clears.",
+        "resolved_by": {
+          "id": "rsi-exam-gate/decide.py",
+          "role": "decision-gate",
+          "type": "system"
+        },
+        "revises_event_id": "evt_002",
+        "revision_note": null,
+        "suggestion_type": "proactive",
+        "tags": [
+          "rsi-exam",
+          "decision-gate",
+          "v3"
+        ],
+        "warnings": []
+      },
+      "id": "evt_003",
+      "session_id": "rsiexam_fixture-rollout",
+      "state_change": null,
+      "timestamp": "2026-09-03T18:03:00+00:00",
+      "tool_call": null,
+      "type": "decision"
+    }
+  ],
+  "id": "rsiexam_fixture-rollout",
+  "metadata": {
+    "custom": {
+      "decision_log_sha256": "8d78aaabb83013b15a66af9850f17074daa8332779eefacc85368a48238dee49",
+      "harness": "claude-code",
+      "importer": "rsi-exam-provenance/trace_from_decisions.py 0.1",
+      "locator_base": "artifacts/app/methods",
+      "model": "claude-opus-5",
+      "rollout_id": "fixture-rollout",
+      "source": "rsi-exam-decision-log/v1",
+      "task": "game2048_policy_search"
+    },
+    "description": "Decision-gate record for RSI-Exam rollout fixture-rollout",
+    "doi": null,
+    "environment": null,
+    "experiment_id": "fixture-rollout",
+    "participants": [
+      {
+        "id": "claude-code:claude-opus-5",
+        "role": "rollout-agent",
+        "type": "ai"
+      },
+      {
+        "id": "rsi-exam-gate/decide.py",
+        "role": "decision-gate",
+        "type": "system"
+      }
+    ],
+    "project": "rsi-exam-provenance",
+    "project_key": "rsi-exam-provenance",
+    "tags": [
+      "rsi-exam",
+      "decision-gate"
+    ]
+  },
+  "status": "completed",
+  "summary": "RSI-Exam rollout fixture-rollout (game2048_policy_search, claude-code, claude-opus-5): 0 kept, 1 reverted, 1 provisional, 1 replicated.",
+  "trace_version": "0.5.0"
+}
