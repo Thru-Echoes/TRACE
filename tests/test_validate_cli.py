@@ -183,3 +183,76 @@ class TestCliMain:
             f"stdout: {result.stdout}\nstderr: {result.stderr}"
         )
         assert "PASS" in result.stdout
+
+
+# ── Semantic validation (specification §4) ───────────────────────────────────
+
+
+class TestSemanticValidation:
+    """`trace-mcp validate` applies the specification's semantic rules, not only
+    the structural JSON Schema.
+
+    The schema cannot express the cross-field rules of specification §4: it
+    declares `resolved_by` optional and every event-data field optional, so a
+    decision claiming `accepted` with no resolver (§4.2) and an event whose
+    `type` does not match its populated data field (§4.1) both satisfy it. Those
+    documents are invalid records, and a validator that passes them tells a
+    producer its output conforms when it does not.
+    """
+
+    @staticmethod
+    def _fixture_doc() -> dict:
+        return json.loads(FIXTURE_SESSION.read_text(encoding="utf-8"))
+
+    def test_accepts_the_unmodified_fixture(self, tmp_path: Path) -> None:
+        """Positive control: the semantic pass must not reject a valid document."""
+        good = tmp_path / "good.json"
+        good.write_text(json.dumps(self._fixture_doc()), encoding="utf-8")
+        assert main([str(good)]) == 0
+
+    def test_rejects_a_resolved_decision_with_no_resolver(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """§4.2: a non-proposed disposition MUST carry a resolved_by actor."""
+        doc = self._fixture_doc()
+        decision = next(e for e in doc["events"] if e["type"] == "decision")
+        decision["decision"]["disposition"] = "accepted"
+        decision["decision"]["resolved_by"] = None
+
+        bad = tmp_path / "unresolved.json"
+        bad.write_text(json.dumps(doc), encoding="utf-8")
+
+        # The schema alone accepts it; only the semantic pass rejects it.
+        jsonschema = pytest.importorskip("jsonschema")
+        jsonschema.validate(json.loads(bad.read_text(encoding="utf-8")), load_schema())
+
+        assert main([str(bad)]) == 1
+        assert "resolved_by" in capsys.readouterr().out
+
+    def test_rejects_an_event_whose_type_does_not_match_its_data(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """§4.1: each event populates exactly the data field its `type` names."""
+        doc = self._fixture_doc()
+        decision = next(e for e in doc["events"] if e["type"] == "decision")
+        decision["decision"] = None
+
+        bad = tmp_path / "mismatched.json"
+        bad.write_text(json.dumps(doc), encoding="utf-8")
+
+        jsonschema = pytest.importorskip("jsonschema")
+        jsonschema.validate(json.loads(bad.read_text(encoding="utf-8")), load_schema())
+
+        assert main([str(bad)]) == 1
+        assert "decision" in capsys.readouterr().out
+
+    def test_a_semantic_failure_does_not_stop_a_multi_file_run(self, tmp_path: Path) -> None:
+        """Mirrors the unreadable-file behaviour: report per file, keep going."""
+        doc = self._fixture_doc()
+        decision = next(e for e in doc["events"] if e["type"] == "decision")
+        decision["decision"]["disposition"] = "accepted"
+        decision["decision"]["resolved_by"] = None
+        bad = tmp_path / "bad.json"
+        bad.write_text(json.dumps(doc), encoding="utf-8")
+
+        assert main([str(bad), str(FIXTURE_SESSION)]) == 1
