@@ -1,4 +1,5 @@
-"""Validate TRACE session JSON files against the packaged JSON Schema.
+"""Validate TRACE session JSON files against the packaged JSON Schema and the
+specification's semantic rules.
 
 This module backs the ``trace-mcp validate`` subcommand. It lives in the
 package (not ``scripts/``) and loads ``schemas/trace-v0.5.json`` as package
@@ -6,6 +7,10 @@ data via importlib.resources, so validation works identically from wheel
 installs, editable installs, and source checkouts. The packaged schema is
 written by ``scripts/generate_schema.py`` and guarded byte-identical to the
 top-level spec artifact ``schemas/trace-v0.5.json``.
+
+Validation is two passes: the schema for structure, then the Pydantic models
+for the cross-field rules of specification §4, which JSON Schema cannot state.
+A document that passes the first and fails the second is reported as FAIL.
 
 Exports: ``load_schema``, ``validate_file``, ``main``.
 
@@ -25,6 +30,10 @@ import sys
 from importlib import resources
 from pathlib import Path
 
+from pydantic import ValidationError
+
+from trace_mcp.schema import Session
+
 _SCHEMA_FILENAME = "trace-v0.5.json"
 
 
@@ -39,7 +48,15 @@ def load_schema() -> dict:
 
 
 def validate_file(path: Path, schema: dict) -> bool:
-    """Validate a single session file against the schema. Returns True if valid.
+    """Validate a session file structurally, then semantically. Returns True if valid.
+
+    Two passes, because neither alone is sufficient. The JSON Schema states the
+    document's shape; the specification's §4 rules are cross-field and cannot be
+    expressed in it (``resolved_by`` is declared optional, and every event-data
+    field is optional, so a decision claiming ``accepted`` with no resolver and
+    an event whose ``type`` contradicts its populated data both satisfy the
+    schema). Loading the document through the models applies those rules, so a
+    producer is told its output conforms only when it actually does.
 
     Side effect: prints one ``  PASS``/``  FAIL`` line to stdout.
     """
@@ -48,10 +65,18 @@ def validate_file(path: Path, schema: dict) -> bool:
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
         jsonschema.validate(data, schema)
+        Session.model_validate(data)
         print(f"  PASS  {path}")
         return True
     except jsonschema.ValidationError as e:
         print(f"  FAIL  {path}: {e.message}")
+        return False
+    except ValidationError as e:
+        # Semantic failure (specification §4). Report the first error with the
+        # field path that carried it, so the producer knows where to look.
+        first = e.errors()[0]
+        location = ".".join(str(part) for part in first["loc"]) or "(document root)"
+        print(f"  FAIL  {path}: {location}: {first['msg']}")
         return False
     except json.JSONDecodeError as e:
         print(f"  FAIL  {path}: Invalid JSON: {e}")

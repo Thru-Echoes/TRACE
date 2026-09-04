@@ -358,6 +358,51 @@ class TestVersionDeclarationSites:
         schema_id = json.loads(published.read_text()).get("$id", "")
         assert schema_id.endswith(name), f"schemas/{name} has a mismatched $id: {schema_id!r}"
 
+    # ── Spec/wire version restatements (INV-10) ──────────────────────────────
+    #
+    # The three sites above (spec heading, schema filename, schema $id) were the
+    # registered set. Bumping SCHEMA_VERSION also requires editing five prose
+    # restatements that no test covered, so a bump could ship with the docs
+    # stating the previous wire version. These guard the rest of the set.
+
+    @pytest.mark.parametrize(
+        ("doc", "anchor", "template"),
+        [
+            ("README.md", "**Version:**", "**Spec:** v{version}"),
+            ("CLAUDE.md", "> **Version**:", "protocol/schema v{version}"),
+            ("docs/ONBOARDING.md", "**Current state**:", "protocol/schema `{version}`"),
+        ],
+    )
+    def test_docs_state_the_schema_version(self, doc: str, anchor: str, template: str) -> None:
+        """The banner lines restate the wire version beside the package version.
+
+        These lines carry both numbers, and the two are deliberately independent,
+        so a reader trusts each half separately.
+        """
+        expected = _spec_version()
+        matches = [ln for ln in (TRACE_ROOT / doc).read_text().split("\n") if ln.startswith(anchor)]
+
+        assert len(matches) == 1, f"expected exactly one line starting {anchor!r} in {doc}, found {len(matches)}"
+        needle = template.format(version=expected)
+        assert needle in matches[0], f"{doc} does not state {needle!r} for SCHEMA_VERSION: {matches[0]!r}"
+
+    def test_spec_default_trace_version_matches_the_schema_version(self) -> None:
+        """§3.1 tells a producer what to stamp into `trace_version`; stale here
+        means every document written from the spec carries the wrong version."""
+        expected = _spec_version()
+        text = (TRACE_ROOT / "docs" / "specification.md").read_text()
+        needle = f'Default: `"{expected}"`.'
+
+        assert needle in text, f"docs/specification.md §3.1 does not state {needle!r} for SCHEMA_VERSION"
+
+    def test_spec_example_document_states_the_schema_version(self) -> None:
+        """The Appendix A example is the shape people copy."""
+        expected = _spec_version()
+        text = (TRACE_ROOT / "docs" / "specification.md").read_text()
+        needle = f'"trace_version": "{expected}"'
+
+        assert needle in text, f"the Appendix A example does not carry {needle!r}"
+
 
 # ── Consumer Project Tests ───────────────────────────────────────────────────
 
