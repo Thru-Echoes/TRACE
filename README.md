@@ -35,9 +35,11 @@ TRACE runs as a **sidecar** alongside your domain MCP servers. It doesn't proxy 
 
 > **New here?** [docs/ONBOARDING.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/ONBOARDING.md) is the map for a developer or a user — the mental model, the attribution rules, project identity, hooked-vs-bare projects, and the dev workflow. [docs/WHAT-IS-TRACE.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/WHAT-IS-TRACE.md) explains the same thing without assuming a technical background.
 
-**Version:** 0.5.0 | **Spec:** v0.5.1 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
+**Version:** 0.5.1 | **Spec:** v0.5.1 | **Schema:** `https://trace-protocol.org/v0.3` | **License:** Apache 2.0
 
 > The schema URI is an identifier (per W3C PROV convention) and is not currently a resolvable URL. The machine-readable JSON Schema lives at [`schemas/trace-v0.5.json`](https://github.com/Thru-Echoes/TRACE/blob/main/schemas/trace-v0.5.json) in this repository.
+
+**New in 0.5.1 — decision confidence.** Additive; every earlier session loads unchanged. A decision may now carry the measurement that motivated it as a typed `confidence` object — the estimate, an interval and its nominal coverage, the method, the sample size, and digest-bound evidence references — checked on construction, in the published schema, and by `trace-mcp validate`. It types the *measurement* only: a producer's own decision rule is preserved beside it under a `contract` key and never interpreted, because encoding one producer's rule in a generic protocol would refuse every producer with a different one. The release also adds a Streamable HTTP transport, an importer for Gents run timelines, and `trace-mcp doctor` / `fleet-check`, which check a *deployment* rather than the source tree.
 
 **New in 0.5.0 — canonical project identity.** Additive; every v0.3.x and v0.4.x session loads unchanged. A project is identified by a stable canonical key rather than a free-text label, so case and separator variants of one name stop reading as separate projects, and two genuinely different projects can no longer be merged by a case-insensitive filesystem. A `TRACE_PROJECT` pin binds one server process to one project, and cross-project reads and writes fail closed. No capture record is ever rewritten — a mislabelled project is repaired by adding an alias.
 
@@ -107,7 +109,7 @@ AI Client (any MCP-aware client: Claude Code, Cursor, ChatGPT, Codex, ...)
 > local checkout or a pinned VCS source:
 >
 > ```bash
-> uvx --from 'git+https://github.com/Thru-Echoes/TRACE.git@v0.5.0' trace-mcp
+> uvx --from 'git+https://github.com/Thru-Echoes/TRACE.git@v0.5.1' trace-mcp
 > ```
 
 ### Install
