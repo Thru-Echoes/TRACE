@@ -8,6 +8,12 @@ Two extraction backends:
    rationale.
 2. **LLM-enhanced** (primary when configured) — Sends session events to
    an OpenAI model for intelligent identification and synthesis of learnings.
+
+Both backends refuse two kinds of input. An **imported record** — a session an
+importer built from another system's data — is provenance, not a learning
+source, and yields nothing. A **machine-measured decision** — one carrying a
+typed confidence block with a producer contract key — is skipped wherever it
+appears, so a human annotation logged beside one still extracts.
 """
 
 from __future__ import annotations
@@ -19,7 +25,7 @@ from typing import TYPE_CHECKING, Literal
 from trace_mcp.extensions.learn.egress import attest_egress
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, LearningCategory
 from trace_mcp.extensions.learn.store import add_learning, add_learning_dedup
-from trace_mcp.schema import Session
+from trace_mcp.schema import Session, TraceEvent
 
 if TYPE_CHECKING:
     from trace_mcp.extensions.learn.config import LearnConfig
@@ -58,6 +64,32 @@ except ImportError:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────
+
+
+def _is_imported_record(session: Session) -> bool:
+    """Whether this session was built by an importer from another system's data (pure).
+
+    An imported record is provenance, not a learning source: its decisions are templates filled with
+    identifiers and numbers rather than conversation, so extracting them yields one entry per machine
+    decision, each naming a version id meaningful only inside one run, and each then rides in the
+    dedup prompt of every later extraction. Both markers must be present and non-empty; every importer
+    in this package sets both.
+    """
+    custom = session.metadata.custom
+    source, importer = custom.get("source"), custom.get("importer")
+    return isinstance(source, str) and bool(source) and isinstance(importer, str) and bool(importer)
+
+
+def _is_machine_measured(evt: TraceEvent) -> bool:
+    """Whether a decision was made by a machine gate rather than by people (pure).
+
+    The signal is the presence of the ``contract`` key on the typed confidence block, not its value:
+    a producer that names no contract still wrote the block from a gate. Presence is read from
+    ``model_fields_set`` so an explicit null counts and an absent key does not.
+    """
+    if evt.decision is None or evt.decision.confidence is None:
+        return False
+    return "contract" in evt.decision.confidence.model_fields_set
 
 
 def _already_extracted(store: KnowledgeStore, session_id: str, event_id: str) -> bool:
@@ -135,11 +167,17 @@ def extract_from_session(
     Idempotent: skips events that have already been extracted.
     When *dedup_threshold* is set, also skips content-duplicate learnings.
     Returns list of new learning IDs.
+
+    Yields nothing for an imported record, and skips machine-measured decisions in any session, so a
+    human annotation logged beside one still extracts.
     """
+    if _is_imported_record(session):
+        return []
+
     new_ids: list[str] = []
 
     for evt in session.events:
-        if _already_extracted(store, session.id, evt.id):
+        if _already_extracted(store, session.id, evt.id) or _is_machine_measured(evt):
             continue
 
         # ── Annotations ──
@@ -224,9 +262,18 @@ def extract_from_session(
 
 
 def _format_events_for_llm(session: Session) -> str:
-    """Format session events as a text block for LLM consumption."""
+    """Format session events as a text block for LLM consumption.
+
+    Empty for an imported record, and omits machine-measured decisions, matching the rule-based path.
+    The caller returns on an empty block before attesting any egress, so an imported record never
+    reaches a cloud provider.
+    """
+    if _is_imported_record(session):
+        return ""
     lines: list[str] = []
     for evt in session.events:
+        if _is_machine_measured(evt):
+            continue
         parts = [f"[{evt.id}] type={evt.type}"]
         if evt.annotation:
             parts.append(f"category={evt.annotation.category}")

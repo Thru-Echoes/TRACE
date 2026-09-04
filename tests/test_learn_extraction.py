@@ -15,6 +15,7 @@ import pytest
 from trace_mcp.extensions.learn.config import LearnConfig
 from trace_mcp.extensions.learn.extraction import (
     _EXTRACTABLE_CATEGORIES,
+    _format_events_for_llm,
     extract_from_session,
     extract_from_session_auto,
     extract_from_session_llm,
@@ -626,3 +627,139 @@ class TestExtractionEdgeCases:
         assert len(new_ids) == 1
         assert ks.learnings[0].category == "observation"
         assert "new_approach.py" in ks.learnings[0].content
+
+
+# ── Imported records and machine-measured decisions ──────────────────────────
+
+_MEASUREMENT: dict[str, object] = {
+    "interval": {"lower": -30.0, "upper": 583.75, "level": 0.9},
+    "method": {"name": "percentile_bootstrap"},
+    "sample_size": 8,
+    "statistic": "mean_paired_delta",
+    "direction": "higher",
+    "estimate": 260.0,
+}
+
+
+def _measured(event: TraceEvent, **block: object) -> TraceEvent:
+    """Attach a confidence block to a decision event built by ``_decision``."""
+    from trace_mcp.schema import DecisionConfidence
+
+    assert event.decision is not None
+    event.decision = event.decision.model_copy(
+        update={"confidence": DecisionConfidence.model_validate({**_MEASUREMENT, **block})}
+    )
+    return event
+
+
+def _imported(session: Session, **custom: object) -> Session:
+    session.metadata.custom = dict(custom)
+    return session
+
+
+class TestImportedRecordsAreNotLearningSources:
+    """An imported record is provenance, not a learning source. Its decisions are templates over
+    identifiers and numbers, so near-identical gate reverts score well below the dedup threshold and
+    each becomes its own entry naming a version id meaningful only inside one rollout."""
+
+    @staticmethod
+    def _reverted() -> TraceEvent:
+        return _decision(
+            "evt_001",
+            "Revert v2 (parent v1)",
+            disposition="rejected",
+            revision_note="Interval entirely below zero.",
+        )
+
+    def test_an_imported_record_yields_nothing(self) -> None:
+        session = _imported(_session([self._reverted()]), source="gents-run-timeline", importer="trace-mcp 0.5.0")
+        assert extract_from_session(KnowledgeStore(project="test"), session) == []
+
+    def test_an_imported_record_is_skipped_whole_annotations_included(self) -> None:
+        session = _imported(
+            _session([self._reverted(), _annotation("evt_002", "correction", "The gate used the wrong parent.")]),
+            source="gents-run-timeline",
+            importer="trace-mcp 0.5.0",
+        )
+        assert extract_from_session(KnowledgeStore(project="test"), session) == []
+
+    @pytest.mark.parametrize(
+        "custom",
+        [
+            {"source": "gents-run-timeline"},
+            {"importer": "trace-mcp 0.5.0"},
+            {"source": "", "importer": "trace-mcp 0.5.0"},
+            {"source": "gents-run-timeline", "importer": ""},
+            {"source": 1, "importer": "trace-mcp 0.5.0"},
+            {"source": ["a"], "importer": "trace-mcp 0.5.0"},
+            {},
+        ],
+        ids=["no-importer", "no-source", "empty-source", "empty-importer", "int-source", "list-source", "neither"],
+    )
+    def test_both_markers_must_be_non_empty_strings(self, custom: dict[str, object]) -> None:
+        """Anything short of both markers present as non-empty strings is an ordinary session."""
+        session = _imported(_session([self._reverted()]), **custom)
+        assert len(extract_from_session(KnowledgeStore(project="test"), session)) == 1
+
+    def test_a_machine_measured_decision_is_skipped_but_a_human_note_beside_it_is_not(self) -> None:
+        session = _session(
+            [
+                _measured(self._reverted(), contract="rsi-exam-decision-log/v1"),
+                _annotation("evt_002", "correction", "The parent digest named the wrong result file."),
+            ]
+        )
+        ks = KnowledgeStore(project="test")
+        new_ids = extract_from_session(ks, session)
+        assert len(new_ids) == 1
+        assert ks.learnings[0].source_event == "evt_002"
+
+    def test_an_explicit_null_contract_still_marks_a_decision_machine_measured(self) -> None:
+        """Presence of the key is the signal, not its truthiness: a producer that names no contract
+        still wrote the block from a gate."""
+        session = _session([_measured(self._reverted(), contract=None)])
+        assert extract_from_session(KnowledgeStore(project="test"), session) == []
+
+    def test_a_block_without_a_contract_key_does_not_skip_the_decision(self) -> None:
+        session = _session([_measured(self._reverted())])
+        assert len(extract_from_session(KnowledgeStore(project="test"), session)) == 1
+
+    def test_the_llm_event_block_omits_what_the_rules_skip(self) -> None:
+        session = _session(
+            [
+                _measured(self._reverted(), contract="rsi-exam-decision-log/v1"),
+                _annotation("evt_002", "correction", "The parent digest named the wrong result file."),
+            ]
+        )
+        text = _format_events_for_llm(session)
+        assert "evt_001" not in text
+        assert "evt_002" in text
+
+    def test_the_llm_event_block_is_empty_for_an_imported_record(self) -> None:
+        """Empty means the LLM path returns before it attests any egress, so an imported record
+        never reaches a cloud provider."""
+        session = _imported(_session([self._reverted()]), source="gents-run-timeline", importer="trace-mcp 0.5.0")
+        assert _format_events_for_llm(session) == ""
+
+    async def test_an_imported_record_never_reaches_a_cloud_provider(self) -> None:
+        """The claim that matters, guarded directly rather than through the empty event block:
+        the LLM path returns before it attests any egress, so nothing is sent and nothing is
+        recorded as sent."""
+        session = _imported(_session([self._reverted()]), source="gents-run-timeline", importer="trace-mcp 0.5.0")
+        config = LearnConfig(openai_api_key="test-key", llm_enabled=True, llm_extraction_model="gpt-4o-mini")
+        with (
+            patch("trace_mcp.extensions.learn.extraction.attest_egress") as attest,
+            patch("trace_mcp.extensions.learn.extraction._HAS_OPENAI", True),
+            patch("trace_mcp.extensions.learn.extraction.AsyncOpenAI") as MockClient,
+        ):
+            # The client is mocked so that a future regression fails on the assertion below rather
+            # than by reaching the network: without the guard this path really does call out.
+            MockClient.return_value = AsyncMock()
+            assert await extract_from_session_llm(KnowledgeStore(project="test"), session, config) == []
+        attest.assert_not_called()
+        MockClient.assert_not_called()
+
+    def test_positive_control_a_plain_rejected_decision_still_extracts(self) -> None:
+        session = _session([self._reverted()])
+        ks = KnowledgeStore(project="test")
+        assert len(extract_from_session(ks, session)) == 1
+        assert "Interval entirely below zero." in ks.learnings[0].content
