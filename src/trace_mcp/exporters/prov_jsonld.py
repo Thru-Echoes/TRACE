@@ -17,6 +17,7 @@ round-trip test). Semantics are unchanged: the v0.4.1 correction split
 
 from __future__ import annotations
 
+import hashlib
 import json
 from typing import Any
 
@@ -176,6 +177,42 @@ def export_prov_jsonld(session: Session) -> str:
                 a["trace:warnings"] = _lit(d.warnings)
             if d.revises_event_id:
                 rel(aid, "prov:wasRevisionOf", f"trace:{d.revises_event_id}")
+            if d.confidence is not None:
+                c = d.confidence
+                a["trace:confidenceStatistic"] = c.statistic
+                a["trace:confidenceDirection"] = c.direction
+                a["trace:confidenceEstimate"] = c.estimate
+                a["trace:confidenceLow"] = c.interval.lower
+                a["trace:confidenceHigh"] = c.interval.upper
+                a["trace:confidenceLevel"] = c.interval.level
+                a["trace:confidenceMethod"] = c.method.name
+                a["trace:confidenceSampleSize"] = c.sample_size
+                if c.method.algorithm:
+                    a["trace:confidenceAlgorithm"] = c.method.algorithm
+                if c.method.resamples is not None:
+                    a["trace:confidenceResamples"] = c.method.resamples
+                if c.method.seed is not None:
+                    a["trace:confidenceSeed"] = c.method.seed
+                if c.unit:
+                    a["trace:confidenceUnit"] = c.unit
+                if c.contract:
+                    a["trace:confidenceContract"] = c.contract
+                for ev in c.evidence:
+                    # Entity identity is a content hash of the whole reference (role, locator, digest):
+                    # two locators for the same bytes stay two entities, a reordered list keeps every
+                    # id, and no raw string enters the identifier.
+                    key = json.dumps(
+                        {"locator": ev.locator, "role": ev.role, "sha256": ev.sha256},
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    )
+                    ev_id = f"{aid}_evidence_{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+                    ent = node(ev_id, "prov:Entity")
+                    ent["trace:kind"] = "Evidence"
+                    ent["trace:role"] = ev.role
+                    ent["prov:atLocation"] = ev.locator
+                    ent["trace:sha256"] = ev.sha256
+                    rel(aid, "prov:used", ev_id)
 
         elif evt.type == "annotation" and evt.annotation:
             an = evt.annotation

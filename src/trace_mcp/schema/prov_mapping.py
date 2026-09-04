@@ -12,6 +12,13 @@ PROV_MAPPING = {
     "ToolCallData.output": "prov:Entity",  # prov:wasGeneratedBy
     "DecisionData": "prov:Activity",  # with trace: attributes
     "DecisionData.revision": "prov:wasRevisionOf",
+    # v0.5.1: decision confidence. Scalar trace:confidence* literals on the decision Activity (the two
+    # bounds are separate literals because a bare JSON-LD array is a set and may be reordered); each
+    # evidence file is a prov:Entity the decision prov:used, which, as with tool inputs, records the
+    # producer's assertion (TRACE verifies no digest). Entity ids are content hashes of the reference.
+    # Rule-state extras (verdict, min_effect, holdout) are not projected: TRACE does not read them.
+    "DecisionData.confidence": "trace:confidence* literals on the prov:Activity",
+    "DecisionData.confidence.evidence[]": "prov:Entity (trace:kind=Evidence), prov:used by the decision Activity",
     "AnnotationData": "prov:Entity",  # prov:wasAttributedTo
     # v0.4.1: corrections split into two relations depending on target shape.
     # Event-ID target = repudiatory invalidation (the prior event is no longer

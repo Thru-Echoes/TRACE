@@ -103,3 +103,58 @@ def test_prov_namespace_present_in_graph() -> None:
     assert any(i.startswith(_PROV) for i in iris), (
         f"no PROV-O namespace IRI in parsed graph; sample={sorted(iris)[:10]}"
     )
+
+
+_TRACE_NS = "https://trace-protocol.org/ns/v0.3#"
+
+
+def _session_with_confidence() -> Session:
+    from trace_mcp.schema import DecisionConfidence
+    from trace_mcp.schema.events import DecisionData
+
+    s = Session(
+        id="trace_test_conf",
+        metadata=SessionMetadata(project="confidence-roundtrip", participants=[Actor(type="ai", id="claude")]),
+    )
+    s.events.append(
+        TraceEvent(
+            id="evt_001",
+            session_id="trace_test_conf",
+            type="decision",
+            actor=Actor(type="ai", id="claude"),
+            decision=DecisionData(
+                description="Keep v3 provisionally",
+                proposed_by=Actor(type="ai", id="claude"),
+                confidence=DecisionConfidence.model_validate(
+                    {
+                        "interval": {"lower": -30.0, "upper": 583.75, "level": 0.9},
+                        "method": {"name": "percentile_bootstrap"},
+                        "sample_size": 8,
+                        "statistic": "mean_paired_delta",
+                        "direction": "higher",
+                        "estimate": 260.0,
+                        "evidence": [
+                            {"role": "candidate", "locator": "results/v3/visible_result.json", "sha256": "b" * 64}
+                        ],
+                        "evidence_digests": {"candidate": "sha256:" + "b" * 64},
+                    }
+                ),
+            ),
+        )
+    )
+    return s
+
+
+def test_confidence_terms_survive_jsonld_parsing() -> None:
+    """The confidence literals and the evidence entity are real triples, not just JSON keys."""
+    raw = export_prov_jsonld(_session_with_confidence())
+    g = rdflib.Graph()
+    g.parse(data=raw, format="json-ld")
+
+    lows = [o.toPython() for _, _, o in g.triples((None, rdflib.URIRef(_TRACE_NS + "confidenceLow"), None))]
+    assert -30.0 in lows
+
+    used = [o for _, _, o in g.triples((None, rdflib.URIRef(_PROV + "used"), None))]
+    assert used
+    digests = [str(o) for entity in used for _, _, o in g.triples((entity, rdflib.URIRef(_TRACE_NS + "sha256"), None))]
+    assert "b" * 64 in digests

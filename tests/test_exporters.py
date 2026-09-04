@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 
 import pytest
@@ -359,3 +360,125 @@ class TestMarkdownEdgeCases:
         md = export_markdown(session)
         assert "Contributions" in md
         assert long_desc in md
+
+
+# ── DecisionConfidence rendering (v0.5.1) ───────────────────────────────────
+
+
+def _evidence_id(activity_id: str, role: str, locator: str, sha256: str) -> str:
+    """Mirror of the exporter's evidence-entity id: activity id plus a content hash of the reference."""
+    key = json.dumps({"locator": locator, "role": role, "sha256": sha256}, sort_keys=True, separators=(",", ":"))
+    return f"{activity_id}_evidence_{hashlib.sha256(key.encode()).hexdigest()[:16]}"
+
+
+@pytest.fixture
+def confident_session(sample_session: Session) -> Session:
+    from trace_mcp.schema import DecisionConfidence
+
+    session = sample_session.model_copy(deep=True)
+    decision = next(e for e in session.events if e.type == "decision")
+    assert decision.decision is not None
+    decision.decision = decision.decision.model_copy(
+        update={
+            "confidence": DecisionConfidence.model_validate(
+                {
+                    "interval": {"lower": -30.0, "upper": 583.75, "level": 0.9},
+                    "method": {
+                        "name": "percentile_bootstrap",
+                        "algorithm": "rsi-exam-gate/percentile-bootstrap/1",
+                        "resamples": 5000,
+                        "seed": 20260902,
+                    },
+                    "sample_size": 8,
+                    "contract": "rsi-exam-decision-log/v1",
+                    "statistic": "mean_paired_delta",
+                    "unit": "game_score",
+                    "direction": "higher",
+                    "estimate": 260.0,
+                    "evidence": [
+                        {"role": "candidate", "locator": "results/v3/visible_result.json", "sha256": "b" * 64}
+                    ],
+                    "evidence_digests": {"candidate": "sha256:" + "b" * 64},
+                    "min_effect": 0.0,
+                    "verdict": "inconclusive",
+                    "holdout": None,
+                }
+            )
+        }
+    )
+    return session
+
+
+class TestConfidenceRendering:
+    def test_markdown_renders_the_measurement(self, confident_session: Session) -> None:
+        md = export_markdown(confident_session)
+        assert (
+            "- **Measured effect**: mean_paired_delta = +260.0 game_score "
+            "(positive favours the candidate; raw metric: higher is better); "
+            "90% nominal interval [-30.0, +583.75]; n=8"
+        ) in md
+        assert (
+            "- **Method**: percentile_bootstrap (rsi-exam-gate/percentile-bootstrap/1), resamples=5000, seed=20260902"
+        ) in md
+        assert (
+            f"- **Evidence** (recorded by the producer, not verified by TRACE): "
+            f"results/v3/visible_result.json (candidate, sha256 {'b' * 64})"
+        ) in md
+        assert (
+            "- **Contract**: rsi-exam-decision-log/v1; preserved keys not read by TRACE: holdout, min_effect, verdict"
+        ) in md
+
+    def test_prov_carries_the_measurement_and_evidence(self, confident_session: Session) -> None:
+        doc = json.loads(export_prov_jsonld(confident_session))
+        graph = doc["@graph"]
+        a = next(n for n in graph if n.get("trace:kind") == "Decision" and "trace:confidenceEstimate" in n)
+        assert (a["trace:confidenceLow"], a["trace:confidenceHigh"], a["trace:confidenceLevel"]) == (
+            -30.0,
+            583.75,
+            0.9,
+        )
+        assert a["trace:confidenceDirection"] == "higher" and a["trace:confidenceSampleSize"] == 8
+        assert a["trace:confidenceMethod"] == "percentile_bootstrap"
+        assert a["trace:confidenceContract"] == "rsi-exam-decision-log/v1"
+        assert not any(k.startswith("trace:confidenceVerdict") or k.startswith("trace:confidenceMinEffect") for k in a)
+        ev_id = _evidence_id(a["@id"], "candidate", "results/v3/visible_result.json", "b" * 64)
+        ent = next(n for n in graph if n["@id"] == ev_id)
+        assert ent["trace:kind"] == "Evidence" and ent["prov:atLocation"] == "results/v3/visible_result.json"
+        assert ent["trace:role"] == "candidate" and ent["trace:sha256"] == "b" * 64
+        assert {u["@id"] for u in a["prov:used"]} == {ev_id}
+
+    def test_prov_evidence_identity_is_content_derived(self, confident_session: Session) -> None:
+        """Two references to the same bytes under the same role at different locators stay two entities,
+        and reordering the evidence list leaves every entity id unchanged."""
+        from trace_mcp.schema import DecisionConfidence
+
+        session = confident_session.model_copy(deep=True)
+        decision = next(e for e in session.events if e.type == "decision")
+        assert decision.decision is not None and decision.decision.confidence is not None
+        block = decision.decision.confidence.model_dump()
+        block["evidence"] = [
+            {"role": "candidate", "locator": "results/v3/visible_result.json", "sha256": "b" * 64},
+            {"role": "candidate", "locator": "results/v3/copy_of_visible_result.json", "sha256": "b" * 64},
+        ]
+        block["evidence_digests"] = None
+        decision.decision = decision.decision.model_copy(
+            update={"confidence": DecisionConfidence.model_validate(block)}
+        )
+        ids_a = {
+            n["@id"] for n in json.loads(export_prov_jsonld(session))["@graph"] if n.get("trace:kind") == "Evidence"
+        }
+        assert len(ids_a) == 2
+        block["evidence"].reverse()
+        decision.decision = decision.decision.model_copy(
+            update={"confidence": DecisionConfidence.model_validate(block)}
+        )
+        ids_b = {
+            n["@id"] for n in json.loads(export_prov_jsonld(session))["@graph"] if n.get("trace:kind") == "Evidence"
+        }
+        assert ids_a == ids_b
+
+    def test_decisions_without_confidence_render_unchanged(self, sample_session: Session) -> None:
+        md = export_markdown(sample_session)
+        assert "**Measured effect**" not in md and "**Evidence**" not in md
+        doc = json.loads(export_prov_jsonld(sample_session))
+        assert not any("trace:confidenceEstimate" in n or n.get("trace:kind") == "Evidence" for n in doc["@graph"])

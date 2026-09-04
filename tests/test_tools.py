@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import trace_mcp
-from trace_mcp.schema import Session, SessionMetadata
+from trace_mcp.schema import Actor, DecisionData, Session, SessionMetadata, TraceEvent
 from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import (
     decision_tools,
@@ -1475,3 +1475,54 @@ class TestValidateSession:
         invalid_file.write_text('{"not_a_session": true}')
         result = mod.main([str(invalid_file)])
         assert result == 1
+
+
+class TestSearchConfidence:
+    """Search indexes the typed measurement's identifiers, never the rule-state extras. Producer-authored
+    rationale is indexed as text like any rationale, so a verdict named there is findable as prose."""
+
+    @staticmethod
+    def _session(rationale: str | None) -> Session:
+        from trace_mcp.schema import DecisionConfidence
+
+        session = Session(id="s", metadata=SessionMetadata(project="p"))
+        session.events.append(
+            TraceEvent(
+                id="evt_001",
+                session_id="s",
+                type="decision",
+                actor=Actor(type="ai", id="a"),
+                decision=DecisionData(
+                    description="Keep v3 provisionally (parent v1)",
+                    rationale=rationale,
+                    proposed_by=Actor(type="ai", id="a"),
+                    confidence=DecisionConfidence.model_validate(
+                        {
+                            "interval": {"lower": -30.0, "upper": 583.75, "level": 0.9},
+                            "method": {"name": "percentile_bootstrap"},
+                            "sample_size": 8,
+                            "statistic": "mean_paired_delta",
+                            "unit": "game_score",
+                            "direction": "higher",
+                            "estimate": 260.0,
+                            "contract": "rsi-exam-decision-log/v1",
+                            "verdict": "inconclusive",
+                        }
+                    ),
+                ),
+            )
+        )
+        return session
+
+    def test_typed_identifiers_are_indexed_and_extras_are_not(self) -> None:
+        session = self._session(rationale=None)
+        for query in ("percentile_bootstrap", "game_score", "mean_paired_delta", "rsi-exam-decision-log/v1"):
+            assert [r["id"] for r in query_tools.search_events(session, query=query)] == ["evt_001"], query
+        assert query_tools.search_events(session, query="inconclusive") == []
+
+    def test_a_verdict_named_in_producer_prose_is_findable_as_prose(self) -> None:
+        session = self._session(
+            rationale="Mean paired delta +260.0 game_score (n=8); 90 percent percentile bootstrap "
+            "interval [-30.0, +583.8]; verdict inconclusive."
+        )
+        assert [r["id"] for r in query_tools.search_events(session, query="inconclusive")] == ["evt_001"]
