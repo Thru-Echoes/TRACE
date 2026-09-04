@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from trace_mcp.schema import Session
+from trace_mcp.schema import DecisionConfidence, Session
 
 _DISPOSITION_EMOJI = {
     "accepted": "\u2705",  # check
@@ -25,6 +25,44 @@ _ANNOTATION_EMOJI = {
     "question": "\u2753",  # question mark
     "other": "\U0001f4ac",  # speech bubble
 }
+
+
+_NOT_VERIFIED = "(recorded by the producer, not verified by TRACE)"
+
+
+def _num(value: float) -> str:
+    """Signed shortest round-trip repr, so prose never alters a recorded value."""
+    return f"{value:+}"
+
+
+def _fmt_confidence(c: DecisionConfidence) -> list[str]:
+    """Render a decision's measurement as markdown bullets (pure).
+
+    Preserved extras are named, never read. Side effects: none.
+    """
+    unit = f" {c.unit}" if c.unit else ""
+    lines = [
+        f"- **Measured effect**: {c.statistic} = {_num(c.estimate)}{unit} "
+        f"(positive favours the candidate; raw metric: {c.direction} is better); "
+        f"{c.interval.level * 100:.10g}% nominal interval "
+        f"[{_num(c.interval.lower)}, {_num(c.interval.upper)}]; n={c.sample_size}"
+    ]
+    method = f"- **Method**: {c.method.name}"
+    if c.method.algorithm:
+        method += f" ({c.method.algorithm})"
+    if c.method.resamples is not None:
+        method += f", resamples={c.method.resamples}"
+    if c.method.seed is not None:
+        method += f", seed={c.method.seed}"
+    lines.append(method)
+    if c.evidence:
+        refs = ", ".join(f"{e.locator} ({e.role}, sha256 {e.sha256})" for e in c.evidence)
+        lines.append(f"- **Evidence** {_NOT_VERIFIED}: {refs}")
+    if c.contract:
+        extras = ", ".join(sorted(c.model_extra or {}))
+        suffix = f"; preserved keys not read by TRACE: {extras}" if extras else ""
+        lines.append(f"- **Contract**: {c.contract}{suffix}")
+    return lines
 
 
 def _fmt_time(dt: datetime | None) -> str:
@@ -101,6 +139,8 @@ def export_markdown(session: Session) -> str:
             )
             if d.rationale:
                 lines.append(f"- **Rationale**: {d.rationale}")
+            if d.confidence is not None:
+                lines.extend(_fmt_confidence(d.confidence))
             if d.disposition == "proposed":
                 lines.append(f"- **Status**: {emoji} Proposed (unresolved)")
             elif d.resolved_by:

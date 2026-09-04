@@ -1715,3 +1715,55 @@ class TestCrossProjectConsistency:
                     f"normalize to the same key '{key}'. "
                     f"Standardize to one name."
                 )
+
+
+class TestScratchpadConfidence:
+    """A decision's measurement follows it into the scratchpad's Decisions and Open Items lists."""
+
+    def test_confidence_suffix_on_decisions_and_open_items(self) -> None:
+        from trace_mcp.schema import DecisionConfidence
+
+        session = Session(id="trace_test_conf", metadata=SessionMetadata(project="confidence"))
+        block = DecisionConfidence.model_validate(
+            {
+                "interval": {"lower": -30.0, "upper": 583.75, "level": 0.9},
+                "method": {"name": "percentile_bootstrap"},
+                "sample_size": 8,
+                "statistic": "mean_paired_delta",
+                "unit": "game_score",
+                "direction": "higher",
+                "estimate": 260.0,
+            }
+        )
+        session.events = [
+            TraceEvent(
+                id="evt_001",
+                session_id=session.id,
+                type="decision",
+                actor=Actor(type="ai", id="claude"),
+                decision=DecisionData(
+                    description="Keep v3 provisionally",
+                    proposed_by=Actor(type="ai", id="claude"),
+                    disposition="proposed",
+                    confidence=block,
+                ),
+            ),
+            TraceEvent(
+                id="evt_002",
+                session_id=session.id,
+                type="decision",
+                actor=Actor(type="ai", id="claude"),
+                decision=DecisionData(
+                    description="Deprioritize 10-K",
+                    proposed_by=Actor(type="ai", id="claude"),
+                    disposition="proposed",
+                ),
+            ),
+        ]
+
+        section = _build_session_section(session)
+
+        suffix = "[+260.0 game_score; 90% nominal interval [-30.0, +583.75]; n=8]"
+        assert f"- **[proposed]** Keep v3 provisionally (proposed_by=ai) {suffix}" in section
+        assert f"- [ ] Keep v3 provisionally (`evt_001`) {suffix}" in section
+        assert "- **[proposed]** Deprioritize 10-K (proposed_by=ai)\n" in section

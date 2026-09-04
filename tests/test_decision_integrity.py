@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from trace_mcp.schema import Session
+from trace_mcp.schema import Actor, DecisionConfidence, DecisionData, Session, TraceEvent
 from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import decision_tools, session_tools
 
@@ -329,3 +329,50 @@ class TestLiteralSignatureSweep:
         assert literal_values == expected_values, (
             f"{tool_name}.{param}: expected Literal{sorted(map(str, expected_values))}, got {hints[param]!r}"
         )
+
+
+class TestConfidencePersistence:
+    async def test_block_and_its_extras_survive_store_resolve_and_reload(
+        self, storage: JsonFileStorage, active: dict[str, Session]
+    ) -> None:
+        session = await session_tools.create_session(
+            storage, active, project="integrity-test", description="confidence"
+        )
+        block = DecisionConfidence.model_validate(
+            {
+                "interval": {"lower": -30.0, "upper": 583.75, "level": 0.9},
+                "method": {"name": "percentile_bootstrap"},
+                "sample_size": 8,
+                "statistic": "mean_paired_delta",
+                "direction": "higher",
+                "estimate": 260.0,
+                "contract": "rsi-exam-decision-log/v1",
+                "verdict": "inconclusive",
+                "min_effect": 0.0,
+                "holdout": None,
+            }
+        )
+        event = TraceEvent(
+            session_id=session.id,
+            type="decision",
+            actor=Actor(type="ai", id="agent"),
+            decision=DecisionData(
+                description="Keep v3 provisionally",
+                proposed_by=Actor(type="ai", id="agent"),
+                confidence=block,
+            ),
+        )
+        event_id = await session_tools.append_event(storage, session, event)
+        await decision_tools.resolve_decision(
+            storage,
+            session,
+            event_id=event_id,
+            disposition="accepted",
+            resolved_by_type="system",
+            resolved_by_id="gate",
+        )
+        reloaded = await storage.get_session(session.id)
+        d = next(e for e in reloaded.events if e.id == event_id).decision
+        assert d is not None and d.disposition == "accepted" and d.confidence is not None
+        assert d.confidence.interval.upper == 583.75
+        assert d.confidence.model_extra == {"verdict": "inconclusive", "min_effect": 0.0, "holdout": None}

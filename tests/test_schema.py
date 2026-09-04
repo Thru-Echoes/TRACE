@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+import math
 import warnings
 from datetime import datetime
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +15,7 @@ from trace_mcp.schema import (
     Actor,
     AnnotationData,
     ContributionData,
+    DecisionConfidence,
     DecisionData,
     Environment,
     Session,
@@ -495,3 +498,174 @@ class TestDeadFieldRemoval:
         evt = TraceEvent.model_validate(raw)
         assert evt.id == "evt_001"
         assert evt.type == "annotation"
+
+
+# ── DecisionConfidence (v0.5.1) ─────────────────────────────────────────────
+
+GOLDEN = Path(__file__).parent / "fixtures" / "decision_log_v1" / "expected_session.json"
+
+
+def _block(**overrides: object) -> dict[str, object]:
+    """The producer's provisional-keep block, as its converter emits it, with the rule-state extras."""
+    base: dict[str, object] = {
+        "interval": {"lower": -30.0, "upper": 583.75, "level": 0.9},
+        "method": {
+            "name": "percentile_bootstrap",
+            "algorithm": "rsi-exam-gate/percentile-bootstrap/1",
+            "resamples": 5000,
+            "seed": 20260902,
+        },
+        "sample_size": 8,
+        "evidence_digests": {"parent": "sha256:" + "a" * 64, "candidate": "sha256:" + "b" * 64},
+        "contract": "rsi-exam-decision-log/v1",
+        "statistic": "mean_paired_delta",
+        "unit": "game_score",
+        "direction": "higher",
+        "estimate": 260.0,
+        "min_effect": 0.0,
+        "verdict": "inconclusive",
+        "evidence": [
+            {"role": "parent", "locator": "results/v1/visible_result.json", "sha256": "a" * 64},
+            {"role": "candidate", "locator": "results/v3/visible_result.json", "sha256": "b" * 64},
+        ],
+        "holdout": None,
+    }
+    base.update(overrides)
+    return base
+
+
+def _iso(value: str | None) -> str | None:
+    return None if value is None else datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
+
+
+def _normalize(doc: dict) -> dict:
+    """Timestamp spelling is the only thing the serializer is allowed to change."""
+    doc["created"] = _iso(doc["created"])
+    doc["ended"] = _iso(doc["ended"])
+    for event in doc["events"]:
+        event["timestamp"] = _iso(event["timestamp"])
+    return doc
+
+
+class TestDecisionConfidence:
+    def test_types_the_measurement_and_preserves_the_rule_state(self) -> None:
+        c = DecisionConfidence.model_validate(_block())
+        assert c.interval.lower == -30.0 and c.interval.upper == 583.75 and c.interval.level == 0.9
+        assert c.method.name == "percentile_bootstrap" and c.method.resamples == 5000
+        assert c.sample_size == 8 and c.direction == "higher" and c.contract == "rsi-exam-decision-log/v1"
+        assert c.evidence[0].role == "parent"
+        # Rule-state keys are preserved extras: present, untouched, not declared fields.
+        assert c.model_extra == {"min_effect": 0.0, "verdict": "inconclusive", "holdout": None}
+        assert "verdict" not in DecisionConfidence.model_fields
+
+    def test_holdout_null_survives_a_round_trip(self) -> None:
+        dumped = json.loads(DecisionConfidence.model_validate(_block()).model_dump_json())
+        assert "holdout" in dumped and dumped["holdout"] is None
+        assert dumped["verdict"] == "inconclusive" and dumped["min_effect"] == 0.0
+
+    def test_holdout_dict_survives_a_round_trip(self) -> None:
+        holdout = {
+            "estimate": 12.0,
+            "interval": {"lower": -14.0, "upper": 37.5, "level": 0.9},
+            "sample_size": 8,
+            "verdict": "inconclusive",
+            "evidence": [],
+            "evidence_digests": {},
+        }
+        dumped = json.loads(DecisionConfidence.model_validate(_block(holdout=holdout)).model_dump_json())
+        assert dumped["holdout"] == holdout
+
+    def test_golden_document_loads_typed_and_dumps_field_for_field(self) -> None:
+        """A 0.5.0 document written by the producer, loaded by the 0.5.1 model: typed, and equal field for
+        field after a dump, the only permitted difference being timestamp spelling."""
+        raw = json.loads(GOLDEN.read_text(encoding="utf-8"))
+        assert raw["trace_version"] == "0.5.0"
+        session = Session.model_validate(raw)
+        blocks = [e.decision.confidence for e in session.events if e.decision]
+        assert len(blocks) == 3 and all(isinstance(b, DecisionConfidence) for b in blocks)
+        assert [b.interval.upper for b in blocks if b] == [-258.75, 583.75, 575.0]
+        assert [b.model_extra["verdict"] for b in blocks if b and b.model_extra] == ["below", "inconclusive", "clears"]
+        assert _normalize(json.loads(session.model_dump_json())) == _normalize(
+            json.loads(GOLDEN.read_text(encoding="utf-8"))
+        )
+
+    def test_confidence_defaults_to_none_and_old_decisions_load(self) -> None:
+        d = DecisionData.model_validate({"description": "old", "proposed_by": {"type": "human", "id": "h"}})
+        assert d.confidence is None
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [
+            {"interval": {"lower": 10.0, "upper": -10.0, "level": 0.9}},
+            {"interval": {"lower": -30.0, "upper": 583.75, "level": 1.0}},
+            {"interval": {"lower": -30.0, "upper": 583.75, "level": 0.0}},
+            {"interval": {"lower": -30.0, "upper": math.inf, "level": 0.9}},
+            {"interval": {"lower": math.nan, "upper": 583.75, "level": 0.9}},
+            {"estimate": math.nan},
+            {"sample_size": 0},
+            {"method": {"name": "", "resamples": 5000}},
+            {"method": {"name": "percentile_bootstrap", "resamples": 0}},
+            {"statistic": ""},
+            {"statistic": "mean\npaired"},
+            {"unit": "game\tscore"},
+            {"statistic": "mean" + chr(0x85) + "paired"},
+            {"statistic": "mean" + chr(0x2028) + "paired"},
+            {"unit": "game" + chr(0x2029) + "score"},
+            {"method": {"name": "percentile" + chr(0x9B) + "bootstrap"}},
+            {"evidence": [{"role": "parent", "locator": "a" + chr(0x85) + "b", "sha256": "a" * 64}]},
+            {"evidence": [{"role": "parent", "locator": "x", "sha256": "a" * 64 + "\n"}]},
+            {"direction": "up"},
+            {"evidence": [{"role": "parent", "locator": "x", "sha256": "not-hex"}]},
+            {"evidence": [{"role": "parent", "locator": "x", "sha256": "A" * 64}]},
+            {"evidence": [{"role": "", "locator": "x", "sha256": "a" * 64}]},
+            {"evidence": [{"role": "parent", "locator": "", "sha256": "a" * 64}]},
+            {"evidence": [{"role": "parent", "locator": "a\nb", "sha256": "a" * 64}]},
+            {"evidence_digests": {"parent": "a" * 64, "candidate": "sha256:" + "b" * 64}},
+            {"evidence_digests": {"parent": "sha256:" + "a" * 64}},
+            {"evidence_digests": {"parent": "sha256:" + "c" * 64, "candidate": "sha256:" + "b" * 64}},
+        ],
+    )
+    def test_structural_violations_are_rejected(self, overrides: dict[str, object]) -> None:
+        with pytest.raises(ValueError):
+            DecisionConfidence.model_validate(_block(**overrides))
+
+    @pytest.mark.parametrize("estimate", [9999.0, -9999.0])
+    def test_an_estimate_outside_its_interval_is_recorded_not_refused(self, estimate: float) -> None:
+        """Deliberate: percentile bootstrap can place the point estimate outside the resampled
+        bounds, so a containment rule would refuse valid records. This pins that choice."""
+        c = DecisionConfidence.model_validate(_block(estimate=estimate))
+        assert c.estimate == estimate
+
+    def test_identifier_fields_reject_every_line_breaking_character(self) -> None:
+        """Whatever the class admits, no recorded identifier may render as two lines."""
+        for code_point in (0x0A, 0x0D, 0x1F, 0x7F, 0x85, 0x9B, 0x2028, 0x2029):
+            value = "mean" + chr(code_point) + "delta"
+            assert len(value.splitlines()) >= 1
+            with pytest.raises(ValueError):
+                DecisionConfidence.model_validate(_block(statistic=value))
+
+    def test_minimal_block_from_another_producer(self) -> None:
+        """Only the measurement is required; a producer without digests or a contract is fine."""
+        c = DecisionConfidence.model_validate(
+            {
+                "interval": {"lower": 0.1, "upper": 0.3, "level": 0.95},
+                "method": {"name": "t_interval"},
+                "sample_size": 40,
+                "statistic": "mean_delta",
+                "direction": "lower",
+                "estimate": 0.2,
+            }
+        )
+        assert c.evidence == [] and c.evidence_digests is None and c.contract is None
+
+    def test_evidence_digests_must_match_the_entries_by_role(self) -> None:
+        with pytest.raises(ValueError, match="evidence_digests"):
+            DecisionConfidence.model_validate(
+                _block(
+                    evidence_digests={
+                        "parent": "sha256:" + "a" * 64,
+                        "candidate": "sha256:" + "b" * 64,
+                        "extra": "sha256:" + "d" * 64,
+                    }
+                )
+            )

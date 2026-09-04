@@ -6,9 +6,9 @@ Events are the core unit of TRACE — each one records a single auditable action
 
 import warnings
 from datetime import UTC, datetime
-from typing import Any, Literal, Self
+from typing import Annotated, Any, Literal, Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, StringConstraints, model_validator
 
 from trace_mcp.schema.session import Actor, TraceModel
 
@@ -23,6 +23,7 @@ AnnotationCategory = Literal[
     "learning", "gotcha", "observation", "correction", "todo", "question", "discovery", "other"
 ]
 ContributionAttribution = Literal["human", "ai", "collaborative"]
+MeasurementDirection = Literal["higher", "lower"]
 
 
 class EventContext(TraceModel):
@@ -52,6 +53,103 @@ class ToolCallData(TraceModel):
     parent_event_id: str | None = None
 
 
+_HEX_DIGEST = r"^[0-9a-f]{64}$"
+_PREFIXED_DIGEST = r"^sha256:[0-9a-f]{64}$"
+# Identifier-like strings: non-empty, and free of every character that can break a rendered line or
+# an identifier built from one. That is the C0 controls and DEL, the C1 controls, and the Unicode
+# line and paragraph separators — ``str.splitlines()`` splits on U+0085, U+2028 and U+2029 just as it
+# does on a newline, so admitting them would let one recorded value become two rendered lines.
+# Everything else about these strings is the producer's business.
+_TEXT = "^[^\\x00-\\x1f\\x7f-\\x9f\u2028\u2029]+$"
+Text = Annotated[str, StringConstraints(pattern=_TEXT)]
+# Length bounds as well as a pattern: a JSON Schema ``pattern`` is matched with Python's ``re``, whose
+# ``$`` also matches before a trailing newline, so pattern alone would let the published schema accept
+# a digest this model refuses. The bounds make the two agree exactly.
+PrefixedDigest = Annotated[str, StringConstraints(pattern=_PREFIXED_DIGEST, min_length=71, max_length=71)]
+
+
+class MeasurementInterval(TraceModel):
+    """An interval on a measured effect: lower and upper bounds and the nominal coverage (v0.5.1)."""
+
+    lower: float = Field(allow_inf_nan=False)
+    upper: float = Field(allow_inf_nan=False)
+    level: float = Field(gt=0.0, lt=1.0, allow_inf_nan=False)
+
+    @model_validator(mode="after")
+    def _ordered(self) -> Self:
+        if self.lower > self.upper:
+            raise ValueError("interval lower bound must not exceed the upper bound")
+        return self
+
+
+class MeasurementMethod(TraceModel):
+    """How an interval was computed (v0.5.1).
+
+    ``name`` is a free identifier; consumers MUST NOT reject an unknown one. ``algorithm`` names the
+    exact procedure when the producer has one.
+    """
+
+    name: Text
+    algorithm: Text | None = None
+    resamples: int | None = Field(default=None, ge=1)
+    seed: int | None = None
+
+
+class EvidenceRef(TraceModel):
+    """A file a measurement rests on, by role, locator and SHA-256 (v0.5.1).
+
+    A matching digest shows that a holder's bytes match the recorded digest. It does not show that
+    the measurement was computed from those bytes, who produced the file, or that it is authentic.
+    """
+
+    role: Text
+    locator: Text
+    sha256: str = Field(pattern=_HEX_DIGEST, min_length=64, max_length=64)
+
+
+class DecisionConfidence(TraceModel):
+    """The producer-recorded measurement that motivated a decision (v0.5.1): the estimated effect,
+    its interval, the method, the sample size, and the files it rests on.
+
+    A positive ``estimate`` favours the option the decision describes; the producer orients the
+    statistic that way. ``direction`` records the native sense of the underlying raw metric
+    (``"lower"`` means the raw metric is better when smaller) so a reader can relate the estimate
+    back to it. This object carries the measurement only. A producer's decision rule (a minimum
+    effect, a verdict, a held-out check, a confirmation policy) travels as preserved extra keys
+    identified by ``contract``; TRACE stores those untouched and never interprets them. Nothing
+    here says whether the decision was right.
+
+    Field order follows the contract's section 2 listing.
+    """
+
+    interval: MeasurementInterval
+    method: MeasurementMethod
+    sample_size: int = Field(ge=1)
+    evidence_digests: dict[str, PrefixedDigest] | None = None
+    contract: Text | None = None
+    statistic: Text
+    unit: Text | None = None
+    direction: MeasurementDirection
+    estimate: float = Field(allow_inf_nan=False)
+    evidence: list[EvidenceRef] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _digests_match_evidence(self) -> Self:
+        if self.evidence_digests is None:
+            return self
+        by_role: dict[str, str] = {}
+        for ref in self.evidence:
+            if ref.role in by_role:
+                raise ValueError(f"evidence role {ref.role!r} appears twice; evidence_digests is keyed by role")
+            by_role[ref.role] = ref.sha256
+        if set(self.evidence_digests) != set(by_role):
+            raise ValueError("evidence_digests keys must equal the set of evidence roles")
+        for role, digest in self.evidence_digests.items():
+            if digest != f"sha256:{by_role[role]}":
+                raise ValueError(f"evidence_digests[{role!r}] does not match the evidence entry's sha256")
+        return self
+
+
 class DecisionData(TraceModel):
     """Records a decision with full attribution and resolution status."""
 
@@ -65,6 +163,7 @@ class DecisionData(TraceModel):
     suggestion_type: SuggestionType | None = None
     tags: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+    confidence: DecisionConfidence | None = None
 
     @model_validator(mode="after")
     def _validate_resolution(self) -> Self:

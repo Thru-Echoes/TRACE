@@ -14,6 +14,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Decision confidence.** A decision event may now carry a `confidence`
+  object: the producer-recorded measurement that motivated the decision, with
+  its estimate, an interval and its nominal coverage, the method, the sample
+  size, the raw metric's direction, and digest-bound evidence references.
+  Construction rejects a malformed block, the published JSON Schema carries
+  every per-field constraint, and `trace-mcp validate` applies the cross-field
+  rules after the schema check. The object types the measurement only: a
+  producer's decision rule (minimum effect, verdict, held-out check) is
+  preserved as extra keys identified by a `contract` key and never
+  interpreted. Rendered in the markdown export, the scratchpad, search, and as
+  `trace:confidence*` literals plus evidence entities in PROV-LD. Schema
+  version 0.5.1; the file name is unchanged. Documents that do not use the
+  field load as before; a v0.5.0 document that used `decision.confidence` as an
+  untyped extra with a different shape no longer loads. Specification §3.6.1,
+  §4.6, §6; ADR 007.
 - **Streamable HTTP transport.** `trace-mcp --transport streamable-http
   [--host 127.0.0.1] [--port 8765]` serves the MCP tool surface at
   `http://HOST:PORT/mcp` for consumers that connect to a running endpoint

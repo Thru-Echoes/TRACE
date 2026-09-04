@@ -41,7 +41,7 @@ class TraceModel(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
-SCHEMA_VERSION = "0.5.0"
+SCHEMA_VERSION = "0.5.1"
 """TRACE wire/schema format version that session documents conform to.
 
 Intentionally decoupled from the package version (``trace_mcp.__version__``):
