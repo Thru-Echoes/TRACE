@@ -474,7 +474,7 @@ Archived on Zenodo. Cite the **concept DOI** unless you need to pin a specific a
 }
 ```
 
-The v0.5.0 archive specifically is [`10.5281/zenodo.21711456`](https://doi.org/10.5281/zenodo.21711456). [`CITATION.cff`](https://github.com/Thru-Echoes/TRACE/blob/main/CITATION.cff) carries both, so GitHub's "Cite this repository" button and any CFF-aware tool stay in sync with this section.
+The v0.5.1 archive specifically is [`10.5281/zenodo.22310719`](https://doi.org/10.5281/zenodo.22310719). [`CITATION.cff`](https://github.com/Thru-Echoes/TRACE/blob/main/CITATION.cff) lists the concept DOI alongside every version DOI, so GitHub's "Cite this repository" button and any CFF-aware tool stay in sync with this section.
 
 ## Contributing
 
