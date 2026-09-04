@@ -267,8 +267,13 @@ that they equal each other.
 
 **Exhaustive site-set (spec/wire version):**
 - `docs/specification.md` — the `## Specification v<X>` heading
+- `docs/specification.md` — the §3.1 `trace_version` row's `Default: "<X>"`
+- `docs/specification.md` — the Appendix A example's `"trace_version"`
 - `schemas/trace-v<major>.<minor>.json` and its `$id`
 - `src/trace_mcp/schemas/trace-v<major>.<minor>.json` (the packaged copy)
+- `README.md` — the `**Spec:** v<X>` half of the version banner
+- `CLAUDE.md` — the `protocol/schema v<X>` half of the version banner
+- `docs/ONBOARDING.md` — the `protocol/schema \`<X>\`` half of the state line
 
 **Why this is an integrity invariant, not cosmetics.** `server.json` is the MCP
 registry manifest — a stale version there is what an installer *resolves*, not
@@ -282,6 +287,13 @@ enforced in one place but not uniformly.
 for the `__init__.py` site). Each site is read and compared to its source of
 truth; the schema-file check derives the filename from `SCHEMA_VERSION` so a
 wire bump that forgets to rename or regenerate the schema fails.
+
+**Site-set widened 2026-09-03.** The spec/wire set held three sites while five
+more prose restatements went unguarded, so a `SCHEMA_VERSION` bump could ship
+with the front-door docs and the specification's own producer guidance still
+naming the previous wire version. That is the recurring shape this file exists
+to close: an invariant enforced in one place but not uniformly. Verified by
+bumping `SCHEMA_VERSION` and confirming every added site fails.
 
 **Status.** ENFORCED.
 
