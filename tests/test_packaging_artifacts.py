@@ -205,6 +205,74 @@ class TestWheelInstallE2E:
         assert bad.returncode == 1, f"Expected exit 1 for invalid doc, got {bad.returncode}: {bad.stdout}"
         assert "FAIL" in bad.stdout
 
+    def test_decision_log_import_then_validate_from_wheel_install(
+        self, built_dist: dict[str, Path], tmp_path: Path
+    ) -> None:
+        """The importer's fixtures are package-external, but its code is not.
+
+        An importer that works from the source tree can still be missing from the
+        shipped wheel, or reach it without the schema data `validate` needs. This
+        installs the wheel, imports a real decision log with the installed console
+        script, and validates the document it produced — the two halves of the
+        round trip a consumer actually performs.
+        """
+        venv_dir = tmp_path / "venv"
+        subprocess.run(["uv", "venv", str(venv_dir)], check=True, capture_output=True, timeout=120)
+        python = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
+        subprocess.run(
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                str(python),
+                f"trace-mcp[validate] @ {built_dist['wheel'].as_uri()}",
+            ],
+            check=True,
+            capture_output=True,
+            timeout=300,
+        )
+        trace_mcp_bin = python.parent / "trace-mcp"
+
+        log = TRACE_ROOT / "tests" / "fixtures" / "decision_log_v1" / "decisions.jsonl"
+        out = tmp_path / "imported.json"
+        imported = subprocess.run(
+            [
+                str(trace_mcp_bin),
+                "import",
+                "decision-log",
+                str(log),
+                "--project",
+                "rsi-exam-provenance",
+                "--rollout",
+                "fixture-rollout",
+                "--task",
+                "game2048_policy_search",
+                "--harness",
+                "claude-code",
+                "--model",
+                "claude-opus-5",
+                "--output",
+                str(out),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        assert imported.returncode == 0, (
+            f"trace-mcp import decision-log failed from a wheel install:\n"
+            f"stdout: {imported.stdout}\nstderr: {imported.stderr}"
+        )
+
+        validated = subprocess.run(
+            [str(trace_mcp_bin), "validate", str(out)], capture_output=True, text=True, timeout=60
+        )
+        assert validated.returncode == 0, (
+            f"the imported document did not validate from a wheel install:\n"
+            f"stdout: {validated.stdout}\nstderr: {validated.stderr}"
+        )
+        assert "PASS" in validated.stdout
+
     def test_trace_mcp_doctor_works_from_wheel_install(self, built_dist: dict[str, Path], tmp_path: Path) -> None:
         """INV-11 against the SHIPPED artifact, not the source tree.
 

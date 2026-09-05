@@ -175,6 +175,10 @@ Two things to know before pointing a runtime at it:
 [docs/integrations/gents.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/integrations/gents.md)
 works this through end to end for one such runtime, including what to put in the
 agent's prompt so it knows what is worth recording.
+[docs/integrations/decision-log.md](https://github.com/Thru-Echoes/TRACE/blob/main/docs/integrations/decision-log.md)
+covers the other importer, `trace-mcp import decision-log`, which builds a session
+from an evaluation gate's decision log — the records that carry a measured
+`confidence` block on each decision.
 
 ### Install hooks
 
