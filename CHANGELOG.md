@@ -14,6 +14,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`trace_propose_decision` accepts a `confidence` measurement.** A decision
+  made on a number computed in the course of the work — a bootstrap, a
+  benchmark, a held-out comparison — can now record that number where a reader
+  can inspect it, rather than only in free-text `rationale` where nothing can
+  read it. Previously the field could enter a record only through an importer,
+  so a measurement made in conversation had no path in except hand-writing a log
+  in one producer's schema. The block is validated through the same
+  `DecisionConfidence` model the importers use, so the two paths cannot be
+  validated differently, and a malformed block (bounds out of order, coverage
+  outside the unit interval, a sample size below one, a non-finite number) is
+  refused rather than stored partially. There is deliberately no such argument
+  on `trace_resolve_decision`: a measurement informs a decision and never
+  resolves it. An imported block carries `contract`, naming the producer schema
+  governing its extra keys, and a block logged in conversation does not — which
+  is what tells a reader where a measurement came from. Nothing verifies the
+  numbers or the evidence digests against any file, which was already true of
+  imported blocks. The tool documentation states the one rule that matters:
+  record only a measurement that was actually computed, because a fabricated one
+  is worse than none once it is typed.
+
 - **`trace-mcp import decision-log <log.jsonl> --project NAME`** builds a TRACE
   session from an evaluation gate's decision log (`rsi-exam-decision-log/v1`).
   One `decision` event per line, carrying the measurement that drove it as

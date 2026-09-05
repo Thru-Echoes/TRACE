@@ -399,9 +399,51 @@ estimate, the interval and its coverage, the method, the sample size, and
 the evidence — instead of hunting for it in free-text `rationale`, where
 nothing can read it.
 
-**`confidence` is not written by `trace_propose_decision`.** There is no
-argument for it, deliberately. A measurement comes from a producer that
-computed it, so the write path is an importer:
+There are two ways a measurement gets into a record, and the difference
+between them matters when you read one back.
+
+### Logged in conversation
+
+When the number is in front of you — a bootstrap you just ran, a benchmark
+whose output is on screen — pass it to `trace_propose_decision`:
+
+```python
+trace_propose_decision(
+  session_id=...,
+  description="Keep median imputation over mean for the station readings",
+  rationale="Checked on the 24 stations held out of the imputation.",
+  proposed_by_type="ai", proposed_by_id="claude",
+  suggestion_type="proactive",
+  confidence={
+    "statistic": "mae_reduction",
+    "estimate": 0.42,                # oriented so positive favours this decision
+    "unit": "mm",
+    "direction": "lower",            # the raw metric's sense: lower MAE is better
+    "interval": {"lower": 0.18, "upper": 0.67, "level": 0.95},
+    "method": {"name": "percentile_bootstrap", "resamples": 2000},
+    "sample_size": 24,
+  },
+)
+```
+
+**Pass this only for a number that was actually computed.** Never estimate one,
+round it from memory, or reconstruct it — a fabricated measurement is worse
+than none, because being typed makes it read as authoritative. When no
+measurement exists, omit the field and put the reasoning in `rationale`, which
+is honest prose and reads as such.
+
+A malformed block is refused outright rather than stored partially: bounds out
+of order, a coverage outside the unit interval, a sample size below one, or a
+non-finite estimate all raise instead of writing a half-recorded measurement.
+
+The measurement informs the decision; it never resolves it. There is no
+`confidence` argument on `trace_resolve_decision`, and a decision is never
+accepted *because* a number cleared a threshold — a participant still decides.
+
+### Imported from a producer
+
+When a program made the decision — an evaluation gate running unattended — the
+measurements arrive with the record:
 
 ```bash
 trace-mcp import decision-log decisions.jsonl \
@@ -476,6 +518,13 @@ The block on each event:
   makes no family-wise claim.
 - Evidence digests are the producer's assertion about files it read. TRACE
   records them; it does not verify them.
+
+**Telling the two paths apart.** An imported block carries `contract`, naming
+the producer schema whose rules govern its extra keys. A block logged in
+conversation has no producer, so `contract` is absent — which is how a reader
+distinguishes a measurement that came with a machine's record from one a
+participant entered. Neither is verified by TRACE; the difference is in what
+each one claims about its own origin.
 
 `direction` deserves a note: it records the raw metric's sense (`higher` means
 larger raw values are better), while the producer orients `estimate` so that a

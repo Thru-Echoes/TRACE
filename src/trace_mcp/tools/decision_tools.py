@@ -4,9 +4,16 @@ from __future__ import annotations
 
 import os
 from datetime import UTC, datetime
-from typing import get_args
+from typing import Any, get_args
 
-from trace_mcp.schema import Actor, DecisionData, DecisionDisposition, Session, TraceEvent
+from trace_mcp.schema import (
+    Actor,
+    DecisionConfidence,
+    DecisionData,
+    DecisionDisposition,
+    Session,
+    TraceEvent,
+)
 from trace_mcp.storage.base import TraceStorage
 from trace_mcp.storage.locked import locked_disk_session
 from trace_mcp.tools.session_tools import append_event
@@ -31,8 +38,36 @@ async def propose_decision(
     suggestion_type: str | None = None,
     tags: list[str] | None = None,
     conversation_snippet: str | None = None,
+    confidence: dict[str, Any] | None = None,
 ) -> str:
-    """Propose a methodological decision for the workflow."""
+    """Propose a methodological decision for the workflow.
+
+    *confidence*, when given, is the measurement that motivated the decision
+    (specification 3.6.1): the estimate, its interval and nominal coverage, the
+    method, the sample size, the raw metric's direction, and any digest-bound
+    evidence. It is validated here through ``DecisionConfidence`` — the same
+    model the importers use — so a block written in conversation and one built by
+    an importer cannot be validated two different ways.
+
+    A malformed block raises `ValueError` rather than being stored partially: a
+    measurement that cannot be constructed is not recorded at all, since a
+    half-written one would misstate what was measured.
+
+    The field records what the producer measured. It is not a probability that
+    the decision was correct, and nothing here verifies the numbers or the
+    evidence digests against any file.
+    """
+    measurement: DecisionConfidence | None = None
+    if confidence is not None:
+        try:
+            measurement = DecisionConfidence.model_validate(confidence)
+        except Exception as exc:
+            raise ValueError(
+                f"confidence is not a valid measurement block: {exc}. It requires at least "
+                "statistic, estimate, direction ('higher' or 'lower'), sample_size, "
+                "interval {lower, upper, level}, and method {name}."
+            ) from exc
+
     event = TraceEvent(
         session_id=session.id,
         type="decision",
@@ -45,6 +80,7 @@ async def propose_decision(
             revises_event_id=revises_event_id,
             suggestion_type=suggestion_type,  # type: ignore[arg-type]
             tags=tags or [],
+            confidence=measurement,
         ),
     )
     if conversation_snippet is not None:

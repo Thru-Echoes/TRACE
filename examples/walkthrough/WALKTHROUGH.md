@@ -155,7 +155,66 @@ Look for in the response:
 
 - `Logged annotation:`
 
-## Step 6 — End the session
+## Step 6 — Propose a measured decision (AI)
+
+A decision backed by a number carries that number, in a shape a reader can inspect: the estimate, the interval and its coverage, how it was computed, and how much data it rested on. `direction` is the raw metric's sense — mean absolute error, where lower is better — while the estimate is oriented so a positive value favours what the decision proposes. Pass this ONLY for a measurement that was actually computed; when there is none, omit it and put the reasoning in `rationale`.
+
+```json
+{
+  "tool": "trace_propose_decision",
+  "arguments": {
+    "description": "Keep median imputation over mean for the station readings.",
+    "proposed_by_type": "ai",
+    "proposed_by_id": "claude",
+    "suggestion_type": "proactive",
+    "rationale": "Checked on the 24 stations held out of the imputation.",
+    "confidence": {
+      "statistic": "mae_reduction",
+      "estimate": 0.42,
+      "unit": "mm",
+      "direction": "lower",
+      "interval": {
+        "lower": 0.18,
+        "upper": 0.67,
+        "level": 0.95
+      },
+      "method": {
+        "name": "percentile_bootstrap",
+        "resamples": 2000
+      },
+      "sample_size": 24
+    },
+    "session_id": "$SESSION_ID"
+  }
+}
+```
+
+Look for in the response:
+
+- `Decision proposed: evt_004`
+
+## Step 7 — Resolve the measured decision (human accepts)
+
+The measurement informs the decision; it never resolves it. A human still accepts, and the record keeps both the number and who acted on it.
+
+```json
+{
+  "tool": "trace_resolve_decision",
+  "arguments": {
+    "event_id": "evt_004",
+    "disposition": "accepted",
+    "resolved_by_type": "human",
+    "resolved_by_id": "human",
+    "session_id": "$SESSION_ID"
+  }
+}
+```
+
+Look for in the response:
+
+- `Decision evt_004 resolved: accepted`
+
+## Step 8 — End the session
 
 Ending the session prints the Attribution Audit, and this is where the attribution is read back: the contribution's direction and execution, the decision proposed by the AI and accepted, and the correction linked to `evt_001`. The audit names the session id.
 
@@ -164,7 +223,7 @@ Ending the session prints the Attribution Audit, and this is where the attributi
   "tool": "trace_end_session",
   "arguments": {
     "session_id": "$SESSION_ID",
-    "summary": "Walkthrough complete: one decision proposed, accepted, applied, and corrected.",
+    "summary": "Walkthrough complete: a decision proposed, accepted, applied and corrected, and a second backed by a measurement.",
     "write_scratchpad": false
   }
 }
@@ -177,14 +236,14 @@ Look for in the response:
 - `Contributions (1):`
 - `direction=human, execution=ai`
 - `artifact=data/stations.csv`
-- `Decisions (1):`
+- `Decisions (2):`
 - `proposed_by=ai`
 - `disposition=accepted`
 - `Corrections: 1 (corrects: evt_001)`
 
-## Step 7 — Read the decision back
+## Step 9 — Read the decision back
 
-Query the completed session's decisions. The record kept both halves of the attribution: proposed by the AI, resolved by the human, accepted. That proposer-vs-resolver split is the distinction the whole system exists to preserve.
+Query the completed session's decisions. The record kept both halves of the attribution: proposed by the AI, resolved by the human, accepted. That proposer-vs-resolver split is the distinction the whole system exists to preserve. The second decision also reads back its measurement, interval and coverage intact.
 
 ```json
 {
@@ -200,8 +259,10 @@ Look for in the response:
 - `"proposed_by":{"type":"ai"`
 - `"resolved_by":{"type":"human"`
 - `"disposition":"accepted"`
+- `"statistic":"mae_reduction"`
+- `"level":0.95`
 
-## Step 8 — Add a learning
+## Step 10 — Add a learning
 
 Learnings persist in the project's knowledge store on disk. `project` is omitted and resolves to the pin, the same as the session tools. The response echoes the new learning's id and content.
 
@@ -221,7 +282,7 @@ Look for in the response:
 - `"id": "lrn_`
 - `peregrine falcon telemetry sentinel`
 
-## Step 9 — Extract learnings from the record
+## Step 11 — Extract learnings from the record
 
 Extraction mines the session's decisions and annotations into durable learnings. It already ran when the session ended, so running it again here adds nothing: extraction is idempotent, and this call reports `new_learnings: 0`.
 
@@ -236,7 +297,7 @@ Look for in the response:
 
 - `"new_learnings": 0`
 
-## Step 10 — Recall a learning
+## Step 12 — Recall a learning
 
 Recall ranks the store against a query and reports the backend that ranked it. The sentinel learning comes back with a score; the backend name makes a degraded ranker visible, never silent.
 
@@ -256,7 +317,7 @@ Look for in the response:
 - `"backend"`
 - `peregrine falcon telemetry sentinel`
 
-## Step 11 — A write is denied across projects
+## Step 13 — A write is denied across projects
 
 Under a pin, WRITING to another project fails closed the same way reading does — the error names both the pinned key and the label asked for, and no foreign store is created.
 
@@ -276,7 +337,7 @@ Look for in the response:
 - `walkthrough`
 - `some-other-project`
 
-## Step 12 — A read is denied across projects
+## Step 14 — A read is denied across projects
 
 And reading another project fails closed too. Cross-project reads and writes do not silently cross; a follow-up check confirms no `some-other-project` store was created.
 
