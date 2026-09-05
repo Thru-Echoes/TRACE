@@ -660,6 +660,7 @@ async def trace_propose_decision(
     suggestion_type: SuggestionType | None = None,
     tags: list[str] | None = None,
     conversation_snippet: str | None = None,
+    confidence: dict[str, Any] | None = None,
     session_id: str | None = None,
 ) -> str:
     """Propose a methodological decision for the workflow.
@@ -671,6 +672,23 @@ async def trace_propose_decision(
 
     suggestion_type can be 'proactive' (AI volunteered), 'requested' (human asked),
     or 'collaborative' (emerged from discussion).
+
+    confidence records a measurement that motivated the decision, when there was
+    one. Pass it ONLY for a number that was actually computed — from an
+    evaluation run, a benchmark, a statistical test whose output you have in
+    front of you. Never estimate, round from memory, or reconstruct one: a
+    fabricated measurement is worse than none, because it is typed and therefore
+    reads as authoritative. When there is no computed measurement, omit the
+    field and put the reasoning in `rationale`, which is honest prose.
+
+    Shape: `{"statistic": "mean_paired_delta", "estimate": 518.75,
+    "unit": "game_score", "direction": "higher",
+    "interval": {"lower": 467.5, "upper": 575.0, "level": 0.9},
+    "method": {"name": "percentile_bootstrap", "resamples": 5000},
+    "sample_size": 8}`. `direction` is the raw metric's sense; orient
+    `estimate` so a positive value favours the option this decision describes.
+    `evidence` may carry `{role, locator, sha256}` entries for the files
+    measured. Nothing here verifies the numbers or the digests.
 
     session_id is optional — if omitted, uses the current session or
     auto-creates one.
@@ -695,6 +713,7 @@ async def trace_propose_decision(
             suggestion_type=suggestion_type,
             tags=tags,
             conversation_snippet=conversation_snippet,
+            confidence=confidence,
         )
         result = f"{prefix}Decision proposed: {event_id}"
 

@@ -149,11 +149,57 @@ STEPS: tuple[Step, ...] = (
         ),
     ),
     Step(
+        name="Propose a measured decision (AI)",
+        tool="trace_propose_decision",
+        arguments={
+            "description": "Keep median imputation over mean for the station readings.",
+            "proposed_by_type": "ai",
+            "proposed_by_id": "claude",
+            "suggestion_type": "proactive",
+            "rationale": "Checked on the 24 stations held out of the imputation.",
+            "confidence": {
+                "statistic": "mae_reduction",
+                "estimate": 0.42,
+                "unit": "mm",
+                "direction": "lower",
+                "interval": {"lower": 0.18, "upper": 0.67, "level": 0.95},
+                "method": {"name": "percentile_bootstrap", "resamples": 2000},
+                "sample_size": 24,
+            },
+            "session_id": SESSION_ID_PLACEHOLDER,
+        },
+        expect_substrings=("Decision proposed: evt_004",),
+        narration=(
+            "A decision backed by a number carries that number, in a shape a reader can inspect: "
+            "the estimate, the interval and its coverage, how it was computed, and how much data it "
+            "rested on. `direction` is the raw metric's sense — mean absolute error, where lower is "
+            "better — while the estimate is oriented so a positive value favours what the decision "
+            "proposes. Pass this ONLY for a measurement that was actually computed; when there is "
+            "none, omit it and put the reasoning in `rationale`."
+        ),
+    ),
+    Step(
+        name="Resolve the measured decision (human accepts)",
+        tool="trace_resolve_decision",
+        arguments={
+            "event_id": "evt_004",
+            "disposition": "accepted",
+            "resolved_by_type": "human",
+            "resolved_by_id": "human",
+            "session_id": SESSION_ID_PLACEHOLDER,
+        },
+        expect_substrings=("Decision evt_004 resolved: accepted",),
+        narration=(
+            "The measurement informs the decision; it never resolves it. A human still accepts, and "
+            "the record keeps both the number and who acted on it."
+        ),
+    ),
+    Step(
         name="End the session",
         tool="trace_end_session",
         arguments={
             "session_id": SESSION_ID_PLACEHOLDER,
-            "summary": "Walkthrough complete: one decision proposed, accepted, applied, and corrected.",
+            "summary": "Walkthrough complete: a decision proposed, accepted, applied and corrected, and a second backed by a measurement.",
             "write_scratchpad": False,
         },
         expect_substrings=(
@@ -162,7 +208,7 @@ STEPS: tuple[Step, ...] = (
             "Contributions (1):",
             "direction=human, execution=ai",
             "artifact=data/stations.csv",
-            "Decisions (1):",
+            "Decisions (2):",
             "proposed_by=ai",
             "disposition=accepted",
             "Corrections: 1 (corrects: evt_001)",
@@ -182,11 +228,14 @@ STEPS: tuple[Step, ...] = (
             '"proposed_by":{"type":"ai"',
             '"resolved_by":{"type":"human"',
             '"disposition":"accepted"',
+            '"statistic":"mae_reduction"',
+            '"level":0.95',
         ),
         narration=(
             "Query the completed session's decisions. The record kept both halves of the "
             "attribution: proposed by the AI, resolved by the human, accepted. That proposer-"
-            "vs-resolver split is the distinction the whole system exists to preserve."
+            "vs-resolver split is the distinction the whole system exists to preserve. The second "
+            "decision also reads back its measurement, interval and coverage intact."
         ),
     ),
     Step(

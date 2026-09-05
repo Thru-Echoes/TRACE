@@ -97,6 +97,12 @@ and interprets neither. Whether an interval was good enough to act on is the
 producer's judgment; TRACE's job is that the judgment and its basis are both
 still there to read.
 
+The same applies when a person is the one deciding. If you ran the comparison
+yourself and the numbers are in front of you, they can be recorded on the
+decision the same way — with one rule: only ever record a number that was
+actually computed. A made-up measurement is worse than none, because writing it
+in this form makes it look authoritative.
+
 ## What you get
 
 **A record you can hand over.** For a colleague, a reviewer, a client, or your
