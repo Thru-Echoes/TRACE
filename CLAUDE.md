@@ -191,6 +191,20 @@ read as separate projects.
     actor who authored the proposal *content* (whose words populate
     `description`), not the speaker of the resolving directive.
     Question→AI-proposal→accept means `proposed_by=ai`, `resolved_by=human`.
+  - **Measured decisions (v0.5.1, spec §3.6.1)**: when a decision rests on a
+    number you actually computed — a benchmark, an evaluation run, a
+    statistical test whose output is in front of you — record it as
+    `confidence` on `trace_propose_decision`:
+    `{"statistic": "...", "estimate": <n>, "direction": "higher"|"lower",
+    "interval": {"lower": <n>, "upper": <n>, "level": 0.95},
+    "method": {"name": "..."}, "sample_size": <n>}`. `direction` is the raw
+    metric's sense; orient `estimate` so a positive value favours what the
+    decision proposes. **Record only a number that was actually computed.**
+    Never estimate one, round it from memory, or reconstruct it: a fabricated
+    measurement is worse than none, because being typed makes it read as
+    authoritative. With no computed measurement, omit the field and put the
+    reasoning in `rationale`. A measurement informs a decision and never
+    resolves it — there is no such argument on `trace_resolve_decision`.
 - **Corrections** when a participant catches a mistake.
   - If the corrected entity is not a TRACE event (subagent output, tool
     result, external claim), use a URI-form reference per spec §3.7.1:

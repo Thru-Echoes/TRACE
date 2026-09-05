@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The protocol instructions now tell an agent that decision confidence
+  exists.** The field shipped with no guidance pointing at it: `confidence`
+  occurred nowhere in the `CLAUDE_BLOCK.md` adapter template — the only channel
+  that reaches a consumer project — nor in this project's own instructions, so
+  in practice nothing would ever record a measurement. Both now carry when a
+  measurement is worth recording, the block's shape, that `estimate` is oriented
+  so a positive value favours what the decision proposes, and the rule that
+  decides whether the field is worth having at all: record only a number that
+  was actually computed, never one estimated, rounded from memory, or
+  reconstructed, because a fabricated measurement is worse than none once being
+  typed makes it read as authoritative. Existing consumers pick this up when
+  `trace-mcp-init` runs again against them; a server rebuild does not rewrite a
+  project's `CLAUDE.md`.
+
 - **`trace_propose_decision` accepts a `confidence` measurement.** A decision
   made on a number computed in the course of the work — a bootstrap, a
   benchmark, a held-out comparison — can now record that number where a reader
