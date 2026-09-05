@@ -1,0 +1,18 @@
+{
+  "cpu_budget_per_game": 225,
+  "cpu_seconds": 0.0,
+  "evaluator": {
+    "evaluate.py": "642d194eab0c4f1e116a70d7d78d8b5e13197cbfb92e0d6a09dbba6c2a494c86",
+    "game2048.py": "3c1059f3a26b5d5ee014ae51f19147e05a31ddf60fd7d371a48e7c4101cef077"
+  },
+  "games": 4,
+  "max_moves": 10000,
+  "metric": "per_seed_2048_score",
+  "policy_method_tree_sha256": "72267d6fb29d7742042559306b4a3440d7b484a7d87f2173ec4e81c1bf676b85",
+  "profile_sha256": "74da06b435c2fc2a266f403b5ea1c1920bd70ee90b0c989bef0309f7a63d2a6f",
+  "python": "3.12.10",
+  "result_sha256": "03952d710a9684eb7eedd3306f5fc6047d87f0f5e74290e460e9e152a7844e47",
+  "schema": "rsi-exam-gate-receipt/v1",
+  "suite_sha256": "3887e8f4e64505b2809eaa1d01fa09dca6d721cad864f71755e7057193c18ee7",
+  "timestamp": "2026-09-05T00:54:07.943415+00:00"
+}

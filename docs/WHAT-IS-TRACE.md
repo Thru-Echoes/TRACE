@@ -61,6 +61,42 @@ fact that the first proposal came from the machine and a human overruled it.
 
 That last part is the piece most systems lose.
 
+## When the decider is a machine
+
+Not every decision is made in conversation. Sometimes a program decides — an
+evaluation gate that measures whether a new method beats the old one and keeps
+or discards it automatically, hundreds of times, with no human in the loop for
+any single call.
+
+Those decisions have something a conversation usually doesn't: a number behind
+them. TRACE records it in a fixed shape, so a reader gets the estimate, the
+range it might really be in, how that range was computed, and how much data it
+rested on:
+
+> Reverted v2. Mean paired delta **−318.8** points over 8 games; the 90 percent
+> interval runs from −382.5 to −258.8 — entirely below zero.
+>
+> Kept v3 **provisionally**. Mean paired delta +260.0, but the interval runs
+> from −30.0 to +583.8, so it straddles zero and the result could be noise.
+>
+> Replicated v3 on fresh games. +518.8, interval +467.5 to +575.0. That settles
+> it, and v3 is accepted.
+
+The middle decision is the one worth noticing. The machine did not pretend to
+be sure. It recorded "kept for now, not proven," left the decision open, and a
+later replication is what closed it — and the record shows that sequence rather
+than a tidy final answer.
+
+The number itself is not the point. The point is that "we tried it and it looked
+better" and "we measured a +518.8 improvement with an interval that never
+touches zero" are different claims, and a record that cannot tell them apart
+cannot be audited.
+
+TRACE stores the measurement and the producer's own decision rule side by side,
+and interprets neither. Whether an interval was good enough to act on is the
+producer's judgment; TRACE's job is that the judgment and its basis are both
+still there to read.
+
 ## What you get
 
 **A record you can hand over.** For a colleague, a reviewer, a client, or your

@@ -1,10 +1,12 @@
 # TRACE Usage Examples
 
-Nine worked examples showing what to log and when, in increasing
+Ten worked examples showing what to log and when, in increasing
 complexity. Examples 1–5 cover the baseline (decisions, corrections,
 contributions, decision chains); Examples 6–9 demonstrate v0.4.1
 additions (`suggestion_type="requested"`, `discovery` category,
-URI-form `corrects_event_ids`, `host`/`parent_event_id` on `tool_call`).
+URI-form `corrects_event_ids`, `host`/`parent_event_id` on `tool_call`);
+Example 10 covers the v0.5.1 addition, a decision that carries the
+measurement behind it.
 The full data model is defined in [`specification.md`](specification.md);
 the protocol for *when* to call each tool lives in your project's
 `CLAUDE.md` (installed by `trace-mcp-init`) or in the global
@@ -382,6 +384,107 @@ The new `host` field on `tool_call` is an enum:
 emits a "Dangling reference" warning if it isn't. The PROV-LD mapping
 (spec §6) emits `prov:wasInformedBy` from child to parent so downstream
 consumers can walk the dispatch tree.
+
+---
+
+## Example 10 — v0.5.1: a decision that carries its measurement
+
+The nine examples above are logged *during* a conversation. This one is
+different in kind: it comes from a machine, and it arrives by import.
+
+When a decision was made by an evaluation gate rather than in conversation,
+the number that drove it belongs on the event. `decision.confidence` holds
+that measurement in a typed shape (spec §3.6.1) so a reader can inspect the
+estimate, the interval and its coverage, the method, the sample size, and
+the evidence — instead of hunting for it in free-text `rationale`, where
+nothing can read it.
+
+**`confidence` is not written by `trace_propose_decision`.** There is no
+argument for it, deliberately. A measurement comes from a producer that
+computed it, so the write path is an importer:
+
+```bash
+trace-mcp import decision-log decisions.jsonl \
+  --project my-project \
+  --rollout fixture-rollout \
+  --task game2048_policy_search \
+  --harness claude-code \
+  --model claude-opus-5 \
+  --output session.json
+```
+
+Each log line becomes one `decision` event. From the fixture in
+`tests/fixtures/decision_log_v1/`, three lines tell a complete story:
+
+```text
+evt_001  rejected   Revert v2 (parent v1)
+         Mean paired delta -318.8 game_score (n=8); 90 percent percentile
+         bootstrap interval [-382.5, -258.8]; verdict below.
+
+evt_002  accepted   Keep v3 provisionally (parent v1)
+         Mean paired delta +260.0 game_score (n=8); 90 percent percentile
+         bootstrap interval [-30.0, +583.8]; verdict inconclusive.
+         revision_note: "Resolved by replication evt_003."
+
+evt_003  accepted   Replication of v3 on fresh seeds (parent v1)
+         Mean paired delta +518.8 game_score (n=8); 90 percent percentile
+         bootstrap interval [+467.5, +575.0]; verdict clears.
+         revises_event_id: evt_002
+```
+
+Read that as a chain: v2 lost outright, its interval entirely below zero.
+v3 looked better but its interval straddled zero, so it was kept only
+**provisionally** — recorded as `proposed`, not accepted. A replication on
+fresh seeds cleared, which resolved the open provisional and gave v3 its
+acceptance. `trace_get_decision_chain(event_id="evt_003")` returns both
+events, so the provisional and what settled it are read together.
+
+The block on each event:
+
+```jsonc
+"confidence": {
+  "statistic": "mean_paired_delta",
+  "estimate": 518.75,
+  "unit": "game_score",
+  "direction": "higher",              // the raw metric's sense
+  "interval": {"lower": 467.5, "upper": 575.0, "level": 0.9},
+  "method": {"name": "percentile_bootstrap",
+             "algorithm": "rsi-exam-gate/percentile-bootstrap/1",
+             "resamples": 5000, "seed": 20260902},
+  "sample_size": 8,
+  "evidence": [{"role": "parent",
+                "locator": "results/v3/replication/parent_result.json",
+                "sha256": "a214509c…"}],
+  "evidence_digests": {"parent": "sha256:a214509c…"},
+  "contract": "rsi-exam-decision-log/v1",
+
+  // Beyond this line: the producer's own rule state. TRACE preserves these
+  // keys unchanged and interprets none of them — `contract` names whose
+  // rules they are.
+  "min_effect": 0.0,
+  "verdict": "clears"
+}
+```
+
+### What the field does and does not claim
+
+- It describes the **measured effect** — a candidate's improvement over its
+  parent on an evaluation set.
+- It is **not** a probability that the decision was correct, and not a claim
+  about data the decider never saw.
+- `level` is the nominal coverage of *one* interval. Across many decisions it
+  makes no family-wise claim.
+- Evidence digests are the producer's assertion about files it read. TRACE
+  records them; it does not verify them.
+
+`direction` deserves a note: it records the raw metric's sense (`higher` means
+larger raw values are better), while the producer orients `estimate` so that a
+positive value always favours the option the decision describes. The two are
+separate so a reader can relate the estimate back to the underlying metric.
+
+Once present, the block renders wherever a decision is read — the markdown
+export, the scratchpad, search, and as `trace:confidence*` literals plus
+evidence entities in PROV-LD. Decisions without one render exactly as before.
 
 ---
 

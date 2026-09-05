@@ -1,0 +1,67 @@
+{
+  "cpu_budget_per_game": 225,
+  "cpu_seconds": 12.3,
+  "cpu_seconds_per_game": 1.5,
+  "instances": [
+    {
+      "error": null,
+      "max_tile": 512,
+      "moves": 900,
+      "score": 4590,
+      "seed": 104729
+    },
+    {
+      "error": null,
+      "max_tile": 512,
+      "moves": 900,
+      "score": 5000,
+      "seed": 130363
+    },
+    {
+      "error": null,
+      "max_tile": 512,
+      "moves": 900,
+      "score": 4200,
+      "seed": 155921
+    },
+    {
+      "error": null,
+      "max_tile": 512,
+      "moves": 900,
+      "score": 5010,
+      "seed": 181081
+    },
+    {
+      "error": null,
+      "max_tile": 512,
+      "moves": 900,
+      "score": 4440,
+      "seed": 205759
+    },
+    {
+      "error": null,
+      "max_tile": 512,
+      "moves": 900,
+      "score": 4840,
+      "seed": 232003
+    },
+    {
+      "error": null,
+      "max_tile": 512,
+      "moves": 900,
+      "score": 4700,
+      "seed": 260003
+    },
+    {
+      "error": null,
+      "max_tile": 512,
+      "moves": 900,
+      "score": 4330,
+      "seed": 287117
+    }
+  ],
+  "mean_max_tile": 512.0,
+  "mean_score": 4638.75,
+  "median_score": 4700,
+  "valid_fraction": 1.0
+}
