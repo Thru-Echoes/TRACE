@@ -1015,8 +1015,12 @@ def main() -> None:
             from trace_mcp.importers.gents import main as gents_import_main
 
             raise SystemExit(gents_import_main(sys.argv[3:]))
+        if source == "decision-log":
+            from trace_mcp.importers.decision_log import main as decision_log_import_main
+
+            raise SystemExit(decision_log_import_main(sys.argv[3:]))
         print(
-            f"Unknown import source {source!r}. Usage: trace-mcp import gents <timeline.json> --project NAME",
+            f"Unknown import source {source!r}. Usage: trace-mcp import {{gents|decision-log}} <file> --project NAME",
             file=sys.stderr,
         )
         raise SystemExit(2)

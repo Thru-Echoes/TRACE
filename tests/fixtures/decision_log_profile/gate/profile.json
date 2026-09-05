@@ -1,0 +1,29 @@
+{
+  "audit_key_sha256": "b81f37a043a6f767e7c94d105f4bd31282f3ecc20680bb9d09bd93461cf4c863",
+  "bootstrap_seed": 20260902,
+  "confirm_policy": "always",
+  "confirmation": {
+    "cpu_seconds_per_game": 225,
+    "floor": 4,
+    "max_moves": 10000,
+    "max_seeds": 8
+  },
+  "direction": "higher",
+  "evaluator": {
+    "evaluate.py": "642d194eab0c4f1e116a70d7d78d8b5e13197cbfb92e0d6a09dbba6c2a494c86",
+    "game2048.py": "3c1059f3a26b5d5ee014ae51f19147e05a31ddf60fd7d371a48e7c4101cef077"
+  },
+  "level": 0.9,
+  "metric": "per_seed_2048_score",
+  "min_effect": {
+    "fraction": 0.025,
+    "kind": "fraction_of_parent_visible_mean"
+  },
+  "replication_key": "2222222222222222222222222222222222222222222222222222222222222222",
+  "resamples": 5000,
+  "rollout_id": "e2e-rollout",
+  "schema": "rsi-exam-gate-profile/v1",
+  "task": "game2048_policy_search",
+  "unit": "game_score",
+  "visible_suite_sha256": "117c4cb7c2f19eb47fe70949a4f7c3ba2c4ff48da89bfb204dae5b30a7e4528a"
+}
