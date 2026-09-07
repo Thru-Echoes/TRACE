@@ -14,7 +14,11 @@ import pytest
 
 from trace_mcp.adapters import detect_adapter, get_adapter, list_adapters
 from trace_mcp.adapters.base import MCP_SERVER_KEY
-from trace_mcp.adapters.claude_code import MARKER_END, MARKER_START, ClaudeCodeAdapter
+from trace_mcp.adapters.claude_code import (
+    MARKER_END,
+    MARKER_START_RE,
+    ClaudeCodeAdapter,
+)
 from trace_mcp.adapters.codex import CodexAdapter
 
 # ── Registry ──────────────────────────────────────────────────────────────
@@ -91,7 +95,9 @@ class TestClaudeCodeInstall:
         claude_md = tmp_path / "CLAUDE.md"
         assert claude_md.is_file()
         content = claude_md.read_text()
-        assert MARKER_START in content
+        # The opening marker carries this build's block stamp, so it is matched
+        # by pattern rather than as the bare literal.
+        assert MARKER_START_RE.search(content) is not None
         assert MARKER_END in content
 
     def test_install_idempotent(self, tmp_path: Path) -> None:
@@ -108,7 +114,7 @@ class TestClaudeCodeInstall:
         a.install(tmp_path, dry_run=True)
         assert not (tmp_path / ".claude" / "hooks").exists()
         assert not (tmp_path / ".claude" / "settings.json").exists()
-        assert MARKER_START not in (tmp_path / "CLAUDE.md").read_text()
+        assert MARKER_START_RE.search((tmp_path / "CLAUDE.md").read_text()) is None
 
     def test_hook_scripts_are_executable(self, tmp_path: Path) -> None:
         a = ClaudeCodeAdapter()

@@ -78,6 +78,7 @@ HOOK_CHECKS = (
     "hooks.decision_audit_matcher",
 )
 PIN_CHECKS = ("pin.trace_project_file", "pin.mcp_env", "pin.claude_md_line", "pin.coherence")
+DOCS_CHECKS = ("docs.block_stamp",)
 LIVE_CHECKS = ("live.spawn", "live.version", "live.tool_surface")
 """Every check id each probe owns, in emission order.
 
@@ -721,6 +722,57 @@ class _LiveResult:
     tool_names: tuple[str, ...] = ()
     error: str | None = None
     stderr_tail: str = ""
+
+
+def check_instruction_block(project_dir: Path) -> list[Finding]:
+    """The TRACE block in the project's CLAUDE.md is the one this build ships.
+
+    The hook scripts carry a version stamp and are checked against it because
+    an asset installed once and never refreshed goes stale invisibly. The
+    instruction block had neither, and did exactly that: a block installed
+    before a template change kept its old text indefinitely while every other
+    check reported the project clean.
+
+    A block is what tells a model what to record. One that is months behind the
+    template is a project quietly running an older protocol.
+    """
+    from trace_mcp.adapters.claude_code import MARKER_END, MARKER_START_RE, get_block_stamp
+
+    claude_md = project_dir / "CLAUDE.md"
+    if not claude_md.is_file():
+        return [_unevaluated("docs.block_stamp", f"{claude_md} does not exist")]
+
+    text = claude_md.read_text(encoding="utf-8", errors="replace")
+    match = MARKER_START_RE.search(text)
+    if match is None:
+        return [
+            _bad(
+                "docs.block_stamp",
+                f"{claude_md} carries no TRACE instruction block — the project's model is given no "
+                "protocol to follow. Run `trace-mcp-init`.",
+            )
+        ]
+    if text.find(MARKER_END, match.end()) == -1:
+        return [
+            _bad(
+                "docs.block_stamp",
+                f"{claude_md} has an opening TRACE marker with no closing one, so the block's extent "
+                "cannot be determined and the installer will not rewrite it. Repair the markers by hand.",
+            )
+        ]
+
+    expected = get_block_stamp()
+    installed = match.group(1)
+    if installed == expected:
+        return [_ok("docs.block_stamp", f"instruction block is current ({expected})")]
+    found = installed or "unstamped (installed before block stamping existed)"
+    return [
+        _bad(
+            "docs.block_stamp",
+            f"instruction block is {found}, but this build ships {expected} — the project is following "
+            "an older protocol than the server it runs. Re-run `trace-mcp-init` to refresh it in place.",
+        )
+    ]
 
 
 def check_served_build(project_dir: Path, *, live: bool = False, timeout: float | None = None) -> list[Finding]:
