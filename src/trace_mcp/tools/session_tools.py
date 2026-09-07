@@ -498,6 +498,14 @@ def format_bootstrap_message(
     else:
         orientation = f"Prior context: No prior TRACE sessions recorded for '{project}'."
 
+    # Advisory, fail-soft: a server keeps the build it started with, so work
+    # merged after it started is unreachable from it and an argument this build
+    # does not know is dropped silently. Surfaced here because session start is
+    # the one moment a reader is looking at the server rather than through it.
+    from trace_mcp.conformance.staleness import get_stale_build_notice
+
+    stale_notice = get_stale_build_notice()
+
     lines = [
         "TRACE audit logging is now active.",
         f"Session: {session_id}",
@@ -506,6 +514,8 @@ def format_bootstrap_message(
         orientation,
         _BOOTSTRAP_CADENCE,
     ]
+    if stale_notice:
+        lines.insert(1, stale_notice)
     msg = "\n".join(lines)
     if recalled_block:
         msg += recalled_block
@@ -580,10 +590,18 @@ async def start_session(
     # Core-level, fail-safe probe of the OPTIONAL trace-learn extension
     # (keeps the core/extension boundary intact — see
     # docs/adr/003-core-extension-boundary.md).
+    # Same advisory as the bootstrap banner: this is the other entry point a
+    # caller sees a session start through, and a stale build is equally invisible
+    # from here.
+    from trace_mcp.conformance.staleness import get_stale_build_notice
     from trace_mcp.extension_status import get_extension_status
+
+    stale_notice = get_stale_build_notice()
+    stale_line = f"{stale_notice}\n" if stale_notice else ""
 
     return (
         f"TRACE audit logging is now active.\n"
+        f"{stale_line}"
         f"Session: {session.id}\n"
         f"Project: {project}\n"
         f"File: {path}\n"

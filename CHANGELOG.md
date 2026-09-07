@@ -48,6 +48,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `trace-mcp-init` runs again against them; a server rebuild does not rewrite a
   project's `CLAUDE.md`.
 
+- **The session-start banner reports a server older than the source it builds
+  from.** A merge is not a deploy: an MCP server keeps the build it started with
+  for the life of the host session, so work merged afterwards is unreachable from
+  it however current the checkout is. This was not hypothetical — every session
+  recorded between 2026-09-03 and 2026-09-06 carried a wire version three days
+  stale, and nothing said so; the version stamp simply read low. The failure is
+  silent in the worst way, because MCP argument models discard unknown fields: a
+  client passing an argument only a newer build knows has it dropped without an
+  error, and the event reads exactly like one where the caller chose not to
+  supply it. The check compares the running build's package and wire versions
+  against the versions declared in the source tree the project's `.mcp.json`
+  launches from, and names both numbers and the remedy. It is advisory and
+  fail-soft by construction: no config, a launch from a git ref or a registry, a
+  moved or unreadable source tree, or a malformed config all produce silence
+  rather than a warning nobody can act on, and it never raises, so a session can
+  never fail to start because the check could not run.
+
 - **`trace_propose_decision` accepts a `confidence` measurement.** A decision
   made on a number computed in the course of the work — a bootstrap, a
   benchmark, a held-out comparison — can now record that number where a reader
@@ -88,6 +105,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the oracle the parity tests compare against: a replay-mode log proving the
   seven gated-mode keys project as explicit nulls, and a gated run under a task
   profile carrying them populated with receipt evidence and a derived suite.
+
+### Changed
+
+- **`main` now declares a development version, and `CITATION.cff` no longer
+  follows it.** Two trees were both calling themselves `0.5.1`: the tag Zenodo
+  archived, and `main` with three further commits. Moving the tag was refused —
+  it would leave the tag and the minted DOI disagreeing about what `v0.5.1`
+  contains — so the package version becomes `0.5.2.dev0` instead, with no
+  release, tag or DOI. `CITATION.cff` stays at the released version, because a
+  citation file must name a version an archive resolves to and a development
+  version has none. INV-10 therefore gains a third source of truth (the newest
+  released section of this changelog) alongside the package and wire versions,
+  and one cross-rule: when the package version differs from the released one it
+  MUST be marked as a pre-release, so a *stable* version can never silently
+  disagree with the release it shares a number with.
 
 ## [0.5.1] — 2026-09-04
 

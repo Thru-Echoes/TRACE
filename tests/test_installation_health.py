@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -266,6 +267,23 @@ class TestPyprojectConsistency:
 # failure by loosening the assertion.
 
 
+def _latest_released_version() -> str:
+    """The newest version this repository has actually released.
+
+    Read from the newest dated section heading in CHANGELOG.md, skipping
+    ``[Unreleased]``. This is a *different* source of truth from the package
+    version: once `main` carries work beyond the last tag, the two legitimately
+    differ, and a citation must name the released one.
+
+    Pure. Fails the calling test if no released section can be located.
+    """
+    for line in (TRACE_ROOT / "CHANGELOG.md").read_text().split("\n"):
+        match = re.match(r"^## \[(\d+\.\d+\.\d+)\]", line)
+        if match:
+            return match.group(1)
+    pytest.fail("Could not find a released section heading in CHANGELOG.md")
+
+
 def _package_version() -> str:
     """Read the canonical package version out of pyproject.toml.
 
@@ -307,14 +325,39 @@ class TestVersionDeclarationSites:
         stale = {site: got for site, got in declared if got != expected}
         assert not stale, f"server.json versions disagree with pyproject.toml ({expected}): {stale}"
 
-    def test_citation_cff_declares_the_package_version(self) -> None:
-        """CITATION.cff is what a DOI archive and citation tooling read."""
-        expected = _package_version()
+    def test_citation_cff_declares_the_latest_released_version(self) -> None:
+        """CITATION.cff must name a version that has an archive behind it.
+
+        It is pinned to the newest *released* version, not to the package
+        version. Once `main` carries work past the last tag its package version
+        is a development version, and a citation file naming one would have
+        citation tooling emit a version no archive resolves to.
+        """
+        expected = _latest_released_version()
         lines = [ln for ln in (TRACE_ROOT / "CITATION.cff").read_text().split("\n") if ln.startswith("version:")]
 
         assert len(lines) == 1, f"expected exactly one top-level `version:` line in CITATION.cff, found {len(lines)}"
         assert lines[0].split(":", 1)[1].strip().strip("\"'") == expected, (
-            f"CITATION.cff version != pyproject.toml version ({expected}): {lines[0]!r}"
+            f"CITATION.cff version != the newest released version in CHANGELOG.md ({expected}): {lines[0]!r}"
+        )
+
+    def test_a_package_version_ahead_of_the_release_is_marked_as_such(self) -> None:
+        """`main` may run ahead of the last release, but never silently.
+
+        Either the package version equals the newest released version, or it is
+        a pre-release/development version. A *stable* package version that
+        differs from the last release is the ambiguity this rule exists to
+        prevent: two different trees both claiming to be the same release, one
+        of which is the archived artifact a DOI resolves to.
+        """
+        package, released = _package_version(), _latest_released_version()
+        if package == released:
+            return
+
+        assert re.match(r"^\d+\.\d+\.\d+(a|b|rc|\.dev)\d+$", package), (
+            f"pyproject version {package!r} differs from the newest released version {released!r} "
+            "but is not marked as a pre-release. Either release it, or mark it (e.g. "
+            f"{released.rsplit('.', 1)[0]}.{int(released.rsplit('.', 1)[1]) + 1}.dev0)."
         )
 
     @pytest.mark.parametrize(
