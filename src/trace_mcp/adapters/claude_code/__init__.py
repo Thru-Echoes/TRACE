@@ -7,7 +7,9 @@ hook scripts under ``.claude/hooks/``, hook registrations merged into
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import shutil
 from pathlib import Path
 
@@ -20,6 +22,41 @@ _CLAUDE_BLOCK_SRC = _ASSETS / "CLAUDE_BLOCK.md"
 
 MARKER_START = "<!-- trace-mcp:claude-code -->"
 MARKER_END = "<!-- /trace-mcp:claude-code -->"
+
+# The opening marker is matched by PREFIX, not by the literal above, because an
+# installed block may carry a stamp the literal does not have — and blocks
+# installed before stamping existed carry none at all. Both must be recognised,
+# or the installer would append a second block beside the first.
+MARKER_START_RE = re.compile(r"<!-- trace-mcp:claude-code(?:\s+block=([0-9a-f]+))?\s*-->")
+
+
+def get_block_stamp() -> str:
+    """The short digest identifying the instruction block this build ships.
+
+    Derived from the asset's own bytes, so *any* edit to the block changes the
+    stamp. A hand-maintained version number would only change when someone
+    remembered to change it, which is the failure this replaces: the block was
+    installed once and never refreshed again, and nothing could tell.
+    """
+    return hashlib.sha256(_CLAUDE_BLOCK_SRC.read_bytes()).hexdigest()[:12]
+
+
+def render_claude_block() -> str:
+    """The block as it should appear in a project, with its stamp in the marker."""
+    stamp = get_block_stamp()
+    return _CLAUDE_BLOCK_SRC.read_text().replace(MARKER_START, f"<!-- trace-mcp:claude-code block={stamp} -->", 1)
+
+
+def read_installed_block_stamp(text: str) -> str | None:
+    """The stamp on an installed block, or None if absent or unstamped.
+
+    Returning None for both cases is deliberate: a block predating stamping and
+    a project with no block at all are equally not-this-build, and the caller
+    distinguishes them by whether a marker was found.
+    """
+    match = MARKER_START_RE.search(text)
+    return match.group(1) if match else None
+
 
 HOOK_ASSETS_DIR = _HOOKS_SRC
 """The shipped hook scripts — the single source for which hooks a correct
@@ -74,7 +111,10 @@ class ClaudeCodeAdapter(Adapter):
         claude_md = directory / "CLAUDE.md"
         if not claude_md.is_file():
             errors.append(f"missing {claude_md}")
-        elif MARKER_START not in claude_md.read_text():
+        elif MARKER_START_RE.search(claude_md.read_text()) is None:
+            # Matched by pattern, not by the bare literal: an installed block
+            # carries a stamp in its opening marker, and a block predating
+            # stamping carries none. Both are present blocks.
             errors.append(f"{claude_md} missing TRACE marker {MARKER_START}")
 
         return errors
@@ -200,13 +240,39 @@ def _merge_settings(directory: Path, *, dry_run: bool) -> InstallResult:
 
 
 def _append_claude_block(directory: Path, *, dry_run: bool) -> InstallResult:
+    """Install the TRACE block, or refresh it in place when it is out of date.
+
+    An installed block used to be left alone forever, so every edit to the
+    template reached only projects that did not yet have one — the block went
+    stale everywhere and nothing reported it. The marked region is now replaced
+    when its stamp differs from this build's.
+
+    Only the marked region is touched. Everything a project wrote around it is
+    preserved, which is the whole reason the markers exist: a consumer's own
+    instructions live in the same file and are not ours to rewrite.
+    """
     dst = directory / "CLAUDE.md"
-    block = _CLAUDE_BLOCK_SRC.read_text()
+    block = render_claude_block()
 
     if dst.is_file():
         existing = dst.read_text()
-        if MARKER_START in existing:
-            return InstallResult(path=dst, disposition="skipped")
+        match = MARKER_START_RE.search(existing)
+        if match is not None:
+            if match.group(1) == get_block_stamp():
+                return InstallResult(path=dst, disposition="skipped")
+            end = existing.find(MARKER_END, match.end())
+            if end == -1:
+                # An opening marker with no closing one: the block's extent is
+                # unknowable, and guessing it risks eating a project's own text.
+                # Left untouched; `trace-mcp doctor` reports it.
+                return InstallResult(path=dst, disposition="skipped")
+            if not dry_run:
+                # `end` points just past the closing marker, so the replacement
+                # must not carry the asset's own trailing newline: the text that
+                # followed the old block already supplies it. Without this a
+                # blank line accumulates on every refresh.
+                dst.write_text(existing[: match.start()] + block.rstrip("\n") + existing[end + len(MARKER_END) :])
+            return InstallResult(path=dst, disposition="updated")
         if not dry_run:
             sep = "\n" if existing.endswith("\n") else "\n\n"
             dst.write_text(existing + sep + block)
@@ -217,4 +283,14 @@ def _append_claude_block(directory: Path, *, dry_run: bool) -> InstallResult:
     return InstallResult(path=dst, disposition="installed")
 
 
-__all__ = ["HOOK_ASSETS_DIR", "SETTINGS_TEMPLATE_PATH", "ClaudeCodeAdapter", "MARKER_END", "MARKER_START"]
+__all__ = [
+    "HOOK_ASSETS_DIR",
+    "MARKER_END",
+    "MARKER_START",
+    "MARKER_START_RE",
+    "SETTINGS_TEMPLATE_PATH",
+    "ClaudeCodeAdapter",
+    "get_block_stamp",
+    "read_installed_block_stamp",
+    "render_claude_block",
+]

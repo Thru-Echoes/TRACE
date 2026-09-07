@@ -590,9 +590,9 @@ def test_offline_run_reports_the_live_probe_as_skipped(project: Path) -> None:
 def test_a_clean_run_emits_exactly_the_declared_check_ids(project: Path) -> None:
     """Check ids are stable API for fleet tooling — a rename or a dropped check
     must break here rather than silently in a consumer."""
-    from trace_mcp.conformance import CONFIG_CHECKS, HOOK_CHECKS, LIVE_CHECKS, PIN_CHECKS
+    from trace_mcp.conformance import CONFIG_CHECKS, DOCS_CHECKS, HOOK_CHECKS, LIVE_CHECKS, PIN_CHECKS
 
-    declared = [*CONFIG_CHECKS, *HOOK_CHECKS, *PIN_CHECKS, *LIVE_CHECKS]
+    declared = [*CONFIG_CHECKS, *HOOK_CHECKS, *PIN_CHECKS, *DOCS_CHECKS, *LIVE_CHECKS]
     emitted = [f.check for f in run_doctor(project).findings]
     assert sorted(emitted) == sorted(declared)
     assert len(emitted) == len(set(emitted)), "each check must be reported exactly once"

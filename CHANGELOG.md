@@ -12,6 +12,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **`trace-mcp-init` refreshes an installed instruction block instead of
+  skipping it forever.** The Claude Code adapter returned `skipped` the moment
+  it saw the opening marker in a project's `CLAUDE.md`, so every edit to the
+  template reached only projects that did not yet carry a block — which, in a
+  deployed fleet, is none of them. Measured across ten real consumer projects, a
+  protocol change reached zero of them, in two distinct block vintages, while
+  `trace-mcp doctor` reported all ten clean. The block now carries a stamp
+  derived from the shipped template's bytes, so any edit changes it, and the
+  installer replaces the marked region in place when the stamp differs. Only
+  that region is touched: a consumer's own instructions live in the same file
+  (157 lines of them in one real project) and are preserved on both sides, with
+  repeated runs leaving the file byte-identical. An opening marker with no
+  closing one is left untouched rather than guessed at, since guessing the
+  block's extent could delete a project's own text. A new `docs.block_stamp`
+  check reports a stale, unstamped, absent or unterminated block, so this cannot
+  go silently stale again — the same treatment the hook scripts already had
+  through their version stamp and `hooks.stamp` check. Registered under INV-11.
+
 ### Added
 
 - **The protocol instructions now tell an agent that decision confidence
