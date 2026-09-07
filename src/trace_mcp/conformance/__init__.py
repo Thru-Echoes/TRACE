@@ -51,11 +51,13 @@ from trace_mcp.conformance.fleet import (
 )
 from trace_mcp.conformance.probes import (
     CONFIG_CHECKS,
+    DOCS_CHECKS,
     HOOK_CHECKS,
     LIVE_CHECKS,
     PIN_CHECKS,
     check_config,
     check_hooks,
+    check_instruction_block,
     check_pin_coherence,
     check_served_build,
 )
@@ -64,6 +66,7 @@ _OFFLINE_PROBES: tuple[tuple[str, Callable[[Path], list[Finding]], tuple[str, ..
     ("config", check_config, CONFIG_CHECKS),
     ("hooks", check_hooks, HOOK_CHECKS),
     ("pin", check_pin_coherence, PIN_CHECKS),
+    ("docs", check_instruction_block, DOCS_CHECKS),
 )
 
 
@@ -111,6 +114,7 @@ def _guarded(name: str, owned: tuple[str, ...], probe: Callable[[], list[Finding
 
 __all__ = [
     "CONFIG_CHECKS",
+    "DOCS_CHECKS",
     "FLEET_ROOTS_ENV",
     "MAX_DEPTH",
     "CORE_TOOLS",

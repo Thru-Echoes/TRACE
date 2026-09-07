@@ -301,6 +301,16 @@ bumping `SCHEMA_VERSION` and confirming every added site fails.
 
 ## INV-11 — A freshly initialized project is conformance-clean  · ENFORCED
 
+**Extended 2026-09-06 to the instruction block.** The block installed into a
+consumer's `CLAUDE.md` now carries a stamp derived from the shipped template's
+bytes, the installer refreshes the marked region in place when that stamp
+differs, and `docs.block_stamp` reports a block that is not this build's. Before
+this, an installed block was never refreshed: a template edit reached only
+projects that did not yet have one, so the guidance went stale across the whole
+fleet while every check reported those projects clean. The stamp is a content
+digest rather than a hand-maintained number so that any edit changes it, closing
+the same gap the hook scripts' `[trace-hooks vX.Y]` stamp closes for them.
+
 **Statement.** For every host adapter TRACE actually installs, running
 `trace-mcp-init` on an empty directory must produce a deployment that
 `trace_mcp.conformance.run_doctor` reports as `ok` — no failing check — using
