@@ -251,19 +251,30 @@ by delegation).
 
 ## INV-10 — Every restatement of a version agrees with its source of truth  · ENFORCED
 
-**Statement.** The package version has exactly one source of truth
-(`pyproject.toml :: version`) and the spec/wire version exactly one
-(`schema/session.py :: SCHEMA_VERSION`). Every other file that restates either
-number must agree with it. The two are **independent** — a hardening release
-may bump the package while the wire format stands still — so nothing asserts
-that they equal each other.
+**Statement.** Three version numbers each have exactly one source of truth: the
+package version (`pyproject.toml :: version`), the spec/wire version
+(`schema/session.py :: SCHEMA_VERSION`), and the **released** version (the newest
+dated section heading in `CHANGELOG.md`). Every other file that restates one of
+them must agree with *that* one. All three are **independent** — a hardening
+release may bump the package while the wire format stands still, and `main` may
+run ahead of the last release — so nothing asserts that any two are equal.
+
+One cross-rule ties the package and released versions together without equating
+them: when they differ, the package version MUST be marked as a pre-release
+(`X.Y.Z.devN`, `aN`, `bN`, `rcN`). A *stable* package version that differs from
+the last release is the ambiguity this rule exists to prevent — two different
+trees both claiming to be the same release, one of them the archived artifact a
+DOI resolves to.
 
 **Exhaustive site-set (package version):**
 - `src/trace_mcp/__init__.py :: __version__`
 - `server.json :: version` and `server.json :: packages[*].version`
-- `CITATION.cff :: version`
 - `README.md` — the `**Version:**` banner
 - `CLAUDE.md` — the `> **Version**:` banner
+- `docs/ONBOARDING.md` — the `package \`<X>\`` half of the state line
+
+**Exhaustive site-set (released version):**
+- `CITATION.cff :: version`
 
 **Exhaustive site-set (spec/wire version):**
 - `docs/specification.md` — the `## Specification v<X>` heading
@@ -287,6 +298,16 @@ enforced in one place but not uniformly.
 for the `__init__.py` site). Each site is read and compared to its source of
 truth; the schema-file check derives the filename from `SCHEMA_VERSION` so a
 wire bump that forgets to rename or regenerate the schema fails.
+
+**The citation exception, 2026-09-06.** `CITATION.cff` was in the package-version
+set until `main` first carried work past a tag. A citation file must name a
+version that has an archive behind it: pinned to a development package version it
+would have GitHub's "Cite this repository" button and every CFF-aware tool emit a
+version no DOI resolves to. It is therefore pinned to the newest released version
+instead, and the pre-release cross-rule above keeps the package version honest
+about being ahead. This is the same reasoning that already keeps the package and
+wire versions independent — restating one number in a file that means a different
+number is the drift, not the fix.
 
 **Site-set widened 2026-09-03.** The spec/wire set held three sites while five
 more prose restatements went unguarded, so a `SCHEMA_VERSION` bump could ship
