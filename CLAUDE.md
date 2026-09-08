@@ -152,7 +152,7 @@ instructions are in the global `~/.claude/CLAUDE.md`. Key points:
 
 **trace-learn**: `trace_learn_recall`, `trace_learn_add`, `trace_learn_list`, `trace_learn_forget`, `trace_learn_extract`
 
-<!-- trace-mcp:claude-code -->
+<!-- trace-mcp:claude-code block=c45181197f52 -->
 
 ## TRACE Audit Protocol (v0.5.0+)
 
@@ -177,6 +177,15 @@ read as separate projects.
 - Without a pin, pass `project="<label>"` explicitly.
 - Never repair a wrong label by editing a captured session. Add an alias to
   the registry instead — capture records are not rewritten.
+
+**OpenAI key (optional, for semantic recall)**
+
+This project's OpenAI key belongs in its own `.env` file, not in a machine-wide
+one — per-project credentials keep one project's key from covering every
+project on the machine. `~/.trace/.env` is only a fallback, and TRACE reports at
+session start when a project is borrowing it. If a key is missing or refused,
+TRACE says so in the session banner and in the affected tool responses instead
+of quietly returning keyword-ranked results.
 
 **Session lifecycle**
 
