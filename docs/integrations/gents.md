@@ -12,8 +12,14 @@ TRACE session sits next to it and answers a different question: **who proposed
 each step, and what got revised or rejected.** Neither replaces the other. This
 page shows how to run both at once.
 
-Verified against Gents v0.14.0 and TRACE v0.5.0. No Gents source changes are
-required.
+Verified against Gents v0.16.1 and TRACE v0.5.1, and originally against v0.14.0.
+No Gents source changes are required.
+
+Gents is pre-1.0 and ships every few days, sometimes with breaking changes: the
+v0.16 train replaced the storage engine and refuses to open a runtime home
+created by v0.14, so a demo home has to be recreated rather than migrated. Check
+the version you are running against the one above before trusting a command
+here verbatim.
 
 ## How the pieces fit
 
@@ -52,48 +58,26 @@ session store. See the README section on this transport for the full caveats.
 
 ### 2. Register TRACE in the service registry
 
-On a Gents build that has the subcommand:
-
 ```bash
 gents mcp register trace \
   --endpoint http://127.0.0.1:8765/mcp \
   --send-agent-did \
   --display-name "TRACE decision provenance" \
-  --version 0.5.0
+  --version 0.5.1
 ```
 
-The v0.14.0 release binary ships `gents mcp probe` but not `gents mcp register`.
-On that build, write the same `ToolServiceRegistry` document directly against the
-runtime's GraphQL endpoint:
-
-```graphql
-mutation {
-  upsert_ToolServiceRegistry(
-    filter: { service_id: { _eq: "trace" } }
-    add: {
-      service_id: "trace"
-      display_name: "TRACE decision provenance"
-      lan_ip: "127.0.0.1"
-      mcp_port: 8765
-      mcp_path: "/mcp"
-      send_agent_did: true
-      status: "online"
-      version: "0.5.0"
-    }
-    update: {
-      lan_ip: "127.0.0.1" mcp_port: 8765 mcp_path: "/mcp"
-      send_agent_did: true status: "online" version: "0.5.0"
-    }
-  ) { _docID service_id }
-}
-```
+`mcp register` landed in the v0.15 train. On v0.14 the release binary shipped
+`gents mcp probe` without it, and the equivalent was an `upsert_ToolServiceRegistry`
+mutation against the runtime's GraphQL endpoint carrying the same fields
+(`service_id`, `lan_ip`, `mcp_port`, `mcp_path`, `send_agent_did`, `status`).
+That path still works but is no longer necessary.
 
 Confirm the runtime can reach it:
 
 ```bash
 gents mcp probe trace --timeout 10s
 # SERVICE  HEALTH_STATE  LATENCY_MS  LAST_ERROR
-# trace    healthy       9           -
+# trace    healthy       20          -
 ```
 
 ### 3. Allow the service on a behavior
@@ -122,6 +106,11 @@ The resolved surface should now include:
 Use `--allowed-mcp-service-id`, not the `required_mcp_service_ids` field: the
 required list is a dependency contract that makes the behavior unrunnable
 whenever TRACE is down, which is rarely what you want from a provenance sidecar.
+
+The flags are not uniform across these commands. `mcp register`, `mcp probe`,
+`tools explain`, and `chat` accept `--home` and default to `~/.gents`, while
+`config tools set` reads `--graphql` and wants the runtime's endpoint. Pass
+`--home` explicitly whenever the runtime is not the default one.
 
 ## Telling the agent when to log
 
@@ -153,7 +142,8 @@ as an open question rather than disappearing into an approved-looking log.
 
 ## What a run produces
 
-One turn, two records. From a verified run against Gents v0.14.0:
+One turn, two records. From a verified run against Gents v0.14.0, repeated on
+v0.16.1:
 
 **TRACE session:**
 
@@ -195,6 +185,8 @@ attribution.
   document signatures to the claimed principal and on signature-bound approvals;
   until such a mechanism exists end to end, do not describe either record as
   tamper-evident or verified.
-- **Version drift.** The registry write above and the tool-selection fields were
-  checked against v0.14.0. Gents is pre-1.0 and ships frequently; re-check the
-  field names against the version you run.
+- **Version drift is fast and sometimes breaking.** The commands here were
+  checked against v0.16.1 and the tool-selection fields against both v0.14.0 and
+  v0.16.1. Between those two releases the runtime changed storage engines with no
+  migration path, gained `mcp register`, and added a `goal` tool category.
+  Re-check against the version you run rather than assuming this page is current.
