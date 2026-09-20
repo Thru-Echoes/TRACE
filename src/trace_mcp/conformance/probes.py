@@ -358,7 +358,7 @@ def _check_learn_extras(args: list[str]) -> Finding:
             f"the server comes up with 17 tools instead of the documented 22, with no error to explain the gap. "
             f"Add: " + " ".join(f"--with {pkg}" for pkg in missing),
         )
-    return _ok("config.learn_extras", f"carries the trace-learn extras {list(LEARN_EXTRAS)} (22-tool server)")
+    return _ok("config.learn_extras", f"carries the trace-learn extras {list(LEARN_EXTRAS)} (23-tool server)")
 
 
 def _check_refresh(args: list[str]) -> Finding:
@@ -833,7 +833,7 @@ def _check_live_version(found: str | None, expected: str) -> Finding:
 
 def _check_live_tools(found: tuple[str, ...], expected_total: int) -> Finding:
     surface = ExpectedToolSurface()
-    declared = set(surface.core_tools) | set(surface.learn_tools)
+    declared = set(surface.core_tools) | set(surface.learn_tools) | set(surface.jev_tools)
     missing = sorted(declared - set(found))
     extra = sorted(set(found) - declared)
     if not missing and not extra:

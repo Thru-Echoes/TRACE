@@ -166,7 +166,7 @@ def test_expected_tool_surface_matches_registered_tools() -> None:
 
     registered = {name for name, _desc, _schema in _list_registered_tools(include_extensions=True)}
     surface = expectations.ExpectedToolSurface()
-    declared = set(surface.core_tools) | set(surface.learn_tools)
+    declared = set(surface.core_tools) | set(surface.learn_tools) | set(surface.jev_tools)
     assert declared == registered, (
         f"declared-but-unregistered: {sorted(declared - registered)}; "
         f"registered-but-undeclared: {sorted(registered - declared)}"
@@ -178,12 +178,13 @@ def test_expected_tool_surface_matches_readme_tables() -> None:
     surface = expectations.ExpectedToolSurface()
     assert list(surface.core_tools) == _readme_tools("### Core tools (17)")
     assert list(surface.learn_tools) == _readme_tools("### Extension: trace-learn (5)")
+    assert list(surface.jev_tools) == _readme_tools("### Extension: Jev advisory (1)")
 
 
-def test_expected_tool_total_is_the_documented_22() -> None:
+def test_expected_tool_total_is_the_documented_23() -> None:
     surface = expectations.ExpectedToolSurface()
-    assert surface.total == 22 == len(surface.core_tools) + len(surface.learn_tools)
-    assert "22 total" in README.read_text()
+    assert surface.total == 23 == len(surface.core_tools) + len(surface.learn_tools) + len(surface.jev_tools)
+    assert "23 total" in README.read_text()
 
 
 def test_hook_expectations_derive_from_the_shipped_assets() -> None:
@@ -705,7 +706,7 @@ class TestLiveProbe:
         version_detail = _detail(report, "live.version")
         assert "0.0.1" in version_detail and trace_mcp.__version__ in version_detail
         assert "uv cache clean" in version_detail, "the finding must carry the remedy, not just the diagnosis"
-        assert "22" in _detail(report, "live.tool_surface")
+        assert "23" in _detail(report, "live.tool_surface")
 
     def test_spawn_failure_is_a_finding_not_an_exception(self, project: Path) -> None:
         _with_server_command(

@@ -92,8 +92,9 @@ Each project gets a `.mcp.json` declaring the server:
 
 Three details that are load-bearing, each of which has caused a real outage:
 
-- **The three `--with` extras** are what make this a 22-tool server. Without
-  them the knowledge extension does not load and you silently get 17 tools.
+- **The three `--with` extras** enable the five trace-learn tools. Without
+  them the knowledge extension does not load. The dependency-free Jev advisory
+  tool still registers, disabled until explicitly configured.
 - **`--from <path>`** builds from a checkout. `uvx --from trace-mcp` would fetch
   an *unrelated* package of that name from PyPI and execute it.
 - **`env.TRACE_PROJECT`** pins the process to one project. Unpinned, session
@@ -130,7 +131,7 @@ identity` (`snapshot`, `scan`, `apply`, `check`, `merge-stores`, `adopt`,
 This is a distinction about **how much a project enforces the protocol**, and it
 is a real choice, not an oversight.
 
-A project always needs `.mcp.json` — that makes the 22 tools available. On top
+A project always needs `.mcp.json` — that makes the 23 tools available. On top
 of that, `trace-mcp-init` can install four **hook scripts** into
 `.claude/hooks/` plus their registrations in `.claude/settings.json`:
 

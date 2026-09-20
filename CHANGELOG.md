@@ -12,6 +12,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Optional Jev advisory classification for existing provenance events.**
+  `trace_jev_assess_candidate` sends a bounded projection of one recorded
+  decision, annotation, or contribution to TypeSafe System One and returns
+  typed choice/Noul probabilities plus an explicit audit envelope. It is
+  opt-in, honors `TRACE_LOCAL_ONLY` and per-project privacy posture, attests
+  egress before sending, never mutates TRACE records or resolves decisions,
+  and keeps Jev distribution confidence separate from measured
+  `decision.confidence`.
+
 ### Fixed
 
 - **`trace-mcp-init` refreshes an installed instruction block instead of
