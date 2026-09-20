@@ -392,8 +392,11 @@ A cloud call attempted with no key, or with a key the provider rejects, is repor
 | `TRACE_LOG_LEVEL` | `INFO` | Logging verbosity |
 | `OPENAI_API_KEY` | — | OpenAI API key for LLM matching, extraction, and cloud embeddings. **Put it in this project's `.env`** — see above; `~/.trace/.env` is a fallback, not the home for it |
 | `TRACE_JEV_ENABLED` | `false` | Explicitly enable read-only Jev advisory calls; a TypeSafe key alone does not enable egress |
+| `TRACE_JEV_PROVIDER` | `typesafe` | Explicit Jev transport: `typesafe` or `vercel_gateway`; credentials never fall across providers |
 | `TYPESAFE_AI_API_KEY` | — | TypeSafe System One credential used only when `TRACE_JEV_ENABLED=true` |
-| `TRACE_JEV_MODEL` | `jev-latest` | Jev model requested by the advisory extension |
+| `AI_GATEWAY_API_KEY` | — | Vercel AI Gateway credential, read only when `TRACE_JEV_PROVIDER=vercel_gateway` |
+| `TRACE_JEV_MODEL` | provider default | `jev-latest` for direct TypeSafe; fixed to `typesafe-ai/jev` for Gateway |
+| `TRACE_JEV_GATEWAY_ZERO_DATA_RETENTION` | `false` | Explicit Gateway `zeroDataRetention` provider option |
 | `TRACE_LLM_MODEL` | `gpt-5.4-mini` | Model for LLM relevance scoring |
 | `TRACE_LLM_EXTRACTION_MODEL` | `gpt-5.4-mini` | Model for LLM learning extraction |
 | `TRACE_LLM_ENABLED` | `false` | Cloud LLM matching/extraction is opt-in: set `true` (with `OPENAI_API_KEY`) to enable |

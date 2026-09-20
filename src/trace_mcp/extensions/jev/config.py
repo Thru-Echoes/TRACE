@@ -43,6 +43,8 @@ class JevConfig:
     enabled: bool = False
     api_key: str | None = field(default=None, repr=False)
     model: str = "jev-latest"
+    provider: str = "typesafe"
+    gateway_zero_data_retention: bool = False
     local_only: bool = False
 
 
@@ -51,16 +53,32 @@ def load_config() -> JevConfig:
     project = _parse_dotenv(Path.cwd() / ".env")
     global_ = _parse_dotenv(_GLOBAL_ENV)
     merged = {**global_, **project}
-    for key in ("TYPESAFE_AI_API_KEY", "TYPESAFE_API_KEY", "TRACE_JEV_ENABLED", "TRACE_JEV_MODEL"):
+    for key in (
+        "TYPESAFE_AI_API_KEY",
+        "TYPESAFE_API_KEY",
+        "AI_GATEWAY_API_KEY",
+        "TRACE_JEV_ENABLED",
+        "TRACE_JEV_MODEL",
+        "TRACE_JEV_PROVIDER",
+        "TRACE_JEV_GATEWAY_ZERO_DATA_RETENTION",
+    ):
         value = os.environ.get(key)
         if value and value.strip():
             merged[key] = value
     local_only = any(_truthy(source.get("TRACE_LOCAL_ONLY")) for source in (global_, project, dict(os.environ)))
-    api_key = merged.get("TYPESAFE_AI_API_KEY") or merged.get("TYPESAFE_API_KEY")
+    provider = merged.get("TRACE_JEV_PROVIDER", "typesafe")
+    api_key = (
+        merged.get("AI_GATEWAY_API_KEY")
+        if provider == "vercel_gateway"
+        else merged.get("TYPESAFE_AI_API_KEY") or merged.get("TYPESAFE_API_KEY")
+    )
+    default_model = "typesafe-ai/jev" if provider == "vercel_gateway" else "jev-latest"
     return JevConfig(
         enabled=_truthy(merged.get("TRACE_JEV_ENABLED")) and not local_only,
         api_key=api_key,
-        model=merged.get("TRACE_JEV_MODEL", "jev-latest"),
+        model=merged.get("TRACE_JEV_MODEL", default_model),
+        provider=provider,
+        gateway_zero_data_retention=_truthy(merged.get("TRACE_JEV_GATEWAY_ZERO_DATA_RETENTION")),
         local_only=local_only,
     )
 

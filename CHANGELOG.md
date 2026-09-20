@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   egress before sending, never mutates TRACE records or resolves decisions,
   and keeps Jev distribution confidence separate from measured
   `decision.confidence`.
+  The provider is explicit: either the direct TypeSafe System One endpoint or
+  Vercel AI Gateway's official evaluation-model SDK path, fixed to
+  `typesafe-ai/jev`. Provider credentials do not fall across transports.
 
 ### Fixed
 

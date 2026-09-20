@@ -6,9 +6,12 @@ import asyncio
 import hashlib
 import json
 import math
+import os
+import subprocess
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 from urllib.request import Request, urlopen
 
@@ -22,6 +25,7 @@ MAPPING_VERSION = "trace-jev-conservative/v1"
 MAX_BYTES = 64_000
 
 Transport = Callable[[Request, float], bytes]
+GatewayRunner = Callable[[bytes, str], bytes]
 
 
 def _probability(value: object) -> float:
@@ -137,6 +141,24 @@ def _post(request: Request, timeout: float) -> bytes:
         return response.read(MAX_BYTES + 1)
 
 
+def _run_gateway(body: bytes, api_key: str) -> bytes:
+    bridge = Path(__file__).with_name("gateway_bridge.mjs")
+    env = dict(os.environ)
+    env.pop("AI_GATEWAY_API_KEY", None)
+    env.pop("TYPESAFE_AI_API_KEY", None)
+    env.pop("TYPESAFE_API_KEY", None)
+    env["TRACE_JEV_GATEWAY_API_KEY"] = api_key
+    result = subprocess.run(
+        ["node", str(bridge)],
+        input=body,
+        capture_output=True,
+        timeout=50,
+        env=env,
+        check=True,
+    )
+    return result.stdout
+
+
 async def assess_event(
     event: TraceEvent,
     config: JevConfig,
@@ -144,22 +166,36 @@ async def assess_event(
     project: str,
     project_key: str,
     transport: Transport = _post,
+    gateway_runner: GatewayRunner = _run_gateway,
 ) -> dict[str, Any]:
     if config.local_only:
         raise ValueError("TRACE_LOCAL_ONLY or the project privacy posture forbids Jev egress")
     if not config.enabled:
         raise ValueError("Jev advisory is disabled; set TRACE_JEV_ENABLED=true and restart the server")
+    if config.provider not in {"typesafe", "vercel_gateway"}:
+        raise ValueError("Unknown Jev provider; use 'typesafe' or 'vercel_gateway'")
     if not config.api_key:
-        raise ValueError("Jev advisory is enabled but no TypeSafe API key is configured")
+        key_name = "AI_GATEWAY_API_KEY" if config.provider == "vercel_gateway" else "TYPESAFE_AI_API_KEY"
+        raise ValueError(f"Jev advisory is enabled but {key_name} is not configured")
+    if config.provider == "vercel_gateway" and config.model != "typesafe-ai/jev":
+        raise ValueError("Vercel AI Gateway Jev requires TRACE_JEV_MODEL=typesafe-ai/jev")
     state = {"event": project_event(event)}
-    body = {"model": config.model, "state": state, "questions": questions()}
+    request_questions = questions()
+    if config.provider == "vercel_gateway":
+        request_questions = {
+            name: {**question, "type": "boolean" if question["type"] == "noul" else question["type"]}
+            for name, question in request_questions.items()
+        }
+    body: dict[str, Any] = {"model": config.model, "state": state, "questions": request_questions}
+    if config.provider == "vercel_gateway":
+        body["providerOptions"] = {"gateway": {"zeroDataRetention": config.gateway_zero_data_retention}}
     encoded = json.dumps(body, ensure_ascii=False, allow_nan=False).encode()
     if len(encoded) > MAX_BYTES:
         raise ValueError("Jev advisory request exceeds the bounded input limit")
 
     attest_egress(
-        provider="typesafe-ai",
-        endpoint="v1/systemone",
+        provider="vercel-ai-gateway" if config.provider == "vercel_gateway" else "typesafe-ai",
+        endpoint="v4/ai/evaluation-model" if config.provider == "vercel_gateway" else "v1/systemone",
         model=config.model,
         purpose="candidate-classification",
         content_class="bounded-trace-event-projection",
@@ -168,15 +204,18 @@ async def assess_event(
         project_key=project_key,
         session_id=event.session_id,
     )
-    request = Request(
-        ENDPOINT,
-        data=encoded,
-        headers={"Authorization": f"Bearer {config.api_key.strip()}", "Content-Type": "application/json"},
-        method="POST",
-    )
     started = time.monotonic()
     try:
-        raw = await asyncio.to_thread(transport, request, 45.0)
+        if config.provider == "vercel_gateway":
+            raw = await asyncio.to_thread(gateway_runner, encoded, config.api_key.strip())
+        else:
+            request = Request(
+                ENDPOINT,
+                data=encoded,
+                headers={"Authorization": f"Bearer {config.api_key.strip()}", "Content-Type": "application/json"},
+                method="POST",
+            )
+            raw = await asyncio.to_thread(transport, request, 45.0)
         if len(raw) > MAX_BYTES:
             raise ValueError("oversized response")
         response = json.loads(raw)
@@ -197,6 +236,18 @@ async def assess_event(
         # Provider bodies and exception text can contain credentials or untrusted content.
         raise ValueError("Jev unavailable or returned an invalid typed response; no advice recorded") from exc
 
+    transport_audit: dict[str, Any]
+    if config.provider == "vercel_gateway":
+        transport_audit = {
+            "provider": "vercel-ai-gateway",
+            "sdk": "ai/7.0.105;@ai-sdk/gateway/4.0.85",
+            "response_model_source": "gateway-route",
+            "zero_data_retention": config.gateway_zero_data_retention,
+            "answer_normalization": "boolean-to-noul;typesafe-confidence-by-question/v1",
+        }
+    else:
+        transport_audit = {"provider": "typesafe-direct", "endpoint": ENDPOINT}
+
     return {
         "schema_version": "trace/jev-advisory/v1",
         "advice": map_advice(answers),
@@ -209,6 +260,7 @@ async def assess_event(
         },
         "requested_model": config.model,
         "response_model": response_model,
+        "transport": transport_audit,
         "request_digest": _digest(body),
         "question_set_version": QUESTION_SET_VERSION,
         "mapping_version": MAPPING_VERSION,
