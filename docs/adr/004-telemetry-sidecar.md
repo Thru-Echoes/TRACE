@@ -103,7 +103,7 @@ its identity.
    always-loaded tool surface it measures, the first increment is an offline
    analyzer (`trace_mcp.selfcost`, `python -m trace_mcp.selfcost`) that reads
    stored session JSON read-only and introspects the registered tool schemas via
-   the FastMCP tool manager. It adds no MCP tool, no schema field, no wire
+   the SDK server's tool manager (FastMCP at the time; MCPServer since mcp 2). It adds no MCP tool, no schema field, no wire
    change, and no core dependency. Any future telemetry MCP tool must keep the
    tool set static and deterministically ordered (cache-stable) and document the
    cache cost it adds.

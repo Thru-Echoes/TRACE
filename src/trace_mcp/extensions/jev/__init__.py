@@ -10,12 +10,12 @@ from trace_mcp.extensions.jev.client import assess_event
 from trace_mcp.extensions.jev.config import effective_config, load_config
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
     from trace_mcp.storage.base import TraceStorage
 
 
-def register(mcp: FastMCP, storage: TraceStorage) -> None:
+def register(mcp: MCPServer, storage: TraceStorage) -> None:
     """Register the read-only ``trace_jev_assess_candidate`` tool."""
     config = load_config()
 
