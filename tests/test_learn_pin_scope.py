@@ -7,7 +7,7 @@ label is required. Before this suite, the learn surface accepted any foreign
 label on a pinned server — a cross-project read/write bypass of the documented
 fail-closed guarantee.
 
-Tools are exercised through ``FastMCP.call_tool`` so the registered schema
+Tools are exercised through ``MCPServer.call_tool`` so the registered schema
 (optional ``project``) and the real dispatch path are what is tested.
 """
 
@@ -18,7 +18,8 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from _mcp_helpers import call_tool_json as _call
+from mcp.server.mcpserver import MCPServer
 
 import trace_mcp.project_identity as pident
 from trace_mcp.extensions.learn import register
@@ -37,19 +38,10 @@ def learn_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     for var in ("TRACE_PROJECT", "OPENAI_API_KEY", "TRACE_LOCAL_ONLY"):
         monkeypatch.delenv(var, raising=False)
     pident._reset_registry_cache()
-    mcp = FastMCP("learn-pin-test")
+    mcp = MCPServer("learn-pin-test")
     register(mcp, JsonFileStorage(directory=str(tmp_path / "sessions")))
     yield mcp, tmp_path
     pident._reset_registry_cache()
-
-
-async def _call(mcp: FastMCP, tool: str, args: dict[str, Any]) -> dict:
-    """Call a registered tool and decode its JSON text payload."""
-    out = await mcp.call_tool(tool, args)
-    if isinstance(out, tuple):  # newer mcp: (content, structured)
-        out = out[0]
-    text = out[0].text  # type: ignore[union-attr]
-    return json.loads(text)
 
 
 # Minimal valid extra arguments per tool (beyond `project`).
@@ -182,7 +174,7 @@ SEED_CORPUS = (
 # ranking quality.
 
 
-async def _seed_corpus(mcp: FastMCP, project: str) -> None:
+async def _seed_corpus(mcp: MCPServer, project: str) -> None:
     for text in SEED_CORPUS:
         await _call(mcp, "trace_learn_add", {"project": project, "content": text})
 

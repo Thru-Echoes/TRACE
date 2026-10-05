@@ -32,7 +32,7 @@ if TYPE_CHECKING:
 _VALID_CATEGORIES = get_args(LearningCategory)
 
 if TYPE_CHECKING:
-    from mcp.server.fastmcp import FastMCP
+    from mcp.server.mcpserver import MCPServer
 
     from trace_mcp.storage.base import TraceStorage
 
@@ -101,7 +101,7 @@ def _resolve_project(project: str | None) -> tuple[str, str | None]:
         return "", json.dumps({"error": str(exc), "project": project or ""})
 
 
-def register(mcp: FastMCP, storage: TraceStorage) -> None:
+def register(mcp: MCPServer, storage: TraceStorage) -> None:
     """Register trace-learn tools and hooks on the MCP server."""
 
     _config = load_config()

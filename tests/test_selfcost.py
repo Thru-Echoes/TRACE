@@ -2,7 +2,7 @@
 
 Uses real schema models and a real Session round-trip through disk — no mocks.
 Schema-surface assertions use inequalities (>=) so they are robust to the
-FastMCP singleton retaining extension tools once loaded in-process.
+MCPServer singleton retaining extension tools once loaded in-process.
 """
 
 from __future__ import annotations

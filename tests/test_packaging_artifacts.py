@@ -167,9 +167,14 @@ class TestWheelInstallE2E:
         venv_dir = tmp_path / "venv"
         subprocess.run(["uv", "venv", str(venv_dir)], check=True, capture_output=True, timeout=120)
         python = venv_dir / ("Scripts" if sys.platform == "win32" else "bin") / "python"
-        # Install through the [validate] extra (PEP 508 direct reference) so the
-        # extra itself is exercised — installing jsonschema manually would let a
-        # broken/renamed extra pass every test.
+        # Install through the [validate] extra (PEP 508 direct reference). mcp 2
+        # pulls jsonschema in on its own, so a broken or renamed extra would no
+        # longer make this install or the CLI fail; assert the extra is declared
+        # in the wheel's metadata so a dead extra is still caught here.
+        with zipfile.ZipFile(built_dist["wheel"]) as wheel:
+            metadata_name = next(n for n in wheel.namelist() if n.endswith(".dist-info/METADATA"))
+            metadata = wheel.read(metadata_name).decode("utf-8")
+        assert "Provides-Extra: validate" in metadata, "the [validate] extra is missing from the wheel metadata"
         subprocess.run(
             [
                 "uv",

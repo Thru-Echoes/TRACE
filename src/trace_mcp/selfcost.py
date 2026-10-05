@@ -6,7 +6,7 @@ any session record. It answers "how much context does TRACE itself cost me?"
 with deliberately-labeled ESTIMATES, at the only granularity an offline analyzer
 can honestly speak to.
 
-What it can and cannot see (verified against the MCP/FastMCP runtime):
+What it can and cannot see (verified against the MCP SDK's MCPServer runtime):
 
   * Schema-surface — the JSON tool definitions TRACE injects into context. These
     sit at prompt prefix position 0 and, under Anthropic prompt caching, are
@@ -143,7 +143,7 @@ class SelfCostReport(BaseModel):
 def _list_registered_tools(include_extensions: bool) -> list[tuple[str, str, dict[str, Any]]]:
     """Return (name, description, input_schema) for every registered MCP tool.
 
-    Side effect: imports trace_mcp.server (which constructs the FastMCP instance
+    Side effect: imports trace_mcp.server (which constructs the MCPServer instance
     and registers core tools at import time) and, when include_extensions is
     True, calls its extension loader. No server is started. Returns [] if the
     runtime introspection API is unavailable.
@@ -180,7 +180,7 @@ def _list_registered_tools(include_extensions: bool) -> list[tuple[str, str, dic
             (
                 getattr(t, "name", "") or "",
                 getattr(t, "description", "") or "",
-                getattr(t, "inputSchema", {}) or {},
+                getattr(t, "input_schema", None) or {},
             )
             for t in mcp_tools
         ]

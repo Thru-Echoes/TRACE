@@ -427,7 +427,7 @@ Regenerate the schema from models: `python scripts/generate_schema.py` (writes t
 
 ```
 src/trace_mcp/
-    server.py              # MCP server entry point (FastMCP) + extension loader
+    server.py              # MCP server entry point (MCPServer, mcp 2.x) + extension loader
     project_identity.py    # Canonical project keys + alias registry
     identity_cli.py        # `trace-mcp identity` migration subcommands
     identity_report.py     # Read-only drift and stray-store reporting

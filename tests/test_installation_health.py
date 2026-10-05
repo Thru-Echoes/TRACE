@@ -106,14 +106,14 @@ class TestPackageImport:
 
     def test_mcp_handshake_reports_package_version(self) -> None:
         """The MCP initialize handshake's serverInfo must carry trace-mcp's own
-        version, not the mcp library's. FastMCP defaults the low-level server
-        version to the mcp package version, which misreports what a client is
-        talking to (e.g. '1.29.0' instead of '0.5.0')."""
+        version, not the mcp library's. Left to its default, the SDK reports the
+        mcp package version, which misreports what a client is talking to
+        (e.g. '2.3.0' instead of '0.5.2'). The wire-level check is
+        tests/test_e2e_server.py::TestServerStartup::test_server_reports_correct_info."""
         import trace_mcp
         from trace_mcp import server
 
-        opts = server.mcp._mcp_server.create_initialization_options()
-        assert opts.server_version == trace_mcp.__version__
+        assert server.mcp.version == trace_mcp.__version__
 
     def test_import_exporters(self) -> None:
         """Exporter modules should be importable."""
@@ -213,10 +213,11 @@ class TestDependencies:
         major = int(pydantic.__version__.split(".")[0])
         assert major >= 2, f"TRACE requires pydantic >= 2.0, found {pydantic.__version__}"
 
-    def test_fastmcp_importable(self) -> None:
-        from mcp.server.fastmcp import FastMCP
+    def test_mcpserver_importable(self) -> None:
+        """server.py is written against the mcp 2.x API; mcp 1.x has no MCPServer."""
+        from mcp.server.mcpserver import MCPServer
 
-        assert FastMCP is not None
+        assert MCPServer is not None
 
 
 # ── pyproject.toml Consistency Tests ─────────────────────────────────────────

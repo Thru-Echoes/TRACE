@@ -12,6 +12,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The server runs on the mcp 2.x SDK; the dependency is now `mcp>=2,<3`.**
+  mcp 2.0 removed `mcp.server.fastmcp`, which `server.py` imported at module
+  scope, so trace-mcp could not import in any environment that also carried
+  an mcp 2.x package: every tool disappeared at once with a
+  `ModuleNotFoundError`. The pinned `mcp<2` bound protected consumers launched
+  through `uvx --refresh` but left every other install path dead on arrival.
+  `server.py` now builds `MCPServer("trace", version=...)`, passes host, port
+  and the HTTP path to `run()` where mcp 2 reads them, and no longer stamps the
+  version through a private attribute, because the constructor takes it. The
+  handshake version is asserted through the public `MCPServer.version`
+  property and over the wire in the stdio end-to-end test. Two mcp 2 defaults
+  that would have changed behaviour are handled. The streamable-http
+  transport's 30-minute idle eviction, after which the old session id answers
+  404, is turned off so a consumer that logs its next event after a long task
+  keeps its session, as under mcp 1.x. And because mcp 2 reports any exception
+  inside a tool as a bare `Error executing tool <name>`, the five read tools
+  (`trace_get_session`, `trace_get_events`, `trace_get_decisions`,
+  `trace_get_decision_chain`, `trace_search`) now return an
+  `Error: could not read session ...` string for a corrupt or unreadable
+  session file, as the write tools already did for their failures. Requests
+  and responses are otherwise unchanged. Consumers that pin `mcp<2` themselves
+  cannot co-install this release.
+
 ### Fixed
 
 - **`trace-mcp-init` refreshes an installed instruction block instead of
