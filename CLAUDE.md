@@ -144,13 +144,15 @@ instructions are in the global `~/.claude/CLAUDE.md`. Key points:
   branch checked out ships it to every consumer on their next server start.
   Keep `main` checked out unless actively testing a branch.
 
-## Available Tools (22 total)
+## Available Tools (23 total)
 
 17 core tools + 5 trace-learn extension tools. See [README.md](README.md#available-tools-22-total) for the full table.
 
 **Core**: `trace_start_session`, `trace_end_session`, `trace_log_tool_call`, `trace_log_annotation`, `trace_log_contribution`, `trace_log_state_change`, `trace_propose_decision`, `trace_resolve_decision`, `trace_get_session`, `trace_get_events`, `trace_get_decisions`, `trace_get_decision_chain`, `trace_search`, `trace_export`, `trace_list_sessions`, `trace_project_summary`, `trace_health_check`
 
 **trace-learn**: `trace_learn_recall`, `trace_learn_add`, `trace_learn_list`, `trace_learn_forget`, `trace_learn_extract`
+
+**Jev advisory**: `trace_jev_assess_candidate` (read-only, opt-in; never resolves decisions or populates measured confidence)
 
 <!-- trace-mcp:claude-code block=c45181197f52 -->
 
