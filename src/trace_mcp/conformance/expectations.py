@@ -14,7 +14,7 @@ declared names. A restated expectation is one more copy to rot, and rot in
 exactly this layer — a matcher naming a bare tool name, a hook fleet frozen at
 an old release — is what the doctor exists to catch.
 
-Exports: ``CORE_TOOLS``, ``LEARN_TOOLS``, ``ConformanceAssetError``,
+Exports: ``CORE_TOOLS``, ``LEARN_TOOLS``, ``JEV_TOOLS``, ``ConformanceAssetError``,
 ``DoctorReport``, ``ExpectedHookDeployment``, ``ExpectedServedBuild``,
 ``ExpectedToolSurface``, ``Finding``, ``shipped_hook_files``,
 ``shipped_hook_stamp``.
@@ -76,6 +76,9 @@ Kept separate from the core names because the extension is optional by
 governance (ADR-003): core must work with it absent. A server missing exactly
 these five is the documented symptom of a launch config without the
 ``--with openai/numpy/model2vec`` extras."""
+
+JEV_TOOLS: tuple[str, ...] = ("trace_jev_assess_candidate",)
+"""The dependency-free Jev advisory surface; registered even when disabled."""
 
 
 # ── Shipped hook assets ─────────────────────────────────────────────────────
@@ -204,11 +207,14 @@ class ExpectedToolSurface(BaseModel):
     learn_tools: tuple[str, ...] = Field(
         default=LEARN_TOOLS, description="trace-learn extension tool names, in documented order."
     )
+    jev_tools: tuple[str, ...] = Field(
+        default=JEV_TOOLS, description="Jev advisory extension tool names, in documented order."
+    )
 
-    @computed_field(description="Total tools a fully-equipped server serves (core + learn).")
+    @computed_field(description="Total tools a fully-equipped server serves (core + extensions).")
     @property
     def total(self) -> int:
-        return len(self.core_tools) + len(self.learn_tools)
+        return len(self.core_tools) + len(self.learn_tools) + len(self.jev_tools)
 
 
 class ExpectedHookDeployment(BaseModel):
@@ -307,6 +313,7 @@ class DoctorReport(BaseModel):
 
 __all__ = [
     "CORE_TOOLS",
+    "JEV_TOOLS",
     "LEARN_TOOLS",
     "ConformanceAssetError",
     "DoctorReport",

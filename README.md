@@ -142,7 +142,7 @@ Using `uvx` builds the package into an isolated environment, avoiding `.venv` br
 
 Two parts of that config are easy to omit and worth keeping:
 
-- **The three `--with` packages are what make this a 22-tool server.** They are the optional dependencies of the trace-learn extension. Without them the server still starts and still records provenance, but the extension does not load and you get the 17 core tools with no error to tell you why.
+- **The three `--with` packages enable the five trace-learn tools.** Without them the server still starts and records provenance, but trace-learn does not load. The dependency-free Jev advisory tool still registers, disabled until explicitly configured.
 - **`TRACE_PROJECT` pins the process to one project.** With it set you omit `project` from `trace_start_session`, and cross-project reads and writes fail closed. Without it, pass `project="..."` explicitly on every session start — an unpinned server rejects the call rather than guessing.
 
 ### Serve over Streamable HTTP
@@ -233,7 +233,7 @@ Exit codes: `0` clean, `1` findings, `2` usage error — a bad path is not an un
 | `config.*` | `.mcp.json` parses and declares a `trace` server; launched with `uvx`; the `--from` source is something uvx can build (and is not the unrelated PyPI distribution name); the args actually name `trace-mcp` as the command to run; the three trace-learn `--with` extras are present; `--refresh-package trace-mcp` is set. |
 | `hooks.*` | Every shipped hook script is installed, executable, and carries this build's `[trace-hooks vX.Y]` stamp; no TRACE-stamped leftovers from an older release remain; `settings.json` parses; every hook is registered **under its own host event**; the decision-audit hook uses the namespaced matcher that actually fires. |
 | `pin.*` | The pin file, the `.mcp.json` `TRACE_PROJECT` env pin, and the CLAUDE.md pin line all exist and canonicalize to one project key. |
-| `live.*` | With `--live` only: the project's own configured command starts, completes an MCP handshake, reports this build's version, and serves all 22 tools. |
+| `live.*` | With `--live` only: the project's own configured command starts, completes an MCP handshake, reports this build's version, and serves all 23 tools. |
 
 `--live` is opt-in because it **runs the command the project's `.mcp.json` declares** — an action, not an inspection. It is the only check that catches a project whose config, hooks, and pins are all correct while the running server is a stale build; a warm `uv` cache can serve an old wheel for minutes even with `--refresh-package`, and the finding names the remedy (`uv cache clean trace-mcp`, then restart the server).
 
@@ -292,7 +292,7 @@ Claude: -> trace_end_session(summary="Analyzed 47 passages...")
         (learnings auto-extracted and persisted for future sessions)
 ```
 
-## Available tools (22 total)
+## Available tools (23 total)
 
 ### Core tools (17)
 
@@ -326,6 +326,12 @@ Claude: -> trace_end_session(summary="Analyzed 47 passages...")
 | `trace_learn_forget` | Remove a learning by ID |
 | `trace_learn_extract` | Extract learnings from session events (annotations, rejected decisions, contributions) |
 
+### Extension: Jev advisory (1)
+
+| Tool | Description |
+|------|-------------|
+| `trace_jev_assess_candidate` | Classify an existing provenance event as a possible durable candidate; read-only and advisory |
+
 ## Event types
 
 | Type | Description | Key Fields |
@@ -341,6 +347,8 @@ Claude: -> trace_end_session(summary="Analyzed 47 passages...")
 The default `trace-learn` extension surfaces relevant past learnings at session start, on-demand via `trace_learn_recall`, and when decisions are proposed — and auto-extracts new learnings at session end. Matching uses cloud LLM scoring only when explicitly opted in (`TRACE_LLM_ENABLED=true` plus an `OPENAI_API_KEY` in the project's `.env`), with BM25 fallback otherwise — and a fallback caused by a missing or refused key is reported rather than passed off as a result. Storage: `~/.trace/knowledge/{project_key}.json`, named by the canonical project key rather than the display label (env: `TRACE_KNOWLEDGE_DIR`).
 
 See [`docs/extensions/trace-learn.md`](https://github.com/Thru-Echoes/TRACE/blob/main/docs/extensions/trace-learn.md) for matching backends, BM25 stemming, per-backend thresholds, extraction details, and LLM configuration.
+
+The optional Jev advisory extension is documented in [`docs/extensions/jev.md`](https://github.com/Thru-Echoes/TRACE/blob/main/docs/extensions/jev.md). It is read-only, explicitly enabled, and keeps model confidence separate from measured decision confidence.
 
 ## Configuration
 
@@ -383,6 +391,12 @@ A cloud call attempted with no key, or with a key the provider rejects, is repor
 | `TRACE_EGRESS_LOG` | `~/.trace/egress.jsonl` | Cloud-egress ledger: one JSONL line per cloud call trace-learn makes (the fact of the call — provider, endpoint, model, purpose, item count — never the content) |
 | `TRACE_LOG_LEVEL` | `INFO` | Logging verbosity |
 | `OPENAI_API_KEY` | — | OpenAI API key for LLM matching, extraction, and cloud embeddings. **Put it in this project's `.env`** — see above; `~/.trace/.env` is a fallback, not the home for it |
+| `TRACE_JEV_ENABLED` | `false` | Explicitly enable read-only Jev advisory calls; a TypeSafe key alone does not enable egress |
+| `TRACE_JEV_PROVIDER` | `typesafe` | Explicit Jev transport: `typesafe` or `vercel_gateway`; credentials never fall across providers |
+| `TYPESAFE_AI_API_KEY` | — | TypeSafe System One credential used only when `TRACE_JEV_ENABLED=true` |
+| `AI_GATEWAY_API_KEY` | — | Vercel AI Gateway credential, read only when `TRACE_JEV_PROVIDER=vercel_gateway` |
+| `TRACE_JEV_MODEL` | provider default | `jev-latest` for direct TypeSafe; fixed to `typesafe-ai/jev` for Gateway |
+| `TRACE_JEV_GATEWAY_ZERO_DATA_RETENTION` | `false` | Explicit Gateway `zeroDataRetention` provider option |
 | `TRACE_LLM_MODEL` | `gpt-5.4-mini` | Model for LLM relevance scoring |
 | `TRACE_LLM_EXTRACTION_MODEL` | `gpt-5.4-mini` | Model for LLM learning extraction |
 | `TRACE_LLM_ENABLED` | `false` | Cloud LLM matching/extraction is opt-in: set `true` (with `OPENAI_API_KEY`) to enable |

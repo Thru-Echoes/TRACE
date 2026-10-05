@@ -142,6 +142,8 @@ include = [
     # In-package docs (linked from the top-level README; keeps tree-built and
     # sdist-built wheels identical — see test_wheel_matches_package_tree).
     "src/trace_mcp/adapters/codex/README.md",
+    "src/trace_mcp/extensions/jev/*.mjs",
+    "src/trace_mcp/extensions/jev/package*.json",
     "tests/**/*.py",
     "tests/fixtures/**",
     "docs/specification.md",

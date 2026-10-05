@@ -1,0 +1,7 @@
+{
+  "name": "trace-jev-gateway",
+  "private": true,
+  "type": "module",
+  "engines": {"node": ">=22"},
+  "dependencies": {"ai": "7.0.105", "@ai-sdk/gateway": "4.0.85"}
+}
