@@ -311,7 +311,7 @@ class TestLiteralSignatureSweep:
         from trace_mcp import server
 
         fn = getattr(server, tool_name)
-        fn = getattr(fn, "fn", fn)  # unwrap FastMCP tool object if needed
+        fn = getattr(fn, "fn", fn)  # unwrap a tool object if the decorator ever returns one
         hints = typing.get_type_hints(fn)
         assert param in hints, f"{tool_name} has no parameter '{param}'"
         literal_values: set = set()

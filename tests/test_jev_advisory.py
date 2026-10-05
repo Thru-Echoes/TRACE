@@ -5,7 +5,8 @@ from pathlib import Path
 from urllib.request import Request
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from _mcp_helpers import call_tool_json
+from mcp.server.mcpserver import MCPServer
 
 import trace_mcp.extensions.jev.config as jev_config
 import trace_mcp.project_identity as pident
@@ -239,12 +240,11 @@ async def test_registered_tool_reads_existing_event_without_mutation(
     session = Session(id="trace_test", metadata=SessionMetadata(project="demo", project_key="demo"), events=[_event()])
     await storage.create_session(session)
     before = (tmp_path / "sessions" / "trace_test.json").read_bytes()
-    mcp = FastMCP("jev-test")
+    mcp = MCPServer("jev-test")
     register(mcp, storage)
-    output = await mcp.call_tool("trace_jev_assess_candidate", {"session_id": "trace_test", "event_id": "evt_001"})
-    if isinstance(output, tuple):
-        output = output[0]
-    payload = json.loads(output[0].text)  # type: ignore[union-attr]
+    payload = await call_tool_json(
+        mcp, "trace_jev_assess_candidate", {"session_id": "trace_test", "event_id": "evt_001"}
+    )
     assert "disabled" in payload["error"]
     assert (tmp_path / "sessions" / "trace_test.json").read_bytes() == before
     pident._reset_registry_cache()

@@ -168,10 +168,10 @@ async def test_streamable_http_full_session_lifecycle(tmp_path: Path) -> None:
     try:
         await _wait_for_port(port, proc)
 
+        # mcp 2 yields (read, write); 1.x also yielded a session-id getter.
         async with streamable_http_client(f"http://127.0.0.1:{port}/mcp") as (
             read_stream,
             write_stream,
-            _,
         ):
             async with ClientSession(read_stream, write_stream) as session:
                 await asyncio.wait_for(session.initialize(), timeout=_REQUEST_TIMEOUT)

@@ -36,7 +36,7 @@ migration tooling (`snapshot`, `scan`, `apply`, `check`, `merge-stores`,
 - **Forward refs across files**: Import both models in `schema/__init__.py`, call `model_rebuild()` after
 - All modules import `Session` from `trace_mcp.schema` (not `.schema.session`) to trigger rebuild
 - `from datetime import UTC` (not `timezone.utc`) — ruff UP017
-- **FastMCP** `@mcp.tool()` needs parentheses
+- **MCPServer** (mcp 2.x) `@mcp.tool()` needs parentheses
 - `asyncio_mode = "auto"` in pytest config for async tests
 - **Atomic writes** (temp file + `os.replace`) for all JSON writes — no `fcntl` dependency (cross-platform)
 - **Session writes go through `storage.locked.locked_disk_session`** — the single fail-closed, disk-truth read-modify-write path (INV-1, `docs/INVARIANTS.md`). Never hand-roll a lock block; never let a write proceed on a lock timeout.
@@ -64,7 +64,7 @@ migration tooling (`snapshot`, `scan`, `apply`, `check`, `merge-stores`,
 
 ```
 src/trace_mcp/
-    server.py              # MCP server entry point (FastMCP) + extension loader
+    server.py              # MCP server entry point (MCPServer, mcp 2.x) + extension loader
     project_identity.py    # Canonical project keys + alias registry (~/.trace/projects.json)
     identity_cli.py        # `trace-mcp identity` migration subcommands
     identity_report.py     # Read-only drift/stray-store reporting for the CLI

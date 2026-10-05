@@ -259,13 +259,16 @@ class TestServerStartup:
                 await _shutdown_server(proc)
 
     async def test_server_reports_correct_info(self) -> None:
-        """Server info should contain the correct name and version."""
+        """Server info should contain the correct name and trace-mcp's own version."""
+        import trace_mcp
+
         with tempfile.TemporaryDirectory() as tmpdir:
             proc = await _start_server(tmpdir)
             try:
                 response = await _initialize_server(proc)
                 server_info = response["result"]["serverInfo"]
                 assert server_info["name"] == "trace"
+                assert server_info["version"] == trace_mcp.__version__
             finally:
                 await _shutdown_server(proc)
 

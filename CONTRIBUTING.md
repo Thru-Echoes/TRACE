@@ -67,7 +67,7 @@ representative, not an exhaustive per-file tally.
 - **Line length**: 120
 - **Target**: Python 3.11+
 - Use `from datetime import UTC` (not `timezone.utc`) per ruff UP017
-- FastMCP `@mcp.tool()` needs parentheses
+- MCPServer (mcp 2.x) `@mcp.tool()` needs parentheses
 - Prefer Pydantic v2 BaseModel over raw dicts for anything with a known shape
 - Atomic writes (temp file + `os.replace`) for any new JSON storage path
 

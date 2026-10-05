@@ -14,7 +14,7 @@ import os
 import sys
 from typing import Any, Literal
 
-from mcp.server.fastmcp import FastMCP
+from mcp.server.mcpserver import MCPServer
 
 from trace_mcp import __version__
 from trace_mcp import extension_hooks as hooks
@@ -46,21 +46,13 @@ logging.basicConfig(
 logger = logging.getLogger("trace-mcp")
 
 # --- Server state ---
-mcp = FastMCP("trace")
-# FastMCP exposes no version parameter and defaults the low-level server's
-# version to the mcp LIBRARY version, so the initialize handshake's serverInfo
-# misreports what a client is talking to. Stamp trace-mcp's own version on the
-# underlying server (guarded by
-# tests/test_installation_health.py::TestPackageImport::test_mcp_handshake_reports_package_version).
-# Defensive: `_mcp_server` is a private FastMCP attribute — if a future mcp 1.x
-# release moves it, a cosmetic version misreport must degrade to a warning,
-# never an import-time crash that takes the whole fleet down on its next
-# cold-resolved server start (the mcp 2.0 failure shape). CI's cold-resolution
-# guard still fails loudly in that case, via the test above.
-try:
-    mcp._mcp_server.version = __version__
-except AttributeError:  # pragma: no cover — depends on the installed mcp internals
-    logger.warning("could not stamp trace-mcp's version on the MCP server; serverInfo will report the mcp library's")
+# The HTTP path the streamable-http transport serves; the SDK's default, named
+# here so the startup log and the bind use the same value.
+STREAMABLE_HTTP_PATH = "/mcp"
+# The version is a constructor argument, so the initialize handshake's
+# serverInfo reports trace-mcp's own version rather than the mcp library's
+# (guarded by tests/test_installation_health.py and tests/test_e2e_server.py).
+mcp = MCPServer("trace", version=__version__)
 storage = JsonFileStorage()
 active_sessions: dict[str, Session] = {}
 _current_session_id: str | None = None
@@ -783,6 +775,8 @@ async def trace_get_session(session_id: str) -> str:
         return f"Error: Session '{session_id}' not found."
     except pident.ProjectMismatchError as e:
         return f"Error: {e}"
+    except Exception as e:  # a corrupt or unreadable file; mcp 2 would otherwise hide the reason
+        return f"Error: could not read session '{session_id}': {e}"
 
     summary = query_tools.get_session_summary(session)
     return _compact(summary)
@@ -802,6 +796,8 @@ async def trace_get_events(
         return f"Error: Session '{session_id}' not found."
     except pident.ProjectMismatchError as e:
         return f"Error: {e}"
+    except Exception as e:  # a corrupt or unreadable file; mcp 2 would otherwise hide the reason
+        return f"Error: could not read session '{session_id}': {e}"
 
     events = query_tools.get_events(session, type_filter=type, limit=limit)
     return _compact(events)
@@ -821,6 +817,8 @@ async def trace_get_decisions(
         return f"Error: Session '{session_id}' not found."
     except pident.ProjectMismatchError as e:
         return f"Error: {e}"
+    except Exception as e:  # a corrupt or unreadable file; mcp 2 would otherwise hide the reason
+        return f"Error: could not read session '{session_id}': {e}"
 
     decisions = query_tools.get_decisions(session, disposition=disposition, proposed_by_type=proposed_by_type)
     return _compact(decisions)
@@ -842,6 +840,8 @@ async def trace_get_decision_chain(
         return f"Error: Session '{session_id}' not found."
     except pident.ProjectMismatchError as e:
         return f"Error: {e}"
+    except Exception as e:  # a corrupt or unreadable file; mcp 2 would otherwise hide the reason
+        return f"Error: could not read session '{session_id}': {e}"
 
     chain = query_tools.get_decision_chain(session, event_id=event_id)
     if not chain:
@@ -868,6 +868,8 @@ async def trace_search(
         return f"Error: Session '{session_id}' not found."
     except pident.ProjectMismatchError as e:
         return f"Error: {e}"
+    except Exception as e:  # a corrupt or unreadable file; mcp 2 would otherwise hide the reason
+        return f"Error: could not read session '{session_id}': {e}"
 
     all_results = query_tools.search_events(session, query=query)
     cap = max(1, min(limit, query_tools.MAX_SEARCH_LIMIT))
@@ -1068,16 +1070,25 @@ def main() -> None:
                 "prefer 127.0.0.1 and a local consumer unless this host is otherwise isolated.",
                 args.host,
             )
-        mcp.settings.host = args.host
-        mcp.settings.port = args.port
         logger.info(
             "Starting TRACE MCP server v%s at http://%s:%d%s (transport=streamable-http)",
             __version__,
             args.host,
             args.port,
-            mcp.settings.streamable_http_path,
+            STREAMABLE_HTTP_PATH,
         )
-        mcp.run(transport="streamable-http")
+        # mcp 2 takes transport options on run(), not on a settings object. Its
+        # default evicts an HTTP session after 30 idle minutes and answers the old
+        # session id with 404; mcp 1.x never did, and a consumer that logs its
+        # next event after a long task must not lose its session, so eviction
+        # stays off.
+        mcp.run(
+            transport="streamable-http",
+            host=args.host,
+            port=args.port,
+            streamable_http_path=STREAMABLE_HTTP_PATH,
+            session_idle_timeout=None,
+        )
         return
 
     logger.info("Starting TRACE MCP server v%s (transport=stdio)", __version__)
@@ -1096,7 +1107,7 @@ def _parse_server_args(argv: list[str]) -> argparse.Namespace:
 
     ``--host`` and ``--port`` only take effect with
     ``--transport streamable-http``; the stdio transport has no socket. The
-    HTTP path is FastMCP's ``streamable_http_path`` default (``/mcp``).
+    HTTP path is ``STREAMABLE_HTTP_PATH`` (``/mcp``, the SDK default).
     """
     parser = argparse.ArgumentParser(
         prog="trace-mcp",

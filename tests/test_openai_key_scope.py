@@ -19,12 +19,12 @@ has no key yet" routine, so the quiet path had to go.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 import pytest
-from mcp.server.fastmcp import FastMCP
+from _mcp_helpers import call_tool_json as _call
+from mcp.server.mcpserver import MCPServer
 
 import trace_mcp.extensions.learn.config as _cfg
 import trace_mcp.project_identity as pident
@@ -352,13 +352,6 @@ def learn_mcp(env_files, tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     pident._reset_registry_cache()
 
 
-async def _call(mcp: FastMCP, tool: str, args: dict[str, Any]) -> dict:
-    out = await mcp.call_tool(tool, args)
-    if isinstance(out, tuple):
-        out = out[0]
-    return json.loads(out[0].text)  # type: ignore[union-attr]
-
-
 async def test_recall_response_carries_the_missing_key_warning(learn_mcp, tmp_path: Path) -> None:
     """The warning rides along with the results, so the answer that gets used
     carries the caveat that produced it."""
@@ -367,7 +360,7 @@ async def test_recall_response_carries_the_missing_key_warning(learn_mcp, tmp_pa
 
     from trace_mcp.extensions.learn import register
 
-    mcp = FastMCP("key-scope-test")
+    mcp = MCPServer("key-scope-test")
     register(mcp, JsonFileStorage(directory=str(tmp_path / "sessions")))
 
     await _call(mcp, "trace_learn_add", {"content": "a learning about widgets"})
@@ -397,7 +390,7 @@ async def test_a_rejected_key_surfaces_as_its_own_error_not_a_strict_mode_one(
     write_project({"OPENAI_API_KEY": "sk-rejected", "TRACE_STRICT_LLM": "false"})
     monkeypatch.setattr(learn_pkg, "get_embedding_provider", lambda _config: _RejectingProvider())
 
-    mcp = FastMCP("key-scope-test")
+    mcp = MCPServer("key-scope-test")
     learn_pkg.register(mcp, JsonFileStorage(directory=str(tmp_path / "sessions")))
 
     result = await _call(mcp, "trace_learn_add", {"content": "a learning about widgets"})
@@ -412,7 +405,7 @@ async def test_recall_on_an_empty_store_still_carries_the_warning(learn_mcp, tmp
 
     from trace_mcp.extensions.learn import register
 
-    mcp = FastMCP("key-scope-test")
+    mcp = MCPServer("key-scope-test")
     register(mcp, JsonFileStorage(directory=str(tmp_path / "sessions")))
 
     result = await _call(mcp, "trace_learn_recall", {"context": "anything"})
@@ -429,7 +422,7 @@ async def test_recall_has_no_warnings_when_the_key_is_present(learn_mcp, tmp_pat
 
     from trace_mcp.extensions.learn import register
 
-    mcp = FastMCP("key-scope-test")
+    mcp = MCPServer("key-scope-test")
     register(mcp, JsonFileStorage(directory=str(tmp_path / "sessions")))
 
     await _call(mcp, "trace_learn_add", {"content": "a learning about widgets"})

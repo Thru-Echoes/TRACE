@@ -1250,10 +1250,10 @@ class TestSpecMCPToolCoverage:
         assert callable(export_tools.export_session)
 
     def test_mcp_tool_registration(self) -> None:
-        """TRACE registers its tools with FastMCP."""
+        """TRACE registers its tools with the SDK server (MCPServer)."""
         from trace_mcp.server import mcp
 
-        # FastMCP stores tools; just verify the server object exists
+        # The SDK server stores tools; just verify the server object exists
         assert mcp.name == "trace"
 
 
