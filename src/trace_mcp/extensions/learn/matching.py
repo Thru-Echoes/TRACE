@@ -651,19 +651,24 @@ def get_default_backend(
         return LLMBackend(config)
 
     # Tier 3: BM25 (always available, zero external deps)
-    # If strict mode is ON and the user has an API key, they expected LLM or
-    # embedding — refuse to silently degrade to BM25.
-    if config.strict_llm and config.openai_api_key:
+    # Strict mode refuses this fallback only when a CLOUD path was actually asked
+    # for (LLM matching enabled, or OpenAI embeddings requested) and cannot be
+    # served. A key alone activates nothing in this extension, so a key alone
+    # must not turn keyword recall into a refusal; a missing explicitly
+    # requested local backend is refused by get_embedding_provider itself.
+    cloud_requested = config.llm_enabled or config.embedding_backend == "openai"
+    if config.strict_llm and config.openai_api_key and cloud_requested:
         logger.error(
-            "Strict LLM mode is ON and an OPENAI_API_KEY is set, but neither "
-            "Embedding nor LLM backends are available. Refusing to fall back "
-            "to BM25. Check that the 'openai' package is installed and the "
-            "API key is valid. Set TRACE_STRICT_LLM=false to allow BM25 fallback."
+            "Strict LLM mode is ON and a cloud path was requested (TRACE_LLM_ENABLED or "
+            "TRACE_EMBEDDING_BACKEND=openai), but neither an embedding nor an LLM backend is "
+            "available. Refusing to fall back to BM25. Check that the 'openai' package is "
+            "installed and the API key is valid, install 'fastembed' for local embeddings, "
+            "or set TRACE_STRICT_LLM=false to allow BM25 fallback."
         )
         raise LLMFallbackError(
-            "Strict LLM mode is ON but no LLM/Embedding backend is available. "
-            "Install 'openai' package and verify OPENAI_API_KEY, or set "
-            "TRACE_STRICT_LLM=false to allow BM25 fallback."
+            "Strict LLM mode is ON but the requested cloud path has no LLM/Embedding backend "
+            "available. Install the 'openai' package and verify OPENAI_API_KEY, install "
+            "'fastembed' for local embeddings, or set TRACE_STRICT_LLM=false to allow BM25 fallback."
         )
 
     logger.warning(
