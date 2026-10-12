@@ -13,7 +13,7 @@ existing suite mocks ``_HAS_OPENAI`` / ``AsyncOpenAI`` and ``_HAS_MODEL2VEC`` / 
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import numpy as np
 import pytest
@@ -102,15 +102,51 @@ class TestFastEmbedSelection:
                         provider = get_embedding_provider(config)
         assert provider is None
 
-    def test_auto_falls_to_model2vec_when_no_fastembed(self):
+    def test_auto_without_fastembed_falls_to_bm25_even_when_model2vec_is_installed(self):
+        """Static vectors ranked below keyword search on the benchmark store, so auto never picks them."""
         config = LearnConfig(openai_api_key="sk-test", embedding_backend="auto")
-        mock_instance = MagicMock()
-        mock_instance.dim = 256
-        with patch(f"{_EMB}._HAS_FASTEMBED", False):
-            with patch(f"{_EMB}._HAS_MODEL2VEC", True):
-                with patch("model2vec.StaticModel.from_pretrained", return_value=mock_instance):
-                    provider = get_embedding_provider(config)
+        with patch(f"{_EMB}._HAS_FASTEMBED", False), patch(f"{_EMB}._HAS_MODEL2VEC", True):
+            assert get_embedding_provider(config) is None
+
+    def test_model2vec_is_available_on_explicit_request(self):
+        config = LearnConfig(embedding_backend="model2vec")
+        with patch(f"{_EMB}._HAS_FASTEMBED", True), patch(f"{_EMB}._HAS_MODEL2VEC", True):
+            provider = get_embedding_provider(config)
         assert isinstance(provider, Model2VecEmbeddingProvider)
+
+    def test_default_fastembed_model_carries_the_query_prefix(self):
+        assert DEFAULT_FASTEMBED_MODEL == "snowflake/snowflake-arctic-embed-s"
+        assert FASTEMBED_ALLOWLIST[DEFAULT_FASTEMBED_MODEL]["query_prefix"] == (
+            "Represent this sentence for searching relevant passages: "
+        )
+
+    def test_auto_builds_no_cloud_client_and_loads_no_model(self):
+        config = LearnConfig(openai_api_key="sk-test", embedding_backend="auto")
+        with (
+            patch(f"{_EMB}._HAS_FASTEMBED", False),
+            patch(f"{_EMB}._HAS_MODEL2VEC", True),
+            patch(f"{_EMB}._HAS_OPENAI", True),
+            patch(f"{_EMB}.AsyncOpenAI") as openai_cls,
+            patch("model2vec.StaticModel.from_pretrained") as loader,
+        ):
+            assert get_embedding_provider(config) is None
+        openai_cls.assert_not_called()
+        loader.assert_not_called()
+
+    async def test_explicitly_pinned_potion_model_is_the_one_loaded(self):
+        inst = MagicMock()
+        inst.encode.return_value = [np.array([0.1, 0.2])]
+        with (
+            patch(f"{_EMB}._HAS_FASTEMBED", False),
+            patch(f"{_EMB}._HAS_MODEL2VEC", True),
+            patch("model2vec.StaticModel.from_pretrained", return_value=inst) as loader,
+        ):
+            prov = get_embedding_provider(
+                LearnConfig(embedding_backend="model2vec", embedding_model="minishlab/potion-base-8M")
+            )
+            assert prov is not None
+            await prov.embed_query("q")
+        loader.assert_called_once_with("minishlab/potion-base-8M")
 
     def test_fastembed_ignores_openai_default_model(self):
         """When the OpenAI default model string is left in place, fastembed uses its own default."""
@@ -197,3 +233,115 @@ class TestSaveCacheDimensionGuard:
         assert loaded.shape == (2, 4)  # dim taken from the first embedded row
         assert not np.isnan(loaded[0][0])
         assert np.isnan(loaded[1][0])  # off-dimension row → treated as missing
+
+
+# ── Query vs document encoding ─────────────────────────────────────────────
+
+EXACT_ARCTIC_PREFIX = "Represent this sentence for searching relevant passages: "
+_UNSORTED_VEC = [0.8, -0.2, 0.1]  # deliberately unsorted so a coordinate shuffle is caught
+
+
+def _fake_fastembed(seen: list[list[str]]) -> MagicMock:
+    def _embed(texts):
+        seen.append(list(texts))
+        return (np.array(_UNSORTED_VEC) for _ in texts)
+
+    model = MagicMock()
+    model.embed.side_effect = _embed
+    return model
+
+
+class TestQueryEmbedding:
+    """Queries and documents are encoded asymmetrically where the model card requires it."""
+
+    @pytest.mark.parametrize("model_name", sorted(FASTEMBED_ALLOWLIST))
+    async def test_query_prefix_matches_model_card_and_documents_stay_bare(self, model_name: str):
+        seen: list[list[str]] = []
+        with patch(f"{_EMB}._HAS_FASTEMBED", True), patch(f"{_EMB}.TextEmbedding", return_value=_fake_fastembed(seen)):
+            prov = FastEmbedEmbeddingProvider(model_name=model_name)
+            docs = await prov.embed_texts(["a learning"])
+            query = await prov.embed_query("find it")
+        expected_query = EXACT_ARCTIC_PREFIX + "find it" if model_name.startswith("snowflake/") else "find it"
+        assert seen == [["a learning"], [expected_query]]
+        assert docs == [_UNSORTED_VEC]
+        assert query == _UNSORTED_VEC
+
+    async def test_model2vec_query_is_the_single_document_embedding(self):
+        inst = MagicMock()
+        inst.encode.return_value = [np.array(_UNSORTED_VEC)]
+        with patch(f"{_EMB}._HAS_MODEL2VEC", True), patch("model2vec.StaticModel.from_pretrained", return_value=inst):
+            prov = Model2VecEmbeddingProvider()
+            assert await prov.embed_query("q") == _UNSORTED_VEC
+        inst.encode.assert_called_once_with(["q"])
+
+    async def test_openai_query_delegates_to_the_attested_document_path(self):
+        """No second network call site: embed_query goes through embed_texts, which records egress."""
+        with patch(f"{_EMB}._HAS_OPENAI", True), patch(f"{_EMB}.AsyncOpenAI"):
+            prov = OpenAIEmbeddingProvider(api_key="sk-test")
+        prov.embed_texts = AsyncMock(return_value=[_UNSORTED_VEC])  # type: ignore[method-assign]
+        assert await prov.embed_query("q") == _UNSORTED_VEC
+        prov.embed_texts.assert_awaited_once_with(["q"])
+
+    async def test_helper_dispatches_to_a_provider_query_method(self):
+        from trace_mcp.extensions.learn.embeddings import embed_query
+
+        prov = MagicMock()
+        prov.embed_query = AsyncMock(return_value=_UNSORTED_VEC)
+        prov.embed_texts = AsyncMock(return_value=[[9.0, 9.0, 9.0]])
+        assert await embed_query(prov, "find it") == _UNSORTED_VEC
+        prov.embed_query.assert_awaited_once_with("find it")
+        prov.embed_texts.assert_not_awaited()
+
+    async def test_helper_falls_back_for_a_duck_typed_provider_without_embed_query(self):
+        from trace_mcp.extensions.learn.embeddings import embed_query
+
+        class DocsOnly:
+            model_name = "docs-only"
+            dimensions = 3
+
+            def __init__(self) -> None:
+                self.calls: list[list[str]] = []
+
+            async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+                self.calls.append(list(texts))
+                return [[1.0, 2.0, 3.0] for _ in texts]
+
+        prov = DocsOnly()
+        assert await embed_query(prov, "q") == [1.0, 2.0, 3.0]
+        assert prov.calls == [["q"]]
+
+    async def test_explicit_protocol_subclass_inherits_symmetric_default(self):
+        from trace_mcp.extensions.learn.embeddings import EmbeddingProvider
+
+        class Legacy(EmbeddingProvider):
+            model_name = "legacy"
+
+            @property
+            def dimensions(self) -> int:
+                return 3
+
+            async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+                return [[1.0, 0.0, float(len(t))] for t in texts]
+
+        assert await Legacy().embed_query("abc") == [1.0, 0.0, 3.0]
+
+
+class TestDefaultModel2VecModel:
+    def test_default_is_retrieval_tuned(self):
+        from trace_mcp.extensions.learn.embeddings import DEFAULT_MODEL2VEC_MODEL
+
+        assert DEFAULT_MODEL2VEC_MODEL == "minishlab/potion-retrieval-32M"
+        with patch(f"{_EMB}._HAS_MODEL2VEC", True):
+            assert Model2VecEmbeddingProvider().model_name == DEFAULT_MODEL2VEC_MODEL
+
+    def test_explicit_selection_uses_default_unless_a_potion_model_is_configured(self):
+        from trace_mcp.extensions.learn.embeddings import DEFAULT_MODEL2VEC_MODEL
+
+        with patch(f"{_EMB}._HAS_FASTEMBED", False), patch(f"{_EMB}._HAS_MODEL2VEC", True):
+            default = get_embedding_provider(LearnConfig(embedding_backend="model2vec"))
+            assert default is not None and default.model_name == DEFAULT_MODEL2VEC_MODEL
+            pinned = get_embedding_provider(
+                LearnConfig(embedding_backend="model2vec", embedding_model="minishlab/potion-base-8M")
+            )
+            assert pinned is not None and pinned.model_name == "minishlab/potion-base-8M"
+            assert get_embedding_provider(LearnConfig(embedding_backend="auto")) is None

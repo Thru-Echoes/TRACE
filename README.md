@@ -129,7 +129,7 @@ Add to your project's `.mcp.json`:
       "command": "uvx",
       "args": [
         "--from", "/path/to/TRACE",
-        "--with", "openai", "--with", "numpy", "--with", "model2vec",
+        "--with", "openai", "--with", "numpy", "--with", "fastembed",
         "--refresh-package", "trace-mcp", "trace-mcp"
       ],
       "env": { "TRACE_PROJECT": "your-project-key" }
@@ -344,7 +344,7 @@ Claude: -> trace_end_session(summary="Analyzed 47 passages...")
 
 ## Knowledge persistence (trace-learn)
 
-The default `trace-learn` extension surfaces relevant past learnings at session start, on-demand via `trace_learn_recall`, and when decisions are proposed — and auto-extracts new learnings at session end. Matching uses cloud LLM scoring only when explicitly opted in (`TRACE_LLM_ENABLED=true` plus an `OPENAI_API_KEY` in the project's `.env`), with BM25 fallback otherwise — and a fallback caused by a missing or refused key is reported rather than passed off as a result. Storage: `~/.trace/knowledge/{project_key}.json`, named by the canonical project key rather than the display label (env: `TRACE_KNOWLEDGE_DIR`).
+The default `trace-learn` extension surfaces relevant past learnings at session start (opt-in via `recall_learnings=True`, with `recall_query` for identifier-shaped descriptions), on-demand via `trace_learn_recall`, and when decisions are proposed — and auto-extracts new learnings at session end. Recall ranks by fusing local embedding similarity with BM25 and returns per-signal scores instead of applying an absolute cutoff; an empty recall says why. Cloud LLM scoring is used only when explicitly opted in (`TRACE_LLM_ENABLED=true` plus an `OPENAI_API_KEY` in the project's `.env`) — and a fallback caused by a missing or refused key is reported rather than passed off as a result. Storage: `~/.trace/knowledge/{project_key}.json`, named by the canonical project key rather than the display label (env: `TRACE_KNOWLEDGE_DIR`).
 
 See [`docs/extensions/trace-learn.md`](https://github.com/Thru-Echoes/TRACE/blob/main/docs/extensions/trace-learn.md) for matching backends, BM25 stemming, per-backend thresholds, extraction details, and LLM configuration.
 
@@ -386,6 +386,8 @@ A cloud call attempted with no key, or with a key the provider rejects, is repor
 | `TRACE_REGISTRY_PATH` | `~/.trace/projects.json` | Canonical-key alias registry. |
 | `TRACE_LOCK_TIMEOUT` | `15` | Seconds to wait for the knowledge-store lock before failing closed. |
 | `TRACE_LOCAL_ONLY` | `false` | No-egress kill switch. **Ratchets**: any source may set it `true`; none may set it `false` over a source that set it `true`. |
+| `TRACE_EMBEDDING_BACKEND` | `auto` | `auto` (fastembed when installed, otherwise BM25 alone), `fastembed`, `model2vec` (explicit only; the static tier measured below BM25), `openai` (explicit opt-in only), or `none` |
+| `TRACE_EMBEDDING_MODEL` | backend default | Model id for the chosen backend: `minishlab/potion-retrieval-32M` for model2vec, `snowflake/snowflake-arctic-embed-s` for fastembed, `text-embedding-3-small` for openai |
 | `TRACE_SESSIONS_DIR` | `~/.trace/sessions/` | Directory for session JSON files |
 | `TRACE_KNOWLEDGE_DIR` | `~/.trace/knowledge/` | Directory for trace-learn knowledge stores |
 | `TRACE_EGRESS_LOG` | `~/.trace/egress.jsonl` | Cloud-egress ledger: one JSONL line per cloud call trace-learn makes (the fact of the call — provider, endpoint, model, purpose, item count — never the content) |
@@ -403,7 +405,7 @@ A cloud call attempted with no key, or with a key the provider rejects, is repor
 | `TRACE_STRICT_LLM` | `true` if key set, else `false` | Fail loudly on LLM errors instead of silent BM25 fallback |
 | `TRACE_BM25_K1` | `1.5` | BM25 term frequency saturation parameter |
 | `TRACE_BM25_B` | `0.75` | BM25 document length normalization parameter |
-| `TRACE_TAG_WEIGHT` | `0.3` | Weight given to tag overlap in scoring (0.0–1.0) |
+| `TRACE_TAG_WEIGHT` | `0.3` | Weight of tag overlap in the legacy combined score used when `trace_learn_recall` is given an explicit `threshold`; default recall ranking adds tag overlap as a fused rank list only when tags are passed |
 | `TRACE_DECAY_ENABLED` | `true` | Enable time-based decay for learning scores |
 | `TRACE_DECAY_HALF_LIFE_DAYS` | `365.0` | Half-life for exponential decay (days) |
 | `TRACE_EVERGREEN_RECALL_THRESHOLD` | `3` | Recalls needed for evergreen floor protection |

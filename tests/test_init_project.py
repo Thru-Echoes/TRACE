@@ -8,7 +8,7 @@ preserved, and sibling MCP servers are left untouched. A pre-existing
 replaced — the previous behavior would have destroyed every other server entry.
 
 The fleet migration (ADR-006 S8) re-runs ``init`` across ~18 deployed configs
-that all carry hand-added ``--with openai/numpy/model2vec`` extras (and, for at
+that all carry hand-added ``--with openai/numpy/fastembed`` extras (and, for at
 least one, a ``TRACE_DEFAULT_PROJECT`` env pin); this behavior is the
 prerequisite that keeps that sweep from breaking them.
 """
@@ -70,7 +70,7 @@ def test_fresh_init_shape(tmp_path: Path) -> None:
         "--with",
         "numpy",
         "--with",
-        "model2vec",
+        "fastembed",
         "--refresh-package",
         "trace-mcp",
         "trace-mcp",
@@ -112,7 +112,9 @@ def test_reinit_preserves_with_extras(tmp_path: Path) -> None:
     # the existing entry carried the same packages, and re-running init must
     # not append a second copy of every one.
     with_pkgs = [args[i + 1] for i, a in enumerate(args) if a == "--with"]
-    assert with_pkgs == ["openai", "numpy", "model2vec"]
+    # The canonical set now carries fastembed; the entry's old model2vec extra survives
+    # as a hand-added package (harmless: the static tier is no longer auto-selected).
+    assert with_pkgs == ["openai", "numpy", "fastembed", "model2vec"]
 
 
 def test_reinit_preserves_hand_added_extra_alongside_canonical(tmp_path: Path) -> None:
@@ -131,7 +133,7 @@ def test_reinit_preserves_hand_added_extra_alongside_canonical(tmp_path: Path) -
 
     args = _read(tmp_path)["mcpServers"]["trace"]["args"]
     with_pkgs = [args[i + 1] for i, a in enumerate(args) if a == "--with"]
-    assert with_pkgs == ["openai", "numpy", "model2vec", "pandas"], (
+    assert with_pkgs == ["openai", "numpy", "fastembed", "pandas"], (
         "canonical extras first, no duplicate of the overlapping one, hand-added package kept"
     )
     assert args[-1] == "trace-mcp"

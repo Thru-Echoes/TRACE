@@ -40,6 +40,12 @@ def _mock_provider(vectors: list[list[float]] | None = None, model_name: str = "
         return [[float(i), 0.0, 0.0, 0.0] for i in range(len(texts))]
 
     provider.embed_texts = AsyncMock(side_effect=_embed)
+
+    async def _embed_query(text):
+        # Route through the public method so a test that replaces embed_texts sees the same failure.
+        return (await provider.embed_texts([text]))[0]
+
+    provider.embed_query = AsyncMock(side_effect=_embed_query)
     return provider
 
 
