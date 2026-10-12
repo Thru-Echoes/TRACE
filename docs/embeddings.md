@@ -20,6 +20,8 @@ From lightest/lowest-quality to heaviest/highest, and from fully-local to cloud:
 
 ¹ `fastembed` downloads the model weights once (quantized int8 ONNX) and caches
 them; after that it runs fully offline. It never transmits your learning content.
+The runtime underneath it carries one telemetry facility of its own, described in
+[ONNX Runtime telemetry](#onnx-runtime-telemetry-in-the-fastembed-tier) below.
 
 **Local-first `auto` is the default and it never selects OpenAI.** Having an
 `OPENAI_API_KEY` in your environment does not route embeddings to the cloud —
@@ -56,6 +58,32 @@ responsibility.
 | `snowflake/snowflake-arctic-embed-m` | 768 | Apache-2.0 |
 | `BAAI/bge-small-en-v1.5` | 384 | MIT |
 | `BAAI/bge-base-en-v1.5` | 768 | MIT |
+
+### ONNX Runtime telemetry in the `fastembed` tier
+
+`fastembed` runs its models on Microsoft's ONNX Runtime, and ONNX Runtime ships a
+telemetry facility. Its own privacy notice (`Privacy.md`, installed next to the
+package) states that telemetry is implemented only for Windows and is **on by
+default in the official Windows builds**. There the runtime registers an ETW
+TraceLogging provider named `Microsoft.ML.ONNXRuntime` and emits events at session
+creation, model load, inference runs, errors, and process facts such as the CPU
+model, memory size, and whether a debugger is attached. The library does not
+contact the network itself: Windows' diagnostic-data service (Connected User
+Experiences and Telemetry) collects those events and may upload them to Microsoft's
+diagnostic-data endpoints, the `events.data.microsoft.com` hosts listed in Microsoft's
+Windows diagnostic-data documentation. The events describe the runtime, never the
+text being embedded. In the official macOS and Linux wheels the facility is a no-op
+stub, and none of the 1.27.0 binaries for the three platforms embed a Microsoft
+endpoint.
+
+The documented switch is `onnxruntime.disable_telemetry_events()`. It must run
+**before the model loads**: the first events fire when the ONNX session is created,
+which `fastembed` does while constructing `TextEmbedding(...)`, the call TRACE makes
+on the first recall that needs embeddings. TRACE does not make that call yet; a
+process that wants it off must call it before that first recall. An ETW controller
+on the machine can switch the provider back on afterwards (the runtime honours the
+ETW enable callback), so on Windows the airtight options remain a private build or
+the operating system's own diagnostic-data settings.
 
 ### Bring your own model, the easy way: a local OpenAI-compatible server
 

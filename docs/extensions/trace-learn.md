@@ -25,6 +25,12 @@ At session end, new learnings are automatically extracted from annotations and r
 `backend` field of every recall response names what ranked it, for example
 `hybrid:embedding:minishlab/potion-retrieval-32M+bm25`.
 
+The `fastembed` tier runs on ONNX Runtime, whose official Windows builds carry
+on-by-default telemetry (runtime events through Windows ETW, never learning text);
+the macOS and Linux wheels do not. `onnxruntime.disable_telemetry_events()` before
+the model loads turns it off. See
+[ONNX Runtime telemetry](../embeddings.md#onnx-runtime-telemetry-in-the-fastembed-tier).
+
 ## How a recall is scored
 
 Recall ranks, it does not cut. Every result carries `score` (similarity × decay),

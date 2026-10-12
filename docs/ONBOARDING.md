@@ -168,7 +168,9 @@ available in the next.
 - **Local-first.** Matching uses BM25, fused with local `fastembed` embeddings when the package is installed. Cloud
   scoring happens only with `TRACE_LLM_ENABLED=true` *and* a key; cloud
   embeddings need an explicit `TRACE_EMBEDDING_BACKEND=openai`. A key sitting on
-  the machine activates nothing by itself.
+  the machine activates nothing by itself. The `fastembed` tier's runtime (ONNX
+  Runtime) carries on-by-default telemetry only in its official Windows builds;
+  `docs/embeddings.md` says what it reports and how to turn it off.
 - **The key belongs in the project's own `.env`.** Per-project credentials keep
   a leaked or exhausted key from covering every project on the machine.
   `~/.trace/.env` is a fallback, and TRACE says so at session start when a
