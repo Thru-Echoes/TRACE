@@ -283,6 +283,7 @@ async def trace_start_session(
     tags: list[str] | None = None,
     recall_learnings: bool = False,
     recall_limit: int = 5,
+    recall_query: str | None = None,
 ) -> str:
     """Start a new TRACE audit session.
 
@@ -296,6 +297,10 @@ async def trace_start_session(
     recall_learnings defaults to False to keep session start cheap and quiet.
     Set recall_learnings=True only when past learnings are likely relevant; it
     surfaces up to recall_limit (default 5) learnings based on description/tags.
+    recall_query, when given, is the search text used for that recall instead
+    of the description; use it when the description is an identifier or a run
+    label. The banner echoes the query it used and, when nothing cleared the
+    recall floor or the store was too small for one, says so in one line.
 
     project is OPTIONAL when the server is pinned (TRACE_PROJECT set): omit it to
     use the pin. When unpinned, project is required. A supplied label must
@@ -333,10 +338,26 @@ async def trace_start_session(
 
         # Recall is OFF by default (v0.4.2): opt-in only, rendered once.
         recalled_block = ""
-        if recall_learnings and description:
-            recalled = await hooks.recall_if_available(resolved, description, tags, recall_limit)
-            if recalled:
-                recalled_block = hooks.format_recalled_learnings(recalled)
+        supplied = recall_query.strip() if recall_query is not None else None
+        query = supplied or (description or "").strip()
+        ran = bool(recall_learnings and query)
+        if ran:
+            outcome = await hooks.recall_if_available(resolved, query, tags, recall_limit)
+            recalled_block = hooks.format_recalled_learnings(outcome)
+            if outcome.notice:
+                # Why the block above is empty or thin: an empty recall must be
+                # distinguishable from an empty store.
+                recalled_block += hooks.format_recall_notice(outcome.notice)
+        if recall_query is not None:
+            # A server that predates this argument drops it silently; echoing it
+            # whenever it was supplied, recall on or off, is how a client tells.
+            if not supplied:
+                echo = "(blank, used the description)" if ran else "(blank)"
+            elif ran:
+                echo = query
+            else:
+                echo = f"{supplied} (recall_learnings is off; nothing was recalled)"
+            recalled_block += f"\nRecall query: {echo}"
 
         return session_tools.format_bootstrap_message(
             session_id=session.id,

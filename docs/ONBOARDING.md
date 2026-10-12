@@ -85,7 +85,7 @@ Each project gets a `.mcp.json` declaring the server:
 {"mcpServers": {"trace": {
   "command": "uvx",
   "args": ["--from", "/path/to/TRACE", "--with", "openai", "--with", "numpy",
-           "--with", "model2vec", "--refresh-package", "trace-mcp", "trace-mcp"],
+           "--with", "fastembed", "--refresh-package", "trace-mcp", "trace-mcp"],
   "env": {"TRACE_PROJECT": "your-project-key"}
 }}}
 ```
@@ -165,7 +165,7 @@ Optional by governance, on by default. It extracts learnings from finished
 sessions and surfaces relevant ones later, so a lesson learned in one session is
 available in the next.
 
-- **Local-first.** Matching uses BM25 or local `model2vec` embeddings. Cloud
+- **Local-first.** Matching uses BM25, fused with local `fastembed` embeddings when the package is installed. Cloud
   scoring happens only with `TRACE_LLM_ENABLED=true` *and* a key; cloud
   embeddings need an explicit `TRACE_EMBEDDING_BACKEND=openai`. A key sitting on
   the machine activates nothing by itself.

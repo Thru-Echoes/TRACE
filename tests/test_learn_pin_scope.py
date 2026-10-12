@@ -152,6 +152,93 @@ async def test_recall_reports_backend(learn_env) -> None:
     assert result.get("backend") == "bm25", f"expected backend name in response, got: {result}"
 
 
+async def test_recall_payload_reports_what_it_did(learn_env) -> None:
+    """An empty-looking recall explains itself: counts, floor, backend, the query used, and a notice."""
+    mcp, _ = learn_env
+    await _seed_corpus(mcp, "proj-x")
+    result = await _call(mcp, "trace_learn_recall", {"project": "proj-x", "context": "zzz"})
+    assert set(result) >= {"project", "results", "total", "matched", "scored", "floor", "backend", "query", "notice"}
+    assert result["project"] == "proj-x"
+    assert result["scored"] == 3 and result["matched"] == 0  # small store: everything comes back, nothing matched
+    assert result["total"] == len(result["results"]) == 3
+    assert len({r["learning"]["id"] for r in result["results"]}) == 3
+    assert all(r["matched"] is False for r in result["results"])
+    assert result["query"] == "zzz" and result["backend"] == "bm25"
+    assert result["floor"] == "small store of 3: all returned; matched at score>=0.15"
+    assert result["notice"] == "small store of 3: all 3 returned, 0 matched"
+    assert all("small store" not in w for w in result.get("warnings", []))  # informational, not a warning
+
+
+async def test_recall_on_an_empty_store_explains_itself_and_writes_nothing(learn_env, monkeypatch) -> None:
+    from trace_mcp.extensions.learn import store as learn_store
+
+    mcp, _ = learn_env
+    saves: list[str] = []
+    real_save = learn_store.save_store
+
+    def counting_save(ks, *a, **k):
+        saves.append(ks.project)
+        return real_save(ks, *a, **k)
+
+    monkeypatch.setattr(learn_store, "save_store", counting_save)
+    result = await _call(
+        mcp, "trace_learn_recall", {"project": "proj-empty", "context": "RUN_TOKEN=3b09311f2873 export"}
+    )
+    assert result["results"] == [] and result["total"] == 0 and result["scored"] == 0 and result["matched"] == 0
+    assert result["notice"] == "no learnings stored yet for this project; query cleaned to 'export'"
+    assert result["query"] == "export" and result["backend"] == "bm25"
+    assert set(result) >= {"project", "floor", "backend"} and result["project"] == "proj-empty"
+    assert saves == []  # a read of an empty store writes nothing
+
+
+async def test_recall_respects_the_requested_limit_and_tags(learn_env) -> None:
+    mcp, _ = learn_env
+    await _seed_corpus(mcp, "proj-x")
+    await _call(mcp, "trace_learn_add", {"project": "proj-x", "content": "tagged note", "tags": ["vpn"]})
+    one = await _call(mcp, "trace_learn_recall", {"project": "proj-x", "context": "zzz", "limit": 1})
+    two = await _call(mcp, "trace_learn_recall", {"project": "proj-x", "context": "zzz", "limit": 2})
+    four = await _call(mcp, "trace_learn_recall", {"project": "proj-x", "context": "zzz", "limit": 4})
+    assert len(one["results"]) == 1 and len(two["results"]) == 2 and len(four["results"]) == 4
+    tagged = await _call(mcp, "trace_learn_recall", {"project": "proj-x", "context": "zzz", "tags": ["vpn"]})
+    assert tagged["matched"] == 1 and tagged["results"][0]["learning"]["content"] == "tagged note"
+
+
+async def test_query_alias_and_context_produce_the_same_response(learn_env) -> None:
+    mcp, _ = learn_env
+    await _seed_corpus(mcp, "proj-x")
+    volatile = {"recall_count", "last_surfaced"}
+
+    def normalise(result: dict) -> dict:
+        out = dict(result)
+        out["results"] = [
+            {**r, "learning": {k: v for k, v in r["learning"].items() if k not in volatile}} for r in result["results"]
+        ]
+        return out
+
+    cases = (
+        ("ZANZIBAR-9931", "form ZANZIBAR-9931 must be filed before export"),
+        ("warehouse VPN", "the nightly job needs the warehouse VPN"),
+    )
+    for text, expected_top in cases:
+        by_context = await _call(mcp, "trace_learn_recall", {"project": "proj-x", "context": text})
+        by_query = await _call(mcp, "trace_learn_recall", {"project": "proj-x", "query": text})
+        both = await _call(mcp, "trace_learn_recall", {"project": "proj-x", "query": text, "context": ""})
+        assert normalise(by_context) == normalise(by_query) == normalise(both)
+        assert by_context["results"][0]["learning"]["content"] == expected_top
+        assert by_context["results"][0]["matched"]
+
+
+async def test_recall_cleans_an_identifier_shaped_query_and_says_so(learn_env) -> None:
+    mcp, _ = learn_env
+    await _seed_corpus(mcp, "proj-x")
+    result = await _call(
+        mcp, "trace_learn_recall", {"project": "proj-x", "context": "RUN_TOKEN=3b09311f2873 ZANZIBAR-9931 export"}
+    )
+    assert result["query"] == "ZANZIBAR-9931 export"
+    assert result["results"][0]["matched"] is True and "ZANZIBAR-9931" in result["results"][0]["learning"]["content"]
+    assert "query cleaned to 'ZANZIBAR-9931 export'" in result["notice"], result
+
+
 async def test_recall_bm25_surfaces_verbatim_token(learn_env) -> None:
     mcp, _ = learn_env
     await _seed_corpus(mcp, "proj-x")
@@ -183,8 +270,11 @@ async def test_recall_query_alias_behaves_like_context(learn_env) -> None:
     mcp, _ = learn_env
     await _seed_corpus(mcp, "proj-x")
     result = await _call(mcp, "trace_learn_recall", {"project": "proj-x", "query": "ZANZIBAR-9931"})
-    assert result.get("total") == 1, f"query= must rank like context=, got: {result}"
-    assert "ZANZIBAR-9931" in result["results"][0]["learning"]["content"]
+    top = result["results"][0]
+    assert top["matched"] is True and "ZANZIBAR-9931" in top["learning"]["content"], (
+        f"query= must rank like context=, got: {result}"
+    )
+    assert sum(1 for r in result["results"] if r["matched"]) == 1  # only the verbatim hit is a match
 
 
 async def test_recall_query_context_conflict_errors(learn_env) -> None:
@@ -206,7 +296,8 @@ async def test_recall_query_and_identical_context_allowed(learn_env) -> None:
         "trace_learn_recall",
         {"project": "proj-x", "query": "ZANZIBAR-9931", "context": "ZANZIBAR-9931"},
     )
-    assert result.get("total") == 1
+    assert result["results"][0]["matched"] is True
+    assert sum(1 for r in result["results"] if r["matched"]) == 1
 
 
 # ── input normalization ──────────────────────────────────────────────────────
@@ -234,7 +325,8 @@ async def test_recall_empty_context_with_query_is_not_a_conflict(learn_env) -> N
         "trace_learn_recall",
         {"project": "proj-x", "context": "", "query": "ZANZIBAR-9931"},
     )
-    assert result.get("total") == 1, f"empty-string context is an absent alias, not a conflict: {result}"
+    assert "error" not in result, f"empty-string context is an absent alias, not a conflict: {result}"
+    assert result["results"][0]["matched"] is True and "ZANZIBAR-9931" in result["results"][0]["learning"]["content"]
 
 
 # ── registry-alias interactions ──────────────────────────────────────────────

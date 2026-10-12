@@ -75,7 +75,7 @@ LEARN_TOOLS: tuple[str, ...] = (
 Kept separate from the core names because the extension is optional by
 governance (ADR-003): core must work with it absent. A server missing exactly
 these five is the documented symptom of a launch config without the
-``--with openai/numpy/model2vec`` extras."""
+``--with openai/numpy/fastembed`` extras."""
 
 JEV_TOOLS: tuple[str, ...] = ("trace_jev_assess_candidate",)
 """The dependency-free Jev advisory surface; registered even when disabled."""

@@ -36,7 +36,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   session file, as the write tools already did for their failures. Requests
   and responses are otherwise unchanged. Consumers that pin `mcp<2` themselves
   cannot co-install this release.
+- **Learning recall ranks by hybrid BM25 + embedding fusion and no longer
+  applies an absolute cosine cutoff.** The old 0.3 cutoff was compared against
+  `0.7 × cosine + 0.3 × tag overlap`, so a query with no tags needed raw cosine
+  of 0.43, which the bundled static model rarely produces for an on-topic
+  learning; with a fastembed model the same cutoff passed everything. On this
+  project's own 352-learning store with 100 session-description queries
+  (relevant = the learnings extracted from that session), no absolute cutoff
+  separated relevant from irrelevant learnings for any model tried (best F1 0.10
+  to 0.16), BM25 alone outranked every embedding model on those queries, and
+  fusing the two rank lists beat the old default by +0.10 MRR (90% interval
+  +0.055 to +0.140, paired bootstrap over the 100 queries). Results now carry
+  `matched` and per-signal scores (`similarity`, `z`, `bm25`, `tag_overlap`,
+  `decay`, `fused`); a candidate is matched when its similarity stands one
+  standard deviation above the store's mean for the query, has a lexical hit,
+  or shares a tag. Stores under eight learnings skip the z floor and return
+  everything up to the limit, ranked, ties newest-first. When fewer than the
+  limit are matched, up to three weak candidates follow, flagged, and they are
+  left out of decision warnings and recall counts. An explicit `threshold`
+  keeps the legacy absolute semantics over the candidates the backend scored.
+  Tag overlap no longer caps a tagless query's score: it enters the fusion only
+  when the caller passes tags that some learning shares.
+- **Embeddings rank only when a transformer provider is installed.** `auto`
+  now selects `fastembed` (default `snowflake/snowflake-arctic-embed-s`, with
+  its query prefix) when the package is present and otherwise runs recall on
+  BM25 alone; the static `model2vec` tier is used only when
+  `TRACE_EMBEDDING_BACKEND=model2vec` is set explicitly (its default model is
+  `potion-retrieval-32M`, was `potion-base-8M`; such stores re-embed lazily).
+  Measured with the shipped ranker on this project's 352-learning store, 100
+  session descriptions as queries (a learning counts as relevant to the
+  session it was extracted from), limit 10, MRR@10: BM25 alone 0.52; hybrid
+  with the static models 0.42 to 0.44 (90% bootstrap intervals exclude zero
+  against BM25); hybrid with arctic-embed-s 0.52. On the same queries
+  paraphrased by a language model that saw only the descriptions (mean
+  word-level Jaccard with the originals 0.04): BM25 alone 0.17; static models
+  0.17; bge-small 0.23 and arctic-embed-s 0.21, with hit rate@5 (share of
+  queries with a relevant result in the top five) 0.36 against 0.20. The
+  measurement is retrospective and the intervals are exploratory; see
+  `docs/embeddings.md` for the protocol and its limits.
+  The default launch extras written by `trace-mcp-init`, and this repository's
+  own launch config, carry `fastembed` in place of `model2vec`; a config that
+  still carries only `model2vec` keeps working on BM25 alone. The first recall
+  with `fastembed` downloads about 130 MB of weights once and embeds a few hundred learnings (20 to 30 s observed on an Apple Silicon laptop with the weights already on disk). The extension builds one embedding provider
+  per server registration and shares it with the matcher.
+- **Decay no longer reorders candidates with different evidence.** It breaks
+  ties (an evergreen learning outranks a fresher one of equal evidence) and
+  scales the displayed score. Multiplying it into the fused rank score cost
+  0.17 MRR@10 on the benchmark above (fresh store copy per query), because
+  adjacent fused ranks differ by a few percent while a 365-day decay spans up
+  to half; decaying the evidence before ranking cost more. Measured as a
+  tie-breaker, the numbers equal the decay-off run on this benchmark.
+- Lazy (re-)embedding of stale learnings now runs outside the knowledge-store
+  lock: the stale set is snapshotted under the lock, embedded with the lock
+  released, and merged under the lock onto learnings whose content is
+  unchanged. A transformer tier's first embedding of a few hundred learnings
+  takes tens of seconds while the lock times out after 15 s, so holding it
+  would have failed every concurrent add or recall on the project.
+- `trace_learn_recall` embeds the query through the provider's query-side
+  encoder and strips identifier-shaped fragments from it first; the response
+  reports the `query` actually scored. For a provider with an asymmetric query
+  encoder (the fastembed arctic models) this also changes the numbers the
+  legacy `threshold` path produces; that is intended.
 ### Added
+- `trace_start_session(recall_query=...)`: a search text used instead of the
+  description when the description is an identifier or run label. Recall stays
+  opt-in through `recall_learnings`. The banner echoes the query it used (a
+  server built before this argument drops it silently, so the echo is how a
+  client tells) and appends a one-line notice when nothing cleared the floor,
+  the store was too small for one, or the query was cleaned.
+- `trace_learn_recall` reports `matched`, `scored`, `floor`, `backend`, `query`
+  and, when the bare results would mislead, a `notice`. `warnings` keeps
+  carrying configuration problems only.
+- Embedding providers expose `embed_query` beside `embed_texts`; the
+  `EmbeddingProvider` protocol carries a symmetric default.
+### Fixed
+- The fastembed provider adds the query-side instruction prefix the arctic
+  models are trained with ("Represent this sentence for searching relevant
+  passages: "); fastembed itself never adds it, so a bare query was scored like
+  a document and ranked worse (cosine-only ranking on the store above, same
+  100 queries: MRR 0.33 without the prefix, 0.44 with it). bge models need no
+  prefix and get none.
+- An empty recall is no longer indistinguishable from an empty store: the
+  session banner and the recall response say how many learnings were scored,
+  the floor, the backend and the best similarity seen.
+- `docs/extensions/trace-learn.md` now documents the embedding backend, which
+  has been the default since v0.3 but was missing from the backend table and
+  the threshold table.
 
 - **Optional Jev advisory classification for existing provenance events.**
   `trace_jev_assess_candidate` sends a bounded projection of one recorded

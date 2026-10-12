@@ -13,10 +13,10 @@ From lightest/lowest-quality to heaviest/highest, and from fully-local to cloud:
 | Backend | What it is | Dependency | Egress | Retrieval quality |
 | --- | --- | --- | --- | --- |
 | `none` (BM25) | Lexical ranking only | none | none | lexical baseline (great for identifiers/paths) |
-| `model2vec` | Static token→vector (`potion-base-8M`) | `numpy` (no PyTorch) | none | modest upgrade over BM25 |
-| `fastembed` | Small ONNX transformer (`arctic-embed-s`) | `onnxruntime` (no PyTorch) | none¹ | **the "local-strong" tier** |
+| `model2vec` | Static token→vector (`potion-retrieval-32M`) | `numpy` (no PyTorch) | none | explicit only: on the benchmark below it scored below BM25 alone on ordinary queries, with no significant gain on paraphrases |
+| `fastembed` | Small ONNX transformer (`arctic-embed-s`) | `onnxruntime` (no PyTorch) | none¹ | **the local default**: on the benchmark below its point estimate equalled BM25's on ordinary queries and was significantly higher on paraphrased ones; fused with BM25 at recall |
 | `openai` | OpenAI embeddings API | `openai` | **content → endpoint** | highest, but off-machine |
-| `auto` *(default)* | Prefer local: `fastembed` → `model2vec` → BM25 | — | none | best available **local** |
+| `auto` *(default)* | `fastembed` when installed, otherwise BM25 alone | — | none | best available **local** |
 
 ¹ `fastembed` downloads the model weights once (quantized int8 ONNX) and caches
 them; after that it runs fully offline. It never transmits your learning content.
@@ -24,6 +24,14 @@ them; after that it runs fully offline. It never transmits your learning content
 **Local-first `auto` is the default and it never selects OpenAI.** Having an
 `OPENAI_API_KEY` in your environment does not route embeddings to the cloud —
 that requires an explicit `TRACE_EMBEDDING_BACKEND=openai`.
+
+**Queries and documents are encoded separately.** Stored learnings are embedded as
+documents (`embed_texts`); the recall query goes through `embed_query`. The arctic
+models require the instruction prefix "Represent this sentence for searching relevant
+passages: " on the query side, which the fastembed provider adds; documents never get
+it. bge models need no prefix. Whatever the model, recall ranks by fusing the embedding
+similarity with BM25 (see `docs/extensions/trace-learn.md`), so the model choice tunes
+the semantic half of the ranking rather than deciding it alone.
 
 ## Choosing a backend
 
@@ -146,6 +154,44 @@ backend/model, TRACE re-embeds affected learnings on the next recall (vectors
 from different models are not comparable). The `.npy` sidecar cache tolerates a
 partially-migrated store (rows of differing dimension are treated as missing, not
 errored) and is rebuilt once every row shares one model.
+
+## How the tiers were measured
+
+A retrospective measurement, not a session-start trial. One project's knowledge store (352
+learnings, the final store) and 100 of its session descriptions as queries, with a learning
+counted relevant to the session it was extracted from: every query's targets were in the
+candidate set, the labels favour shared vocabulary, and other sessions' learnings count as
+irrelevant even when they would help. The shipped ranker, limit 10, decay as tie-breaker, a
+fresh copy of the store per query, decay ages taken at run time. MRR@10 is the mean over
+queries of the reciprocal rank of the first relevant result among the ten returned (0 when
+none); hit rate@5 is the share of queries with at least one relevant result in the top five.
+The paraphrased set rewrote each description with a language model that saw only the
+descriptions, not the learnings; mean Jaccard between the lower-cased `\w+` token sets of a
+paraphrase and its original was 0.04. Intervals are 90% percentile bootstraps over the 100
+queries and are exploratory: queries from related sessions are not independent, the methods
+were chosen while looking at this store, and nothing was held out.
+
+| Ranking | Ordinary queries MRR@10 (hit rate@5) | Paraphrased MRR@10 (hit rate@5) |
+|---|---|---|
+| BM25 alone | 0.52 (0.67) | 0.17 (0.20) |
+| hybrid, `potion-base-8M` | 0.42 (0.57) | 0.17 (0.25) |
+| hybrid, `potion-retrieval-32M` | 0.44 (0.62) | 0.17 (0.27) |
+| hybrid, `bge-small-en-v1.5` | 0.49 (0.65) | 0.23 (0.29) |
+| hybrid, `arctic-embed-s` (query prefix) | 0.52 (0.68) | 0.21 (0.36) |
+
+Against BM25 alone, the two static models were significantly worse on ordinary queries
+(90% intervals −0.150 to −0.051 and −0.133 to −0.028) and not significantly different on
+paraphrases; the two transformers were not significantly different on ordinary queries and
+significantly better on paraphrases (+0.020 to +0.103 and +0.011 to +0.087). The weights
+download is about 130 MB; embedding 352 learnings took 20 to 30 s with the model already on
+disk, on an Apple Silicon laptop; both are single observations, not bounds.
+
+`auto` no longer selects `model2vec`: a launch config that carries only `model2vec`
+runs recall on BM25 alone until `fastembed` is added (the default launch extras now
+include it). The first recall with `fastembed` downloads about 130 MB of weights once
+and embeds a few hundred learnings (20 to 30 s observed on an Apple Silicon laptop with the weights already on disk). For an explicit
+`TRACE_EMBEDDING_BACKEND=model2vec`, the default model is `potion-retrieval-32M` (was
+`potion-base-8M`; stores re-embed lazily).
 
 ## Future plan (not yet implemented): first-class arbitrary custom models
 

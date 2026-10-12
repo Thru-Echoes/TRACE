@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from trace_mcp.extension_status import get_extension_status
+from trace_mcp.extension_status import _BANNER, get_extension_status
 from trace_mcp.schema import Session
 from trace_mcp.storage.json_file import JsonFileStorage
 from trace_mcp.tools import session_tools
@@ -24,6 +24,10 @@ class _OpenAIEmbeddingProvider:  # name-matched stub
 
 
 class _Model2VecEmbeddingProvider:  # name-matched stub
+    pass
+
+
+class FastEmbedEmbeddingProvider:  # name-matched stub (the status code dispatches on the class name)
     pass
 
 
@@ -51,11 +55,23 @@ def test_status_model2vec_local_no_llm(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "local embeddings" in s and "no LLM" in s
 
 
+def test_status_fastembed_local_no_llm(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patch_provider(monkeypatch, FastEmbedEmbeddingProvider())
+    s = get_extension_status()
+    assert s.startswith(
+        f"{_BANNER} — learning extension (local embeddings, no LLM). To upgrade: put an OpenAI key in this "
+        "project's .env and set TRACE_EMBEDDING_BACKEND=openai for LLM-grade semantic recall."
+    )
+
+
 def test_status_no_embeddings(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_provider(monkeypatch, None)
     s = get_extension_status()
     assert "TRACE active" in s
-    assert "no embeddings" in s or "keyword recall only" in s
+    assert s.startswith(
+        f"{_BANNER} — learning extension (keyword recall only, no embeddings). To upgrade: install `fastembed` "
+        "(local transformer, no LLM) or put an OpenAI key in this project's .env for semantic recall."
+    )
 
 
 def test_status_no_learning_extension(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -12,7 +12,8 @@ Four backends, tried in order:
 4. **JaccardBackend** (legacy) — Simple token-overlap scoring.  Kept for
    backward compatibility and as an absolute fallback.
 
-Auto-selection: Embedding > LLM > BM25.
+Auto-selection: Embedding > LLM > BM25. An embedding backend ranks by hybrid
+fusion with BM25 and a per-query relative floor (see ``recall_ranked``).
 """
 
 from __future__ import annotations
@@ -97,6 +98,53 @@ def _tokenize_set(text: str) -> set[str]:
     return set(_TOKEN_RE.findall(text.lower()))
 
 
+_HEX_RUN_RE = re.compile(r"^[0-9a-fA-F]{8,}$")
+_UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+_DIGIT_RUN_RE = re.compile(r"^\d{6,}$")
+_ASSIGNMENT_RE = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(\S+)$")
+_LABEL_KEY_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")  # RUN_TOKEN, SESSION_ID: an environment-style label
+_TRAILING_PUNCT = ".,;:!?)"
+
+
+def _is_identifier(tok: str) -> bool:
+    """A bare hex run (8+), a uuid, or a digit run (6+): a label, not a topic."""
+    tok = tok.rstrip(_TRAILING_PUNCT)
+    return bool(_HEX_RUN_RE.match(tok) or _UUID_RE.match(tok) or _DIGIT_RUN_RE.match(tok))
+
+
+def _words(tok: str) -> list[str]:
+    """Split a snake_case token into words; other tokens pass through unchanged."""
+    return [part for part in tok.split("_") if part] if "_" in tok else [tok]
+
+
+def clean_query(text: str) -> str:
+    """Strip identifier-shaped fragments from a recall query and split slugs into words.
+
+    Dropped: bare hex runs, uuids, long digit runs, and ``KEY=value`` fragments
+    whose key is an upper-case label (``RUN_TOKEN=...``) or whose value is one
+    of those. Kept, as words: every other token, including lower-case
+    assignments with topical values (``ssl_verify=false`` becomes
+    ``ssl verify false``). A run token and a slug carry almost no topical
+    signal for any ranker, so a session description shaped like one is
+    useless as a query until it is cleaned. Returns the original text when
+    nothing topical survives.
+    """
+    kept: list[str] = []
+    for tok in text.split():
+        assignment = _ASSIGNMENT_RE.match(tok)
+        if assignment:
+            key, value = assignment.group(1), assignment.group(2)
+            if _LABEL_KEY_RE.match(key) or _is_identifier(value):
+                continue
+            kept += _words(key) + _words(value)
+            continue
+        if _is_identifier(tok):
+            continue
+        kept += _words(tok)
+    cleaned = " ".join(kept).strip()
+    return cleaned or text
+
+
 # ── Tag overlap (shared) ──────────────────────────────────────────────────
 
 
@@ -120,16 +168,24 @@ class MatchingBackend(Protocol):
 
     default_threshold: float
 
+    async def text_scores(self, learnings: list[Learning], context: str) -> list[float]:
+        """The backend's own similarity for every learning, in ``[0, 1]``, aligned to *learnings*.
+
+        No tag term and no decay: this is the primitive the hybrid ranker fuses.
+        """
+        ...
+
     async def score_batch(
         self,
         learnings: list[Learning],
         context: str,
         context_tags: list[str] | None = None,
     ) -> list[tuple[int, float]]:
-        """Score each learning against *context*.
+        """Score each learning against *context* (legacy: similarity mixed with tag overlap).
 
         Returns a list of ``(index, score)`` tuples where *index* is the
-        position in *learnings* and *score* is in ``[0, 1]``.
+        position in *learnings* and *score* is in ``[0, 1]``. Backends that
+        mix locally implement it as ``mix_scores(await text_scores(...), ...)``.
         """
         ...
 
@@ -166,13 +222,25 @@ class JaccardBackend:
     def __init__(self, tag_weight: float = 0.3) -> None:
         self.tag_weight = tag_weight
 
+    async def text_scores(self, learnings: list[Learning], context: str) -> list[float]:
+        return [jaccard_similarity(lrn.content, context) for lrn in learnings]
+
+    def mix_scores(
+        self, text: list[float], learnings: list[Learning], context_tags: list[str] | None
+    ) -> list[tuple[int, float]]:
+        """Legacy combined score per learning (pure): similarity mixed with tag overlap, store order."""
+        return [
+            (i, (1 - self.tag_weight) * t + self.tag_weight * _tag_overlap(lrn.tags, context_tags))
+            for i, (lrn, t) in enumerate(zip(learnings, text, strict=True))
+        ]
+
     async def score_batch(
         self,
         learnings: list[Learning],
         context: str,
         context_tags: list[str] | None = None,
     ) -> list[tuple[int, float]]:
-        return [(i, score_learning(lrn, context, context_tags, self.tag_weight)) for i, lrn in enumerate(learnings)]
+        return self.mix_scores(await self.text_scores(learnings, context), learnings, context_tags)
 
 
 # ── BM25 backend ─────────────────────────────────────────────────────────
@@ -239,27 +307,30 @@ class BM25Backend:
         self.b = b
         self.tag_weight = tag_weight
 
+    async def text_scores(self, learnings: list[Learning], context: str) -> list[float]:
+        if not learnings:
+            return []
+        documents = [_tokenize(lrn.content, stem=True) for lrn in learnings]
+        query_tokens = _tokenize(context, stem=True)
+        index = _BM25Index(documents, k1=self.k1, b=self.b)
+        return [_normalize_bm25(index.score(query_tokens, i)) for i in range(len(learnings))]
+
+    def mix_scores(
+        self, text: list[float], learnings: list[Learning], context_tags: list[str] | None
+    ) -> list[tuple[int, float]]:
+        """Legacy combined score per learning (pure): similarity mixed with tag overlap, store order."""
+        return [
+            (i, (1 - self.tag_weight) * t + self.tag_weight * _tag_overlap(lrn.tags, context_tags))
+            for i, (lrn, t) in enumerate(zip(learnings, text, strict=True))
+        ]
+
     async def score_batch(
         self,
         learnings: list[Learning],
         context: str,
         context_tags: list[str] | None = None,
     ) -> list[tuple[int, float]]:
-        if not learnings:
-            return []
-        documents = [_tokenize(lrn.content, stem=True) for lrn in learnings]
-        query_tokens = _tokenize(context, stem=True)
-
-        index = _BM25Index(documents, k1=self.k1, b=self.b)
-
-        results: list[tuple[int, float]] = []
-        for i, lrn in enumerate(learnings):
-            raw_bm25 = index.score(query_tokens, i)
-            text_score = _normalize_bm25(raw_bm25)
-            tag_score = _tag_overlap(lrn.tags, context_tags)
-            combined = (1 - self.tag_weight) * text_score + self.tag_weight * tag_score
-            results.append((i, combined))
-        return results
+        return self.mix_scores(await self.text_scores(learnings, context), learnings, context_tags)
 
 
 # ── LLM backend ───────────────────────────────────────────────────────────
@@ -303,6 +374,13 @@ class LLMBackend:
             b=config.bm25_b,
             tag_weight=config.tag_weight,
         )
+
+    async def text_scores(self, learnings: list[Learning], context: str) -> list[float]:
+        """LLM relevance per learning without tag context; learnings cut by the BM25 pre-filter score 0."""
+        dense = [0.0] * len(learnings)
+        for idx, score in await self.score_batch(learnings, context, None):
+            dense[idx] = max(0.0, min(1.0, score))
+        return dense
 
     async def score_batch(
         self,
@@ -441,7 +519,12 @@ class EmbeddingBackend:
     scored via a BM25 fallback so mixed stores work seamlessly.
     """
 
-    default_threshold: float = 0.3
+    # recall_ranked applies no absolute cutoff for this backend; it uses a
+    # per-query relative floor (Z_FLOOR). Cosine scales differ by model, and on
+    # the benchmark store (session-membership labels) every absolute cutoff
+    # performed poorly for every model tried. 0.0 keeps the protocol attribute
+    # meaningful: "never filter on this".
+    default_threshold: float = 0.0
 
     def __init__(
         self,
@@ -452,11 +535,53 @@ class EmbeddingBackend:
     ) -> None:
         self._provider = provider
         self._tag_weight = tag_weight
-        self._bm25_fallback = BM25Backend(
+        # Lexical partner for hybrid fusion, and the stand-in scorer for
+        # learnings that have no vector yet.
+        self.bm25 = BM25Backend(
             k1=bm25_fallback_k1,
             b=bm25_fallback_b,
             tag_weight=tag_weight,
         )
+
+    async def text_scores(self, learnings: list[Learning], context: str) -> list[float]:
+        """Cosine similarity in [0, 1] per learning; BM25 stand-in for learnings with no vector."""
+        if not learnings:
+            return []
+        scores = [0.0] * len(learnings)
+        with_emb = [(i, lrn) for i, lrn in enumerate(learnings) if lrn.embedding is not None]
+        without = [i for i, lrn in enumerate(learnings) if lrn.embedding is None]
+        if with_emb:
+            import numpy as np
+
+            from trace_mcp.extensions.learn.embeddings import cosine_similarity_matrix, embed_query
+
+            # Query-side encoding (instruction prefix where the model needs one);
+            # documents were embedded with embed_texts when they were stored.
+            query_vec = await embed_query(self._provider, context)
+            matrix = np.array([lrn.embedding for _, lrn in with_emb], dtype=np.float32)
+            sims = cosine_similarity_matrix(query_vec, matrix)
+            for j, (i, _) in enumerate(with_emb):
+                scores[i] = max(0.0, min(1.0, float(sims[j])))
+        if without:
+            standin = await self.bm25.text_scores([learnings[i] for i in without], context)
+            for i, sc in zip(without, standin, strict=True):
+                scores[i] = sc
+        return scores
+
+    def mix_scores(
+        self, text: list[float], learnings: list[Learning], context_tags: list[str] | None
+    ) -> list[tuple[int, float]]:
+        """Legacy combined score per learning (pure), in the legacy order.
+
+        Embedded learnings first, then the BM25 stand-ins, so a stable sort on
+        the scores breaks ties the way it always did.
+        """
+        order = [i for i, lrn in enumerate(learnings) if lrn.embedding is not None]
+        order += [i for i, lrn in enumerate(learnings) if lrn.embedding is None]
+        return [
+            (i, (1 - self._tag_weight) * text[i] + self._tag_weight * _tag_overlap(learnings[i].tags, context_tags))
+            for i in order
+        ]
 
     async def score_batch(
         self,
@@ -464,54 +589,7 @@ class EmbeddingBackend:
         context: str,
         context_tags: list[str] | None = None,
     ) -> list[tuple[int, float]]:
-        if not learnings:
-            return []
-
-        # Partition: learnings with embeddings vs without
-        with_emb: list[tuple[int, Learning]] = []
-        without_emb: list[tuple[int, Learning]] = []
-        for i, lrn in enumerate(learnings):
-            if lrn.embedding is not None:
-                with_emb.append((i, lrn))
-            else:
-                without_emb.append((i, lrn))
-
-        results: list[tuple[int, float]] = []
-
-        # Score embedded learnings via cosine similarity
-        if with_emb:
-            import numpy as np
-
-            from trace_mcp.extensions.learn.embeddings import cosine_similarity_matrix
-
-            query_vecs = await self._provider.embed_texts([context])
-            query_vec = query_vecs[0]
-
-            matrix = np.array(
-                [lrn.embedding for _, lrn in with_emb],
-                dtype=np.float32,
-            )
-            similarities = cosine_similarity_matrix(query_vec, matrix)
-
-            for j, (orig_idx, lrn) in enumerate(with_emb):
-                text_score = max(0.0, min(1.0, float(similarities[j])))
-                tag_score = _tag_overlap(lrn.tags, context_tags)
-                combined = (1 - self._tag_weight) * text_score + self._tag_weight * tag_score
-                results.append((orig_idx, combined))
-
-        # BM25 fallback for learnings without embeddings
-        if without_emb:
-            bm25_learnings = [lrn for _, lrn in without_emb]
-            bm25_scores = await self._bm25_fallback.score_batch(
-                bm25_learnings,
-                context,
-                context_tags,
-            )
-            for bm25_local_idx, score in bm25_scores:
-                orig_idx = without_emb[bm25_local_idx][0]
-                results.append((orig_idx, score))
-
-        return results
+        return self.mix_scores(await self.text_scores(learnings, context), learnings, context_tags)
 
 
 # ── Backend auto-selection ────────────────────────────────────────────────
@@ -525,7 +603,7 @@ def describe_backend(backend: MatchingBackend) -> str:
     silent (the fail-loud posture of docs/INVARIANTS.md).
     """
     if isinstance(backend, EmbeddingBackend):
-        return f"embedding:{backend._provider.model_name}"
+        return f"hybrid:embedding:{backend._provider.model_name}+bm25"
     if isinstance(backend, LLMBackend):
         return f"llm:{backend._model}"
     if isinstance(backend, BM25Backend):
@@ -535,10 +613,16 @@ def describe_backend(backend: MatchingBackend) -> str:
     return type(backend).__name__
 
 
-def get_default_backend(config: LearnConfig | None = None) -> MatchingBackend:
+def get_default_backend(
+    config: LearnConfig | None = None,
+    provider: EmbeddingProvider | None = None,
+) -> MatchingBackend:
     """Return the best available matching backend based on *config*.
 
-    Priority: Embedding > LLM > BM25.
+    Priority: Embedding > LLM > BM25. Pass *provider* to reuse an embedding
+    provider the caller already built; otherwise one is selected from *config*.
+    Each provider loads its model lazily, so sharing one instance between the
+    backend and the caller keeps a static model from being loaded twice.
     """
     if config is None:
         from trace_mcp.extensions.learn.config import load_config
@@ -548,9 +632,10 @@ def get_default_backend(config: LearnConfig | None = None) -> MatchingBackend:
     from trace_mcp.extensions.learn.config import LLMFallbackError
 
     # Tier 1: Embedding backend (cosine similarity on precomputed vectors)
-    from trace_mcp.extensions.learn.embeddings import get_embedding_provider
+    if provider is None:
+        from trace_mcp.extensions.learn.embeddings import get_embedding_provider
 
-    provider = get_embedding_provider(config)
+        provider = get_embedding_provider(config)
     if provider is not None:
         logger.info("Using Embedding matching backend (provider=%s)", provider.model_name)
         return EmbeddingBackend(
@@ -640,7 +725,265 @@ def compute_decay(
     return multiplier
 
 
-# ── Main recall function ─────────────────────────────────────────────────
+# ── Hybrid ranking ───────────────────────────────────────────────────────
+
+RRF_K = 60  # reciprocal-rank-fusion constant; the published default
+Z_FLOOR = 1.0  # a candidate stands out when its similarity is >= 1 sd above the store's mean for this query
+SMALL_STORE = 8  # below this many learnings a floor is statistically meaningless: return everything
+UNMATCHED_CAP = 3  # weak candidates appended when fewer than `limit` learnings cleared the floor
+
+
+@dataclass(frozen=True)
+class RecallSummary:
+    """What a recall did, for the banner and the tool response."""
+
+    backend: str
+    store_size: int
+    scored: int
+    matched: int
+    returned: int
+    floor: str
+    best_similarity: float | None
+    best_z: float | None
+    small_store: bool
+    query: str
+
+
+@dataclass
+class RecallOutcome:
+    results: list[dict]
+    summary: RecallSummary
+
+
+def _competition_ranks(values: list[float]) -> list[int]:
+    """1-based ranks, highest value first; ties share the best rank of their group."""
+    order = sorted(range(len(values)), key=lambda i: -values[i])
+    ranks = [0] * len(values)
+    rank = 0
+    prev: float | None = None
+    for pos, i in enumerate(order):
+        if prev is None or values[i] != prev:
+            rank = pos + 1
+            prev = values[i]
+        ranks[i] = rank
+    return ranks
+
+
+def _rrf(lists: list[list[float]], k: int = RRF_K) -> list[float]:
+    """Reciprocal rank fusion of several score lists over the same items."""
+    fused = [0.0] * len(lists[0])
+    for values in lists:
+        for i, r in enumerate(_competition_ranks(values)):
+            fused[i] += 1.0 / (k + r)
+    return fused
+
+
+def _zscores(values: list[float]) -> list[float]:
+    n = len(values)
+    if n == 0:
+        return []
+    mean = sum(values) / n
+    sd = math.sqrt(sum((v - mean) ** 2 for v in values) / n)
+    if sd < 1e-9:
+        return [0.0] * n
+    return [(v - mean) / sd for v in values]
+
+
+async def _legacy_scores(
+    backend: MatchingBackend,
+    learnings: list[Learning],
+    context: str,
+    context_tags: list[str] | None,
+) -> tuple[list[tuple[int, float]], dict[int, float] | None]:
+    """The legacy ``score_batch`` pairs plus the raw similarity behind them, or None.
+
+    ``score_batch`` is authoritative (an injected backend may override it). For
+    backends that mix locally (they expose ``mix_scores``), the raw text
+    similarity is read through ``text_scores`` for the diagnostics; that costs a
+    second query embedding on this legacy path only. The LLM backend's scores are
+    its own relevance judgement (tags go into its prompt, not into a formula), so
+    for it the raw similarity is the returned score and the pairs may be sparse.
+    """
+    pairs = await backend.score_batch(learnings, context, context_tags)
+    if not pairs:
+        return pairs, {}
+    if getattr(backend, "mix_scores", None) is None:
+        return pairs, {i: sc for i, sc in pairs}  # the LLM's score is its own relevance judgement
+    try:
+        text = await backend.text_scores(learnings, context)
+    except Exception:  # noqa: BLE001 - diagnostics must never discard a successful scoring
+        logger.warning("Raw similarity unavailable for diagnostics; the result carries no similarity", exc_info=True)
+        return pairs, None
+    return pairs, dict(enumerate(text))
+
+
+async def recall_ranked(
+    learnings: list[Learning],
+    context: str,
+    context_tags: list[str] | None = None,
+    *,
+    threshold: float | None = None,
+    limit: int = 10,
+    backend: MatchingBackend | None = None,
+    decay_config: DecayParams | None = None,
+    now: datetime | None = None,
+) -> RecallOutcome:
+    """Rank *learnings* for *context* and say what happened.
+
+    Default (``threshold`` is None): reciprocal rank fusion of the backend's
+    similarity ranks with BM25 ranks (embedding backends) and tag-overlap ranks
+    (when tags are given); an evidence list that is zero everywhere is left out
+    of the fusion. Decay does not enter the ordering of candidates with
+    different evidence: measured on the benchmark store, both multiplying it
+    into the fused value and decaying the evidence before ranking let age
+    outweigh relevance (MRR@10 0.52 -> 0.35 and 0.26 for BM25-only). Ties break
+    by similarity, then by decay (fresher or evergreen first), then newest
+    created. ``score`` on each result is similarity x decay. A candidate is
+    ``matched`` when it stands >= Z_FLOOR standard deviations above the store
+    mean, has a lexical hit (BM25 >= 0.15) or shares a tag; non-embedding
+    backends use their own ``default_threshold``. When fewer than ``limit`` are
+    matched, up to UNMATCHED_CAP weak candidates follow, flagged
+    ``matched: false``. A store smaller than SMALL_STORE skips the z floor
+    (meaningless on so few items) and returns everything up to ``limit``, each
+    flagged by the remaining signals.
+
+    Explicit ``threshold``: the legacy path. Only the candidates the backend
+    scored take part (a pre-filtering backend may return fewer than the store);
+    each one's combined score (similarity mixed with tag overlap) times decay is
+    filtered by ``score >= threshold`` and the survivors are stable-sorted by
+    that score alone, so equal scores keep the backend's order. ``signals``
+    report the raw similarity when it can be read, else ``None``.
+
+    Side effects: matched, surfaced learnings get recall_count++ and last_surfaced.
+    """
+    if not learnings:
+        name = describe_backend(backend) if backend is not None else "none"
+        return RecallOutcome([], RecallSummary(name, 0, 0, 0, 0, "n/a (empty store)", None, None, False, context))
+    if backend is None:
+        backend = get_default_backend()
+    name = describe_backend(backend)
+
+    n = len(learnings)
+    now = now or datetime.now(UTC)
+    if decay_config is not None and decay_config.enabled:
+        decay = [
+            compute_decay(
+                lrn,
+                half_life_days=decay_config.half_life_days,
+                evergreen_recall_threshold=decay_config.evergreen_recall_threshold,
+                evergreen_floor=decay_config.evergreen_floor,
+                now=now,
+            )
+            for lrn in learnings
+        ]
+    else:
+        decay = [1.0] * n
+    tag_overlap = [_tag_overlap(lrn.tags, context_tags) for lrn in learnings]
+    bm25: list[float] | None = None
+    small = False
+
+    if threshold is not None:
+        pairs, raw = await _legacy_scores(backend, learnings, context, context_tags)
+        scored_idx = [i for i, _ in pairs]
+        score = {i: sc * decay[i] for i, sc in pairs}
+        fused = score
+        similarity: dict[int, float | None]
+        z: dict[int, float | None]
+        if raw is None:  # raw similarity unavailable: say so rather than substitute
+            similarity = dict.fromkeys(scored_idx)
+            z = dict.fromkeys(scored_idx)
+        else:
+            similarity = {i: raw.get(i, 0.0) for i in scored_idx}
+            zs = _zscores([raw.get(i, 0.0) for i in scored_idx])
+            z = dict(zip(scored_idx, zs, strict=True))
+        matched = {i: score[i] >= threshold for i in scored_idx}
+        floor = f"score>={threshold:g}"
+        kept = [i for i in scored_idx if matched[i]]  # backend order ...
+        kept.sort(key=lambda i: score[i], reverse=True)  # ... kept for equal scores (stable sort)
+        surfaced = kept[:limit]
+        scored_count = len(pairs)
+    else:
+        sims = await backend.text_scores(learnings, context)
+        hybrid = isinstance(backend, EmbeddingBackend)
+        if hybrid:
+            bm25 = await backend.bm25.text_scores(learnings, context)
+        # Fusion lists: the similarity always; BM25 and tags only when they carry
+        # any evidence, because an all-zero list adds the same constant to every
+        # fused score and shifts ties. Decay is NOT in the fusion: it orders ties
+        # below and scales the displayed score (see the docstring).
+        lists: list[list[float]] = [sims]
+        if bm25 is not None and any(v > 0.0 for v in bm25):
+            lists.append(bm25)
+        if context_tags and any(v > 0.0 for v in tag_overlap):
+            lists.append(tag_overlap)
+        fused_list = _rrf(lists)
+        zs = _zscores(sims)
+        similarity = dict(enumerate(sims))
+        score = {i: sims[i] * decay[i] for i in range(n)}
+        fused = dict(enumerate(fused_list))
+        z = dict(enumerate(zs))
+        small = n < SMALL_STORE
+        if hybrid:
+            lexical_floor = BM25Backend.default_threshold
+            assert bm25 is not None
+            matched = {
+                i: (not small and zs[i] >= Z_FLOOR) or bm25[i] >= lexical_floor or tag_overlap[i] > 0.0
+                for i in range(n)
+            }
+            floor = (
+                f"small store of {n}: all returned; matched on a lexical hit (bm25>={lexical_floor:g}) or a shared tag"
+                if small
+                else f"z>={Z_FLOOR:g} or bm25>={lexical_floor:g}"
+            )
+        else:
+            base = float(getattr(backend, "default_threshold", 0.1))
+            matched = {i: sims[i] >= base or tag_overlap[i] > 0.0 for i in range(n)}
+            floor = f"small store of {n}: all returned; matched at score>={base:g}" if small else f"score>={base:g}"
+        order = sorted(range(n), key=lambda i: (fused[i], similarity[i], decay[i], learnings[i].created), reverse=True)
+        if small:
+            surfaced = order[:limit]
+        else:
+            surfaced = [i for i in order if matched[i]][:limit]
+            if len(surfaced) < limit:
+                weak = [i for i in order if not matched[i]]
+                surfaced += weak[: min(UNMATCHED_CAP, limit - len(surfaced))]
+        scored_count = n
+
+    results: list[dict] = []
+    for pos, i in enumerate(surfaced, start=1):
+        sim_v, z_v = similarity[i], z[i]  # None on the legacy path when the raw read failed
+        if matched[i]:
+            learnings[i].recall_count += 1
+            learnings[i].last_surfaced = now
+        results.append(
+            {
+                "learning": learnings[i].model_dump(mode="json", exclude={"embedding", "embedding_model"}),
+                "score": round(score[i], 4),
+                "matched": matched[i],
+                "rank": pos,
+                "signals": {
+                    "similarity": round(sim_v, 4) if sim_v is not None else None,
+                    "z": round(z_v, 2) if z_v is not None else None,
+                    "bm25": round(bm25[i], 4) if bm25 is not None else None,
+                    "tag_overlap": round(tag_overlap[i], 2),
+                    "decay": round(decay[i], 3),
+                    "fused": round(fused[i], 5),
+                },
+            }
+        )
+    summary = RecallSummary(
+        backend=name,
+        store_size=n,
+        scored=scored_count,
+        matched=sum(1 for v in matched.values() if v),
+        returned=len(results),
+        floor=floor,
+        best_similarity=round(max(known), 4) if (known := [v for v in similarity.values() if v is not None]) else None,
+        best_z=round(max(known_z), 2) if (known_z := [v for v in z.values() if v is not None]) else None,
+        small_store=small,
+        query=context,
+    )
+    return RecallOutcome(results, summary)
 
 
 async def recall_learnings(
@@ -652,69 +995,14 @@ async def recall_learnings(
     backend: MatchingBackend | None = None,
     decay_config: DecayParams | None = None,
 ) -> list[dict]:
-    """Find relevant learnings for a given context.
-
-    Returns learnings above *threshold*, sorted by score descending,
-    capped at *limit*.  Uses *backend* for scoring; if None, auto-selects
-    the best available backend.
-
-    When *threshold* is None, the backend's ``default_threshold`` is used
-    (BM25: 0.15, LLM: 0.2, Jaccard: 0.1).
-
-    When *decay_config* is provided and enabled, scores are multiplied by
-    a time-based decay factor.  Matched learnings (above threshold) have
-    their ``recall_count`` incremented and ``last_surfaced`` set — callers
-    should save the store afterward.
-    """
-    if not learnings:
-        return []
-    if backend is None:
-        backend = get_default_backend()
-    if threshold is None:
-        threshold = float(getattr(backend, "default_threshold", 0.1))
-
-    scored_pairs = await backend.score_batch(learnings, context, context_tags)
-
-    # Apply decay if configured
-    if decay_config is not None and decay_config.enabled:
-        now = datetime.now(UTC)
-        scored_pairs = [
-            (
-                idx,
-                score
-                * compute_decay(
-                    learnings[idx],
-                    half_life_days=decay_config.half_life_days,
-                    evergreen_recall_threshold=decay_config.evergreen_recall_threshold,
-                    evergreen_floor=decay_config.evergreen_floor,
-                    now=now,
-                ),
-            )
-            for idx, score in scored_pairs
-        ]
-
-    # Filter by threshold, then sort + cap to `limit` BEFORE recording recall.
-    # Only the learnings actually surfaced (returned) get recall_count++ and
-    # last_surfaced reset. Previously every above-threshold match was counted —
-    # including those dropped by the limit — which inflated recall_count and
-    # reset decay clocks for learnings the caller never saw (corrupting the
-    # decay/evergreen signal).
-    matched = [(idx, score) for idx, score in scored_pairs if score >= threshold]
-    matched.sort(key=lambda x: x[1], reverse=True)
-    surfaced = matched[:limit]
-
-    now = datetime.now(UTC)
-    results: list[dict] = []
-    for idx, score in surfaced:
-        learnings[idx].recall_count += 1
-        learnings[idx].last_surfaced = now
-        results.append(
-            {
-                "learning": learnings[idx].model_dump(
-                    mode="json",
-                    exclude={"embedding", "embedding_model"},
-                ),
-                "score": round(score, 4),
-            }
-        )
-    return results
+    """Compatibility wrapper: the ranked results of :func:`recall_ranked`."""
+    outcome = await recall_ranked(
+        learnings,
+        context,
+        context_tags,
+        threshold=threshold,
+        limit=limit,
+        backend=backend,
+        decay_config=decay_config,
+    )
+    return outcome.results

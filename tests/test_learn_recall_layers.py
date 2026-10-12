@@ -24,9 +24,11 @@ from typing import Any
 import pytest
 
 from trace_mcp.extension_hooks import (
+    RecallResult,
     clear_hooks,
     extract_if_available,
     format_decision_warnings,
+    format_recall_notice,
     format_recalled_learnings,
     recall_if_available,
     register_extract_hook,
@@ -609,3 +611,139 @@ class TestFullE2EAllLayers:
         warning = format_decision_warnings(related)
         assert "Related learnings" in warning
         assert "correction" in warning.lower() or "ml-dev" in warning.lower()
+
+
+# ── Structured recall result (results + notice) ──────────────────────────
+
+
+class TestRecallResultPlumbing:
+    async def test_list_returning_hook_is_wrapped_losslessly_and_arguments_are_forwarded(self):
+        original = [
+            {"learning": {"category": "gotcha", "content": "b"}, "score": 0.2},
+            {"learning": {"category": "learning", "content": "a"}, "score": 0.9},
+            {"learning": {"category": "decision", "content": "c"}, "score": 0.5},
+        ]
+        seen: list[tuple] = []
+
+        async def fake(project, context, tags, limit):
+            seen.append((project, context, tags, limit))
+            return original
+
+        clear_hooks()
+        register_recall_hook(fake)
+        try:
+            out = await recall_if_available("proj", "ctx", ["t1", "t2"], 7)
+        finally:
+            clear_hooks()
+        assert seen == [("proj", "ctx", ["t1", "t2"], 7)]
+        assert isinstance(out, RecallResult) and out.notice is None
+        assert list(out) == original and all(a is b for a, b in zip(out, original, strict=True))
+        assert out.results is out and out[1:] == original[1:]  # the list it always was
+
+    async def test_result_returning_hook_passes_through_by_identity(self):
+        expected = RecallResult(
+            results=[{"learning": {"category": "gotcha", "content": "x"}, "score": 0.4, "matched": True}],
+            notice="query cleaned to 'x'",
+        )
+
+        async def fake(project, context, tags, limit):
+            return expected
+
+        clear_hooks()
+        register_recall_hook(fake)
+        try:
+            out = await recall_if_available("p", "c")
+        finally:
+            clear_hooks()
+        assert out is expected and out.notice == "query cleaned to 'x'" and out[0]["score"] == 0.4
+
+    @pytest.mark.parametrize("exc", [RuntimeError("x"), ValueError("y"), type("Custom", (Exception,), {})("z")])
+    async def test_failing_hook_yields_empty_result_and_logs(self, exc, caplog):
+        async def boom(project, context, tags, limit):
+            raise exc
+
+        clear_hooks()
+        register_recall_hook(boom)
+        try:
+            with caplog.at_level("WARNING", logger="trace_mcp.extension_hooks"):
+                out = await recall_if_available("p", "c")
+        finally:
+            clear_hooks()
+        assert isinstance(out, RecallResult) and out == [] and out.notice is None
+        assert any("Recall hook failed" in rec.message and rec.exc_info for rec in caplog.records)
+
+    async def test_hook_result_that_fails_to_materialise_still_fails_open(self, caplog):
+        class BrokenResults(list):
+            def __iter__(self):
+                raise RuntimeError("result materialisation failed")
+
+        async def fake(project, context, tags, limit):
+            return BrokenResults([{"learning": {"content": "x"}, "score": 0.5}])
+
+        clear_hooks()
+        register_recall_hook(fake)
+        try:
+            with caplog.at_level("WARNING", logger="trace_mcp.extension_hooks"):
+                out = await recall_if_available("p", "c")
+        finally:
+            clear_hooks()
+        assert isinstance(out, RecallResult) and out == [] and out.notice is None
+        assert any("Recall hook failed" in rec.message for rec in caplog.records)
+
+    async def test_no_hook_yields_a_fresh_empty_result_each_call(self):
+        clear_hooks()
+        first = await recall_if_available("p", "c")
+        assert isinstance(first, RecallResult) and first == [] and first.notice is None
+        first.append({"learning": {"content": "contaminant"}})
+        first.notice = "contaminated"
+        second = await recall_if_available("p", "c")
+        assert second == [] and second.notice is None
+
+    def test_weak_match_is_labelled_and_legacy_rows_render_unchanged(self):
+        text = format_recalled_learnings(
+            [
+                {"learning": {"category": "gotcha", "content": "strong"}, "score": 0.8, "matched": True},
+                {"learning": {"category": "learning", "content": "weak"}, "score": 0.2, "matched": False},
+                {"learning": {"category": "correction", "content": "legacy"}, "score": 0.65},
+                {"learning": {"category": "gotcha", "content": "scoreless"}, "matched": True},
+            ]
+        )
+        assert text == (
+            "\n\nRelevant learnings from past sessions:"
+            "\n  - [gotcha] strong (relevance: 80%)"
+            "\n  - [learning] weak (relevance: 20%, weak match)"
+            "\n  - [correction] legacy (relevance: 65%)"
+            "\n  - [gotcha] scoreless (relevance: 0%)"
+        )
+
+    def test_notice_formatting(self):
+        assert format_recall_notice("3 learnings scored, none cleared z>=1") == (
+            "\n\nRecall: 3 learnings scored, none cleared z>=1"
+        )
+
+    def test_decision_warnings_skip_weak_matches_and_keep_legacy_rows(self):
+        text = format_decision_warnings(
+            [
+                {"learning": {"category": "gotcha", "content": "strong"}, "matched": True},
+                {"learning": {"category": "gotcha", "content": "weak"}, "matched": False},
+                {"learning": {"category": "correction", "content": "legacy row without the key"}},
+                {"learning": {"category": "decision", "content": "another weak"}, "matched": False},
+            ]
+        )
+        assert text == (
+            "\n\nRelated learnings (review before proceeding):"
+            "\n  - [gotcha] strong"
+            "\n  - [correction] legacy row without the key"
+        )
+
+    def test_decision_warnings_empty_when_only_weak_matches(self):
+        weak = [{"learning": {"content": f"weak {i}"}, "matched": False} for i in range(3)]
+        assert format_decision_warnings(weak) == ""
+        assert format_decision_warnings([]) == ""
+        assert "strong" in format_decision_warnings([{"learning": {"content": "strong"}, "matched": True}])
+
+    @pytest.mark.parametrize(
+        "notice", ["", "  padded  ", "scored 3, best 0.29 under hybrid:embedding:m+bm25", "ünïcode"]
+    )
+    def test_notice_is_prefixed_and_preserved_verbatim(self, notice):
+        assert format_recall_notice(notice) == "\n\nRecall: " + notice

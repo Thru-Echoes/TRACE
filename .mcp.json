@@ -10,7 +10,7 @@
         "--with",
         "numpy",
         "--with",
-        "model2vec",
+        "fastembed",
         "--refresh-package",
         "trace-mcp",
         "trace-mcp"
