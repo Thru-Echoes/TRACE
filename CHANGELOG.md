@@ -116,6 +116,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a document and ranked worse (cosine-only ranking on the store above, same
   100 queries: MRR 0.33 without the prefix, 0.44 with it). bge models need no
   prefix and get none.
+- A machine-global OpenAI key no longer makes strict mode refuse keyword
+  recall when nothing cloud-related was requested. With no transformer
+  provider installed and a key present, the extension used to register with a
+  startup error and carry a loud warning on every recall; strict mode now
+  refuses the BM25 fallback only when `TRACE_LLM_ENABLED=true` or
+  `TRACE_EMBEDDING_BACKEND=openai` was set and cannot be served.
 - An empty recall is no longer indistinguishable from an empty store: the
   session banner and the recall response say how many learnings were scored,
   the floor, the backend and the best similarity seen.
