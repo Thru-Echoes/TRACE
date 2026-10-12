@@ -98,6 +98,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   encoder (the fastembed arctic models) this also changes the numbers the
   legacy `threshold` path produces; that is intended.
 ### Added
+
+- **Documented the ONNX Runtime telemetry inside the `fastembed` tier.** ONNX
+  Runtime's official Windows builds register an ETW TraceLogging provider
+  (`Microsoft.ML.ONNXRuntime`) that is on by default and reports session
+  creation, model load, run counts, errors, and process facts, which Windows'
+  diagnostic-data service may upload to Microsoft; the macOS and Linux wheels
+  carry a no-op stub, and no 1.27.0 binary embeds a Microsoft endpoint. The
+  learning text is never part of those events. `docs/embeddings.md` now
+  describes the facility and the documented switch,
+  `onnxruntime.disable_telemetry_events()`, which must run before the model
+  loads because the first events fire at ONNX session creation.
 - `trace_start_session(recall_query=...)`: a search text used instead of the
   description when the description is an identifier or run label. Recall stays
   opt-in through `recall_learnings`. The banner echoes the query it used (a
