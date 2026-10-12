@@ -23,7 +23,7 @@ def get_extension_status() -> str:
     Modes:
       * no learning extension installed/importable
       * learning extension, LLM embeddings (OpenAI)
-      * learning extension, local embeddings (model2vec, no LLM)
+      * learning extension, local embeddings (fastembed or model2vec, no LLM)
       * learning extension, no embeddings (keyword recall only)
 
     Never raises — any failure degrades to the "no learning extension"
@@ -51,7 +51,7 @@ def get_extension_status() -> str:
 
     if name == "OpenAIEmbeddingProvider":
         mode = f"{_BANNER} — learning extension (LLM embeddings via OpenAI)."
-    elif name == "Model2VecEmbeddingProvider":
+    elif name in ("FastEmbedEmbeddingProvider", "Model2VecEmbeddingProvider"):
         mode = (
             f"{_BANNER} — learning extension (local embeddings, no LLM). "
             "To upgrade: put an OpenAI key in this project's .env and set "
@@ -60,7 +60,7 @@ def get_extension_status() -> str:
     else:
         mode = (
             f"{_BANNER} — learning extension (keyword recall only, no embeddings). "
-            "To upgrade: install `model2vec` (local, no LLM) or put an OpenAI key "
+            "To upgrade: install `fastembed` (local transformer, no LLM) or put an OpenAI key "
             "in this project's .env for semantic recall."
         )
 

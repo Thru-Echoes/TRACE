@@ -3,17 +3,25 @@
 Generates vector embeddings for learning content.  Four providers:
 
 1. **fastembed** ``snowflake/snowflake-arctic-embed-s`` — local ONNX transformer
-   (no PyTorch), the "local-strong" tier: markedly stronger retrieval than static
-   embeddings while staying condensed and offline-capable
-2. **model2vec** ``potion-base-8M`` — local static, ~8 MB, no PyTorch, sub-ms
+   (no PyTorch). The only tier ``auto`` selects: measured on this project's own
+   store it matched keyword search on ordinary queries and beat it on paraphrased
+   ones, which is what the embedding half of recall is for.
+2. **model2vec** ``potion-retrieval-32M`` — local static token-lookup model (no
+   transformer). Explicit opt-in only (``TRACE_EMBEDDING_BACKEND=model2vec``):
+   on the benchmark store the static tier ranked below keyword search on
+   ordinary queries and showed no significant gain on paraphrased ones.
 3. **OpenAI** ``text-embedding-3-small`` — cloud; EXPLICIT opt-in only. A custom
    ``base_url`` points this at any OpenAI-compatible local server (Ollama / vLLM /
    LM Studio / text-embeddings-inference) — a fully-local bring-your-own path
 4. **None** — no embeddings, fall through to BM25 matching
 
-Local-first auto-selection: fastembed (if pkg) → model2vec (if pkg) → None.
+Local-first auto-selection: fastembed (if pkg) → None (BM25 alone).
 OpenAI is never auto-selected from a mere key — cloud egress is opt-in
 (``TRACE_EMBEDDING_BACKEND=openai``).
+
+Queries and documents are encoded separately (``embed_query`` vs ``embed_texts``):
+the fastembed arctic models are trained with an instruction prefix on the query side
+only, which the provider adds. Documents are always embedded as-is.
 """
 
 from __future__ import annotations
@@ -72,13 +80,22 @@ except ImportError:  # pragma: no cover
 # NOT listed here is still usable (with a warning) but its license and embedding
 # dimension are the user's responsibility. Fully-arbitrary, TRACE-managed custom
 # models are a deliberately deferred future plan (see docs/embeddings.md).
+# arctic-embed models expect this instruction on the QUERY side only (model card).
+# Measured on one 352-learning store with 100 session-description queries: MRR 0.33
+# with bare queries, 0.44 with the prefix.
+ARCTIC_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+
 FASTEMBED_ALLOWLIST: dict[str, dict[str, Any]] = {
-    "snowflake/snowflake-arctic-embed-s": {"dim": 384, "license": "Apache-2.0"},
-    "snowflake/snowflake-arctic-embed-m": {"dim": 768, "license": "Apache-2.0"},
+    "snowflake/snowflake-arctic-embed-s": {"dim": 384, "license": "Apache-2.0", "query_prefix": ARCTIC_QUERY_PREFIX},
+    "snowflake/snowflake-arctic-embed-m": {"dim": 768, "license": "Apache-2.0", "query_prefix": ARCTIC_QUERY_PREFIX},
     "BAAI/bge-small-en-v1.5": {"dim": 384, "license": "MIT"},
     "BAAI/bge-base-en-v1.5": {"dim": 768, "license": "MIT"},
 }
 DEFAULT_FASTEMBED_MODEL = "snowflake/snowflake-arctic-embed-s"
+# The retrieval fine-tune of the potion family: the same static token-lookup mechanism
+# as potion-base-8M, 512-dim vectors, about 130 MB on disk against 30 MB. Chosen for
+# measured ranking quality on this project's own store (see the changelog).
+DEFAULT_MODEL2VEC_MODEL = "minishlab/potion-retrieval-32M"
 
 
 # ── Provider protocol ────────────────────────────────────────────────
@@ -98,8 +115,38 @@ class EmbeddingProvider(Protocol):
         ...
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:
-        """Generate embeddings for a batch of texts."""
+        """Generate embeddings for a batch of documents (stored learnings)."""
         ...
+
+    async def embed_query(self, text: str) -> list[float]:
+        """Embed one search query.
+
+        Required of every provider. Models trained with a query-side instruction add
+        it here; the default is the symmetric single-document embedding, so a class
+        that subclasses this Protocol explicitly inherits working behaviour.
+        """
+        return (await self.embed_texts([text]))[0]
+
+
+@runtime_checkable
+class DocumentEmbedder(Protocol):
+    """The minimum the ``embed_query`` helper needs: something that embeds documents."""
+
+    async def embed_texts(self, texts: list[str]) -> list[list[float]]: ...
+
+
+async def embed_query(provider: DocumentEmbedder, text: str) -> list[float]:
+    """Embed *text* as a QUERY through *provider*.
+
+    Providers implement ``embed_query`` (query-side encoding). An object that
+    offers only ``embed_texts`` gets the symmetric single-document embedding.
+    No coroutine detection: ``MagicMock``/``AsyncMock`` doubles expose every
+    attribute, so a double must set ``embed_query`` explicitly.
+    """
+    fn = getattr(provider, "embed_query", None)
+    if fn is None:
+        return (await provider.embed_texts([text]))[0]
+    return await fn(text)
 
 
 # ── OpenAI provider ──────────────────────────────────────────────────
@@ -171,14 +218,17 @@ class OpenAIEmbeddingProvider:
             ) from exc
         return [item.embedding for item in response.data]
 
+    async def embed_query(self, text: str) -> list[float]:
+        return (await self.embed_texts([text]))[0]
+
 
 # ── model2vec provider ───────────────────────────────────────────────
 
 
 class Model2VecEmbeddingProvider:
-    """Generate embeddings locally via model2vec (``potion-base-8M``)."""
+    """Generate embeddings locally via model2vec (default ``potion-retrieval-32M``)."""
 
-    def __init__(self, model_name: str = "minishlab/potion-base-8M") -> None:
+    def __init__(self, model_name: str = DEFAULT_MODEL2VEC_MODEL) -> None:
         if not _HAS_MODEL2VEC:
             raise RuntimeError("model2vec package is required for local embeddings")
         self.model_name = model_name
@@ -206,6 +256,9 @@ class Model2VecEmbeddingProvider:
         embeddings = self._get_model().encode(texts)
         return [emb.tolist() for emb in embeddings]
 
+    async def embed_query(self, text: str) -> list[float]:
+        return (await self.embed_texts([text]))[0]
+
 
 # ── fastembed provider (local ONNX transformer, no PyTorch) ──────────────
 
@@ -226,6 +279,7 @@ class FastEmbedEmbeddingProvider:
         self.model_name = model_name
         meta = FASTEMBED_ALLOWLIST.get(model_name, {})
         self.dimensions = int(meta.get("dim", 0))  # 0 = unknown (non-allowlisted model)
+        self._query_prefix: str = str(meta.get("query_prefix", ""))
         # Lazy-load the ONNX model on first use (mirrors the model2vec provider):
         # avoids a resident model + cold-start per idle session at server startup.
         self._model: Any = None
@@ -243,6 +297,10 @@ class FastEmbedEmbeddingProvider:
         # ``.embed`` returns a generator of numpy arrays.
         model = self._get_model()
         return [[float(x) for x in vec] for vec in model.embed(list(texts))]
+
+    async def embed_query(self, text: str) -> list[float]:
+        # Query-side instruction for models that were trained with one (see ARCTIC_QUERY_PREFIX).
+        return (await self.embed_texts([self._query_prefix + text]))[0]
 
 
 def _select_fastembed_model(requested: str) -> str:
@@ -274,8 +332,9 @@ def get_embedding_provider(config: LearnConfig | None = None) -> EmbeddingProvid
 
     Local-first selection order (``auto`` mode):
     1. fastembed — if ``fastembed`` installed (local ONNX, no key, no egress).
-    2. model2vec — if ``model2vec`` installed (local static, no key).
-    3. None — fall through to BM25 matching.
+    2. None — fall through to BM25 matching alone. The static model2vec tier is
+       never auto-selected (it is available on explicit request); on the
+       benchmark store it ranked below BM25 alone.
 
     OpenAI is **never** auto-selected: a mere API key must not route embedding
     content off-machine. Cloud egress requires an explicit
@@ -315,10 +374,10 @@ def get_embedding_provider(config: LearnConfig | None = None) -> EmbeddingProvid
             )
         logger.warning("%s. Falling back to next available backend.", msg)
 
-    # --- model2vec (local static) ---
-    if backend in ("model2vec", "auto") and _HAS_MODEL2VEC:
+    # --- model2vec (local static): explicit request only ---
+    if backend == "model2vec" and _HAS_MODEL2VEC:
         # Use config model if it looks like a model2vec model, otherwise default
-        m2v_model = config.embedding_model if "potion" in config.embedding_model else "minishlab/potion-base-8M"
+        m2v_model = config.embedding_model if "potion" in config.embedding_model else DEFAULT_MODEL2VEC_MODEL
         logger.info("Using model2vec embedding provider (model=%s)", m2v_model)
         return Model2VecEmbeddingProvider(model_name=m2v_model)
     if backend == "model2vec":

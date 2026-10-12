@@ -217,32 +217,25 @@ class TestModel2VecEmbeddingProvider:
 class TestEmbeddingProviderAutoSelection:
     def test_auto_never_selects_openai_even_with_key(self):
         """Local-first: a mere API key must NOT route embeddings to OpenAI via
-        auto. Auto prefers a local backend (model2vec here); OpenAI is opt-in."""
+        auto. With no transformer provider installed, auto means BM25 (None)."""
         config = LearnConfig(openai_api_key="sk-test", embedding_backend="auto")
-        mock_instance = MagicMock()
-        mock_instance.dim = 256
         with patch("trace_mcp.extensions.learn.embeddings._HAS_OPENAI", True):
             with patch("trace_mcp.extensions.learn.embeddings.AsyncOpenAI"):
                 with patch("trace_mcp.extensions.learn.embeddings._HAS_FASTEMBED", False):
                     with patch("trace_mcp.extensions.learn.embeddings._HAS_MODEL2VEC", True):
-                        with patch("model2vec.StaticModel.from_pretrained", return_value=mock_instance):
-                            provider = get_embedding_provider(config)
-        assert isinstance(provider, Model2VecEmbeddingProvider)
+                        provider = get_embedding_provider(config)
+        assert provider is None
 
-    def test_auto_selects_model2vec_when_no_openai_key(self):
-        # _HAS_FASTEMBED forced False so this exercises the model2vec fallback
-        # deterministically whether or not fastembed is installed (CI installs it
-        # via --all-extras; a bare dev checkout does not).
+    def test_auto_never_selects_model2vec(self):
+        """The static tier ranked below keyword search on the benchmark store; it is explicit-only."""
         config = LearnConfig(openai_api_key=None, embedding_backend="auto")
-        mock_instance = MagicMock()
-        mock_instance.dim = 256
         with patch("trace_mcp.extensions.learn.embeddings._HAS_FASTEMBED", False):
             with patch("trace_mcp.extensions.learn.embeddings._HAS_OPENAI", False):
                 with patch("trace_mcp.extensions.learn.embeddings._HAS_MODEL2VEC", True):
-                    with patch("model2vec.StaticModel.from_pretrained", return_value=mock_instance):
-                        provider = get_embedding_provider(config)
-        assert provider is not None
-        assert isinstance(provider, Model2VecEmbeddingProvider)
+                    assert get_embedding_provider(config) is None
+        explicit = LearnConfig(openai_api_key=None, embedding_backend="model2vec")
+        with patch("trace_mcp.extensions.learn.embeddings._HAS_MODEL2VEC", True):
+            assert isinstance(get_embedding_provider(explicit), Model2VecEmbeddingProvider)
 
     def test_returns_none_when_nothing_available(self):
         # All three local/cloud backends forced absent → BM25 fallthrough (None).
@@ -303,6 +296,7 @@ def _mock_provider(return_vec: list[float] | None = None):
     provider.model_name = "test-model"
     provider.dimensions = len(vec)
     provider.embed_texts = AsyncMock(return_value=[vec])
+    provider.embed_query = AsyncMock(return_value=vec)
     return provider
 
 
@@ -378,7 +372,7 @@ class TestEmbeddingBackend:
 
     async def test_threshold_default(self):
         backend = EmbeddingBackend(provider=_mock_provider())
-        assert backend.default_threshold == 0.3
+        assert backend.default_threshold == 0.0  # the hybrid ranker uses a relative floor, never an absolute cutoff
 
     async def test_scores_clamped_to_zero_one(self):
         """Negative cosine similarity is clamped to 0."""
@@ -653,3 +647,53 @@ class TestEmbeddingDedup:
         add_learning(ks, content="Always use conda ml-dev environment")
         result = find_duplicate(ks, "Always use conda ml-dev environment")
         assert result is not None  # Jaccard finds exact match
+
+
+# ── Text-only cosine (no tag cap) ────────────────────────────────────────
+
+
+class TestEmbeddingBackendTextScores:
+    async def test_text_scores_are_raw_cosine_without_tag_cap(self):
+        provider = _mock_provider([1.0, 0.0, 0.0, 0.0])
+        backend = EmbeddingBackend(provider=provider)
+        same = Learning(id="lrn_s", content="s", embedding=[2.0, 0.0, 0.0, 0.0], embedding_model="test-model")
+        half = Learning(id="lrn_h", content="h", embedding=[1.0, 1.0, 0.0, 0.0], embedding_model="test-model")
+        text = await backend.text_scores([same, half], "q")
+        assert text == pytest.approx([1.0, math.sqrt(0.5)], abs=1e-6)
+
+    async def test_text_scores_use_bm25_standin_for_unembedded(self):
+        provider = _mock_provider(CONDA_VEC)
+        backend = EmbeddingBackend(provider=provider)
+        text = await backend.text_scores([CONDA_LEARNING, NONEMB_LEARNING], "attribution bias")
+        standin = await backend.bm25.text_scores([NONEMB_LEARNING], "attribution bias")
+        assert 0.0 < standin[0] < 1.0
+        assert text[1] == pytest.approx(standin[0])
+
+    async def test_query_goes_through_embed_query_and_its_vector_is_used(self):
+        """The recall query takes the query-side encoding; stored vectors are not re-embedded here."""
+        provider = _mock_provider(CONDA_VEC)
+        backend = EmbeddingBackend(provider=provider)
+        text = await backend.text_scores([CONDA_LEARNING, LOGGING_LEARNING], "conda environment")
+        provider.embed_query.assert_awaited_once_with("conda environment")
+        provider.embed_texts.assert_not_awaited()
+        expected_logging = float(cosine_similarity_matrix(CONDA_VEC, np.array([LOGGING_VEC], dtype=np.float32))[0])
+        assert text == pytest.approx([1.0, expected_logging], abs=1e-6)
+        assert text[0] > text[1]
+
+    async def test_asymmetric_provider_scores_with_the_query_encoding(self):
+        """Authorized change: the legacy score_batch also uses the query-side encoding."""
+        provider = _mock_provider([1.0, 0.0, 0.0, 0.0])
+        provider.embed_query = AsyncMock(return_value=[0.0, 1.0, 0.0, 0.0])
+        doc = Learning(
+            id="lrn_d", content="d", tags=["t"], embedding=[1.0, 0.0, 0.0, 0.0], embedding_model="test-model"
+        )
+        backend = EmbeddingBackend(provider=provider, tag_weight=0.3)
+        assert await backend.text_scores([doc], "q") == [0.0]
+        combined = dict(await backend.score_batch([doc], "q", ["t"]))
+        assert combined[0] == pytest.approx(0.3)  # 0.7 * 0.0 + 0.3 * tag overlap 1.0
+
+    async def test_score_batch_keeps_legacy_partition_order(self):
+        provider = _mock_provider(CONDA_VEC)
+        backend = EmbeddingBackend(provider=provider)
+        results = await backend.score_batch([NONEMB_LEARNING, CONDA_LEARNING], "conda")
+        assert [i for i, _ in results] == [1, 0]  # embedded first, then unembedded

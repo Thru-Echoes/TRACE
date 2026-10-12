@@ -82,7 +82,7 @@ def _resolve_trace_source() -> str:
     )
 
 
-LEARN_EXTRAS: tuple[str, ...] = ("openai", "numpy", "model2vec")
+LEARN_EXTRAS: tuple[str, ...] = ("openai", "numpy", "fastembed")
 """Optional dependencies the trace-learn extension needs in order to register.
 
 `uvx --from <src> trace-mcp` installs the base package only, so without these
@@ -92,8 +92,9 @@ is not an error. They are `--with` flags rather than a hard dependency so the
 core install stays `mcp` + `pydantic`.
 
 Installing `openai` does not enable cloud calls: LLM matching and extraction
-remain opt-in behind `TRACE_LLM_ENABLED` and an API key, and the local
-`model2vec` backend is the default.
+remain opt-in behind `TRACE_LLM_ENABLED` and an API key. `fastembed` provides
+the local transformer embeddings that recall fuses with BM25; without it recall
+runs on BM25 alone. The first recall downloads the model weights once.
 """
 
 

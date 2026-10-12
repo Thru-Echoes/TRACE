@@ -53,12 +53,8 @@ class TestLocalOnlyKillSwitch:
         cfg = LearnConfig(openai_api_key="sk-x", embedding_backend="openai", local_only=True)
         from unittest.mock import MagicMock
 
-        from trace_mcp.extensions.learn.embeddings import Model2VecEmbeddingProvider
+        from trace_mcp.extensions.learn.embeddings import FastEmbedEmbeddingProvider
 
-        inst = MagicMock()
-        inst.dim = 256
-        with patch(f"{_EMB}._HAS_FASTEMBED", False):
-            with patch(f"{_EMB}._HAS_MODEL2VEC", True):
-                with patch("model2vec.StaticModel.from_pretrained", return_value=inst):
-                    provider = get_embedding_provider(cfg)
-        assert isinstance(provider, Model2VecEmbeddingProvider)
+        with patch(f"{_EMB}._HAS_FASTEMBED", True), patch(f"{_EMB}.TextEmbedding", return_value=MagicMock()):
+            provider = get_embedding_provider(cfg)
+        assert isinstance(provider, FastEmbedEmbeddingProvider)

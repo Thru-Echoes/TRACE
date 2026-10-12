@@ -1,7 +1,7 @@
 """trace-learn: Cross-session knowledge persistence for TRACE.
 
 Registers 5 MCP tools on the existing TRACE server:
-- trace_learn_recall   — find relevant past learnings (LLM or BM25)
+- trace_learn_recall   — find relevant past learnings (hybrid embedding + BM25, LLM, or BM25)
 - trace_learn_add      — manually add a learning
 - trace_learn_list     — list all learnings
 - trace_learn_forget   — remove a learning
@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 
 from trace_mcp import extension_status
 from trace_mcp import project_identity as pident
-from trace_mcp.extension_hooks import register_extract_hook, register_recall_hook
+from trace_mcp.extension_hooks import RecallResult, register_extract_hook, register_recall_hook
 from trace_mcp.extensions.learn import extraction, matching, store
 from trace_mcp.extensions.learn.config import effective_learn_config, load_config
 from trace_mcp.extensions.learn.egress import egress_project
@@ -101,6 +101,30 @@ def _resolve_project(project: str | None) -> tuple[str, str | None]:
         return "", json.dumps({"error": str(exc), "project": project or ""})
 
 
+def recall_notice(summary: matching.RecallSummary, *, original_query: str) -> str | None:
+    """One sentence on what recall did when the result alone would mislead; None otherwise.
+
+    Pure function. A notice is produced when the store was too small for a
+    floor, when nothing cleared the floor, or when the query was cleaned before
+    scoring. It is what makes an empty recall distinguishable from an empty store.
+    """
+    parts: list[str] = []
+    if summary.store_size == 0:
+        parts.append("no learnings stored yet for this project")
+    elif summary.small_store:
+        parts.append(f"small store of {summary.store_size}: all {summary.returned} returned, {summary.matched} matched")
+    elif summary.matched == 0:
+        best = f"{summary.best_similarity:.2f}" if summary.best_similarity is not None else "n/a"
+        weak = f"; {summary.returned} nearest shown as weak matches" if summary.returned else "; nothing returned"
+        parts.append(
+            f"no learning cleared the floor ({summary.floor}): {summary.scored} scored, "
+            f"best similarity {best} under {summary.backend}{weak}"
+        )
+    if summary.query != original_query:
+        parts.append(f"query cleaned to '{summary.query}'")
+    return "; ".join(parts) or None
+
+
 def register(mcp: MCPServer, storage: TraceStorage) -> None:
     """Register trace-learn tools and hooks on the MCP server."""
 
@@ -113,8 +137,10 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
     # so the failure is captured and re-reported on every affected response instead.
     _startup_error: str | None = None
     try:
-        _backend = matching.get_default_backend(_config)
+        # One provider per registration, shared with the matching backend, so the
+        # static model behind it is loaded once rather than once per consumer.
         _embedding_provider = get_embedding_provider(_config)
+        _backend = matching.get_default_backend(_config, provider=_embedding_provider)
     except Exception as exc:  # noqa: BLE001 - a broken backend must not unregister the tools
         _startup_error = str(exc)
         logger.error(
@@ -173,7 +199,8 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
         )
         cached = _ratchet_cache.get(cache_key)
         if cached is None:
-            cached = (eff, matching.get_default_backend(eff), get_embedding_provider(eff))
+            prov = get_embedding_provider(eff)
+            cached = (eff, matching.get_default_backend(eff, provider=prov), prov)
             _ratchet_cache[cache_key] = cached
         return cached
 
@@ -241,6 +268,53 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
             return []
         return [lrn for lrn in ks.learnings if lrn.embedding is None or lrn.embedding_model != active.model_name]
 
+    async def _embed_stale_unlocked(
+        project: str, provider: EmbeddingProvider | None
+    ) -> dict[str, tuple[str, list[float]]]:
+        """Compute vectors for the store's stale learnings WITHOUT holding the project lock.
+
+        A transformer tier embeds a few hundred learnings in tens of seconds on first
+        use, and the project lock times out after 15 s by default; holding it for the
+        whole embedding would fail every concurrent add or recall on the project.
+        So: snapshot (id, content) of the stale learnings under the lock, release it,
+        embed, and return ``{id: (content, vector)}`` for the caller to merge under the
+        lock onto learnings whose content is still the same (``_merge_embeddings``).
+        Learnings added or edited in between rank on the BM25 stand-in this time and
+        are picked up by the next recall's pass; nothing is ever embedded under the
+        lock, however large the gap. Raises as ``_embed_learnings`` does in strict
+        mode. Side effects: none on the store; the provider may record egress.
+        """
+        active = provider if provider is not None else _embedding_provider
+        if active is None:
+            return {}
+        with store.project_lock(project), egress_project(pident.key_for_label(project) or None):
+            stale = [(lrn.id, lrn.content) for lrn in _needs_embedding(store.load_store(project), active)]
+        if not stale:
+            return {}
+        scratch = [Learning(id=lid, content=content) for lid, content in stale]
+        with egress_project(pident.key_for_label(project) or None):
+            if not await _embed_learnings(scratch, active):
+                return {}
+        return {lrn.id: (lrn.content, lrn.embedding) for lrn in scratch if lrn.embedding is not None}
+
+    def _merge_embeddings(
+        ks: KnowledgeStore, fresh: dict[str, tuple[str, list[float]]], provider: EmbeddingProvider | None
+    ) -> bool:
+        """Attach vectors computed outside the lock to the learnings they belong to. Returns True if any."""
+        active = provider if provider is not None else _embedding_provider
+        if active is None or not fresh:
+            return False
+        merged = False
+        for lrn in ks.learnings:
+            hit = fresh.get(lrn.id)
+            if hit is None or hit[0] != lrn.content:
+                continue  # added or edited since the snapshot; the residue path handles it
+            if lrn.embedding is None or lrn.embedding_model != active.model_name:
+                lrn.embedding = hit[1]
+                lrn.embedding_model = active.model_name
+                merged = True
+        return merged
+
     def _registry_unavailable_error(project: str | None, exc: Exception) -> str:
         return json.dumps(
             {
@@ -283,7 +357,7 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
         context: str,
         tags: list[str] | None,
         limit: int,
-    ) -> list[dict]:
+    ) -> RecallResult:
         # Fail loudly-but-open on registry damage: hooks run inside session
         # capture (start/decision), and capture must never be blocked by a
         # damaged registry (ADR-006 §6 split) — but with the posture unreadable
@@ -292,29 +366,39 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
             _eff, backend, provider = _effective(project)
         except pident.RegistryUnavailableError as exc:
             logger.error("Registry unreadable — skipping auto-recall for %r (fail closed on egress): %s", project, exc)
-            return []
-        # Lock the full load→embed→save read-modify-write span. This is
-        # the highest-frequency knowledge-store mutator (core auto-recall);
-        # leaving it unlocked allowed a concurrent locked add to be
-        # clobbered (a lost update).
+            return RecallResult(notice="recall skipped: project registry unreadable")
+        # A session description can be a run label plus a slug; strip what no
+        # ranker can use before scoring, and say so in the notice.
+        query = matching.clean_query(context)
+        # Slow work first, lock released: vectors for learnings that lack one or
+        # carry another model's (see _embed_stale_unlocked).
+        fresh = await _embed_stale_unlocked(project, provider)
+        # Lock the load→merge→rank→save read-modify-write span. This is the
+        # highest-frequency knowledge-store mutator (core auto-recall); leaving it
+        # unlocked allowed a concurrent locked add to be clobbered (a lost update).
         with store.project_lock(project), egress_project(pident.key_for_label(project) or None):
             ks = store.load_store(project)
-            if not ks.learnings:
-                return []
-            stale = _needs_embedding(ks, provider)
-            embedded = await _embed_learnings(stale, provider) if stale else False
-            results = await matching.recall_learnings(
+            # An empty store takes the same ranking and notice path as any other, so the
+            # notice still reports a cleaned query and the summary is the ranker's own.
+            # Learnings added or edited since the snapshot stay unembedded for now:
+            # they rank on the BM25 stand-in this time and the next recall's
+            # unlocked pass backfills them. Nothing is ever embedded under the lock.
+            embedded = _merge_embeddings(ks, fresh, provider)
+            outcome = await matching.recall_ranked(
                 ks.learnings,
-                context=context,
+                context=query,
                 context_tags=tags,
-                threshold=None,  # Use backend's default_threshold
+                threshold=None,
                 limit=limit,
                 backend=backend,
                 decay_config=_decay_params,
             )
-            if results or embedded:
+            if any(r["matched"] for r in outcome.results) or embedded:
                 _persist_recall_bookkeeping(ks, project)
-            return results
+            return RecallResult(
+                results=outcome.results,
+                notice=recall_notice(outcome.summary, original_query=context),
+            )
 
     async def _extract_hook(project: str, session_id: str) -> list[str]:
         # INV-6: refuse to extract a session into a DIFFERENT project's store
@@ -365,7 +449,13 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
         omit it to use the pin; a supplied label must resolve to the pinned
         project. Unpinned, an explicit project is required.
 
-        When threshold is None, uses the backend's default (BM25: 0.15, LLM: 0.2).
+        Ranking is hybrid for embedding backends (similarity fused with BM25).
+        Identifier-shaped fragments are stripped from the query first (the
+        ``query`` field of the response shows what was scored). Without
+        ``threshold`` a per-query relative floor marks weak candidates instead of
+        dropping them; pass ``threshold`` for an absolute cutoff on ``score``. The
+        response reports ``matched``, ``scored``, ``floor`` and ``backend``, and a
+        ``notice`` field explains an empty, small-store or cleaned-query recall.
 
         Data flow: with the OpenAI embedding/LLM backend configured, the query
         text is sent to OpenAI to score matches. Set ``TRACE_LOCAL_ONLY=1`` to
@@ -402,44 +492,43 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                     }
                 )
             _eff, backend, provider = _effective(project)
-            # Lock the full span (recall may backfill
-            # embeddings and save — a read-modify-write).
+            # Lazy-embed OUTSIDE the lock, then lock the load→merge→rank→save span
+            # (recall backfills embeddings and bookkeeping — a read-modify-write).
+            fresh = await _embed_stale_unlocked(project, provider)
             with store.project_lock(project), egress_project(pident.key_for_label(project) or None):
                 ks = store.load_store(project)
-                if not ks.learnings:
-                    empty: dict[str, Any] = {
-                        "project": project,
-                        "results": [],
-                        "total": 0,
-                        "backend": matching.describe_backend(backend),
-                    }
-                    # A first-run project is exactly where a missing key is most
-                    # worth saying out loud, so this early return carries the
-                    # notices too.
-                    if notices := _key_notices(_eff):
-                        empty["warnings"] = notices
-                    return json.dumps(empty)
-                # Lazy-embed: generate (or regenerate) embeddings for learnings that need them
-                stale = _needs_embedding(ks, provider)
-                embedded = await _embed_learnings(stale, provider) if stale else False
-                results = await matching.recall_learnings(
+                # Anything added or edited since the snapshot ranks on the BM25 stand-in now
+                # and is backfilled by the next recall; nothing is embedded under the lock.
+                embedded = _merge_embeddings(ks, fresh, provider)
+                query = matching.clean_query(context or "")
+                outcome = await matching.recall_ranked(
                     ks.learnings,
-                    context=context or "",
+                    context=query,
                     context_tags=tags,
                     threshold=threshold,
                     limit=limit,
                     backend=backend,
                     decay_config=_decay_params,
                 )
+                results = outcome.results
                 bookkeeping_notice: str | None = None
-                if results or embedded:
+                if any(r["matched"] for r in results) or embedded:
                     bookkeeping_notice = _persist_recall_bookkeeping(ks, project)
                 payload: dict[str, Any] = {
                     "project": project,
                     "results": results,
                     "total": len(results),
-                    "backend": matching.describe_backend(backend),
+                    "matched": outcome.summary.matched,
+                    "scored": outcome.summary.scored,
+                    "floor": outcome.summary.floor,
+                    "backend": outcome.summary.backend,
+                    "query": outcome.summary.query,
                 }
+                # What recall did, when the bare results would mislead (small store, nothing
+                # cleared the floor, query cleaned). Informational, so it is its own field;
+                # ``warnings`` stays reserved for configuration problems.
+                if (notice := recall_notice(outcome.summary, original_query=context or "")) is not None:
+                    payload["notice"] = notice
                 notices = _key_notices(_eff)
                 if bookkeeping_notice:
                     notices.append(bookkeeping_notice)

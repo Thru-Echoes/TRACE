@@ -431,12 +431,11 @@ class TestBackendSelection:
         assert not isinstance(backend, JaccardBackend)
 
     def test_embedding_preferred_over_llm(self):
-        """When model2vec is available, EmbeddingBackend is selected even with API key."""
+        """When an embedding provider is configured, EmbeddingBackend is selected even with an API key."""
         pytest.importorskip("model2vec")  # optional dep — skip cleanly when absent
         from trace_mcp.extensions.learn.matching import EmbeddingBackend
 
-        config = LearnConfig(openai_api_key=None, llm_enabled=False)
-        # model2vec is installed in dev — auto selection picks it up
+        config = LearnConfig(openai_api_key="sk-test", llm_enabled=True, embedding_backend="model2vec")
         backend = get_default_backend(config)
         assert isinstance(backend, EmbeddingBackend)
 
@@ -704,34 +703,22 @@ class TestBackendThresholds:
                 backend = LLMBackend(config)
         assert backend.default_threshold == 0.2
 
-    async def test_recall_uses_backend_threshold_when_none(self):
-        """When threshold=None, recall uses the backend's default."""
+    async def test_recall_marks_matches_by_the_backend_floor_when_none(self):
+        """threshold=None: the backend's default is the match floor; a small store still returns everything."""
         backend = BM25Backend()
-        results = await recall_learnings(
-            ALL_LEARNINGS,
-            "conda environment",
-            threshold=None,
-            backend=backend,
-        )
+        results = await recall_learnings(ALL_LEARNINGS, "conda environment", threshold=None, backend=backend)
+        assert len(results) == len(ALL_LEARNINGS)
         for r in results:
-            assert r["score"] >= backend.default_threshold
+            assert r["matched"] == (r["score"] >= backend.default_threshold)
+        assert any(r["matched"] for r in results) and not all(r["matched"] for r in results)
 
-    async def test_explicit_threshold_overrides_default(self):
-        """Explicit threshold takes precedence over backend default."""
+    async def test_explicit_threshold_filters_by_the_legacy_combined_score(self):
+        """An explicit threshold is an absolute cutoff on the legacy score; only passing learnings return."""
         backend = BM25Backend()
-        results_low = await recall_learnings(
-            ALL_LEARNINGS,
-            "conda environment",
-            threshold=0.01,
-            backend=backend,
-        )
-        results_default = await recall_learnings(
-            ALL_LEARNINGS,
-            "conda environment",
-            threshold=None,
-            backend=backend,
-        )
-        assert len(results_low) >= len(results_default)
+        strict = await recall_learnings(ALL_LEARNINGS, "conda environment", threshold=0.01, backend=backend)
+        loose = await recall_learnings(ALL_LEARNINGS, "conda environment", threshold=0.0, backend=backend)
+        assert all(r["score"] >= 0.01 and r["matched"] for r in strict)
+        assert len(loose) == len(ALL_LEARNINGS) and 0 < len(strict) < len(loose)
 
 
 # ── Recall tracking tests ────────────────────────────────────────────────
@@ -900,3 +887,137 @@ class TestBM25VsJaccardRankAgreement:
         jaccard_results = sorted(await jaccard.score_batch(learnings, query), key=lambda x: x[1], reverse=True)
 
         assert bm25_results[0][0] == jaccard_results[0][0]  # Same top result
+
+
+# ── Text-only similarity and query cleaning ───────────────────────────────
+
+
+class TestTextScores:
+    async def test_bm25_text_scores_match_an_independent_calculation(self):
+        backend = BM25Backend()
+        text = await backend.text_scores(ALL_LEARNINGS, "conda environment")
+        docs = [_tokenize(lrn.content, stem=True) for lrn in ALL_LEARNINGS]
+        index = _BM25Index(docs, k1=1.5, b=0.75)
+        q = _tokenize("conda environment", stem=True)
+        expected = [_normalize_bm25(index.score(q, i)) for i in range(len(ALL_LEARNINGS))]
+        assert text == pytest.approx(expected)
+        assert text[0] > 0.0 and text[2] == 0.0
+
+    async def test_bm25_score_batch_is_text_plus_tag_mixture(self):
+        backend = BM25Backend(tag_weight=0.3)
+        text = await backend.text_scores(ALL_LEARNINGS, "conda environment")
+        combined = dict(await backend.score_batch(ALL_LEARNINGS, "conda environment", ["conda", "env"]))
+        for i, lrn in enumerate(ALL_LEARNINGS):
+            assert combined[i] == pytest.approx(0.7 * text[i] + 0.3 * _tag_overlap(lrn.tags, ["conda", "env"]))
+
+    async def test_jaccard_text_scores_full_list(self):
+        backend = JaccardBackend()
+        text = await backend.text_scores(ALL_LEARNINGS, "conda environment")
+        assert text == [jaccard_similarity(lrn.content, "conda environment") for lrn in ALL_LEARNINGS]
+        assert len(set(text)) > 1
+
+    async def test_jaccard_score_batch_delegates_to_text_scores(self):
+        backend = JaccardBackend(tag_weight=0.5)
+        backend.text_scores = AsyncMock(return_value=[0.5, 0.25, 0.0, 1.0])  # type: ignore[method-assign]
+        combined = dict(await backend.score_batch(ALL_LEARNINGS, "ctx", ["conda"]))
+        assert combined[0] == pytest.approx(0.5 * 0.5 + 0.5 * _tag_overlap(CONDA_LEARNING.tags, ["conda"]))
+        assert combined[2] == pytest.approx(0.0)
+        assert combined[3] == pytest.approx(0.5 * 1.0)
+
+    async def test_text_scores_align_and_handle_empty(self):
+        for backend in (JaccardBackend(), BM25Backend()):
+            assert await backend.text_scores([], "x") == []
+            assert len(await backend.text_scores(ALL_LEARNINGS, "x")) == len(ALL_LEARNINGS)
+
+    async def test_llm_text_scores_prefilter_and_densify_through_the_real_path(self):
+        """61 learnings: BM25 pre-filters to 50, the LLM scores those, the rest are 0.0."""
+        config = LearnConfig(openai_api_key="test-key-123", llm_model="gpt-5.4-mini", llm_enabled=True, strict_llm=True)
+        many = [Learning(id=f"lrn_{i:03d}", content=f"learning number {i}") for i in range(1, 62)]
+        many[60] = Learning(id="lrn_061", content="the conda environment note")  # the only lexical hit
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps({"0": 0.9})  # the pre-filter put the hit first
+        with (
+            patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", True),
+            patch("trace_mcp.extensions.learn.matching.AsyncOpenAI") as mock_cls,
+        ):
+            mock_client = AsyncMock()
+            mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+            mock_cls.return_value = mock_client
+            from trace_mcp.extensions.learn.matching import LLMBackend
+
+            backend = LLMBackend(config)
+            backend._client = mock_client
+            scores = await backend.text_scores(many, "conda environment")
+        assert len(scores) == 61
+        mock_client.chat.completions.create.assert_awaited_once()
+        assert scores[60] == 0.9
+        assert sum(1 for sc in scores if sc > 0.0) == 1
+
+    async def test_llm_and_embedding_text_scores_handle_empty_input(self):
+        config = LearnConfig(openai_api_key="test-key-123", llm_enabled=True, strict_llm=True)
+        with (
+            patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", True),
+            patch("trace_mcp.extensions.learn.matching.AsyncOpenAI"),
+        ):
+            from trace_mcp.extensions.learn.matching import EmbeddingBackend, LLMBackend
+
+            assert await LLMBackend(config).text_scores([], "x") == []
+        provider = AsyncMock()
+        provider.model_name = "m"
+        assert await EmbeddingBackend(provider=provider).text_scores([], "x") == []
+        provider.embed_query.assert_not_awaited()
+
+    async def test_llm_text_scores_densify_without_tag_context(self):
+        config = LearnConfig(openai_api_key="sk-test", llm_enabled=True, strict_llm=True)
+        with (
+            patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", True),
+            patch("trace_mcp.extensions.learn.matching.AsyncOpenAI"),
+        ):
+            from trace_mcp.extensions.learn.matching import LLMBackend
+
+            backend = LLMBackend(config)
+        backend.score_batch = AsyncMock(return_value=[(2, 0.9), (0, 0.4)])  # type: ignore[method-assign]
+        assert await backend.text_scores(ALL_LEARNINGS, "ctx") == [0.4, 0.0, 0.9, 0.0]
+        backend.score_batch.assert_awaited_once_with(ALL_LEARNINGS, "ctx", None)
+
+
+class TestCleanQuery:
+    def test_strips_run_tokens_hex_and_uuids_and_splits_slugs(self):
+        from trace_mcp.extensions.learn.matching import clean_query
+
+        q = "RUN_TOKEN=3b09311f2873 task A norrell_photonics 550e8400-e29b-41d4-a716-446655440000 deadbeefcafe"
+        assert clean_query(q) == "task A norrell photonics"
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("Fix the recall threshold in trace-learn", "Fix the recall threshold in trace-learn"),
+            ("Fix recall", "Fix recall"),
+            ("Why does ssl_verify=false fail?", "Why does ssl verify false fail?"),
+            ("RUN_TOKEN=session_123 task A", "task A"),
+            ("SESSION_ID=abc task", "task"),
+            (
+                "Compare isolation_level=serializable versus isolation_level=read_committed",
+                "Compare isolation level serializable versus isolation level read committed",
+            ),
+            ("debug _load_config", "debug load config"),
+            ("a __ b", "a b"),
+            ("123456 task", "task"),
+            ("1234567 task", "task"),
+            ("12345 task", "12345 task"),
+            ("ticket 3b09311f2873.", "ticket"),
+        ],
+    )
+    def test_keeps_topical_words_and_drops_labels(self, text: str, expected: str):
+        from trace_mcp.extensions.learn.matching import clean_query
+
+        assert clean_query(text) == expected
+
+    @pytest.mark.parametrize(
+        "text", ["RUN_TOKEN=abcdef123456", "RUN_TOKEN=abcdef123456 deadbeefcafe 123456", "", "   "]
+    )
+    def test_returns_original_when_nothing_survives(self, text: str):
+        from trace_mcp.extensions.learn.matching import clean_query
+
+        assert clean_query(text) == text
