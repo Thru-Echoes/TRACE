@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import inspect
 
+from trace_mcp import extension_hooks as hooks
 from trace_mcp import server
 from trace_mcp.schema import Session, SessionMetadata
 from trace_mcp.storage.json_file import JsonFileStorage
@@ -90,3 +91,114 @@ async def test_session_brief_no_match_when_project_absent(tmp_path):
     assert brief["matched"] == 0
     assert brief["most_recent"] is None
     assert brief["capped"] is False
+
+
+# ── recall_query, notice and echo on the session banner ───────────────────
+
+
+async def test_recall_query_overrides_description_and_is_echoed(tmp_path, monkeypatch):
+    _isolate(monkeypatch, tmp_path)
+    seen: list[tuple] = []
+
+    async def fake(project, context, tags, limit):
+        seen.append((project, context, tags, limit))
+        return hooks.RecallResult(results=[], notice="no learning cleared the floor (z>=1): 2 scored")
+
+    hooks.clear_hooks()
+    hooks.register_recall_hook(fake)
+    try:
+        out = await server.trace_start_session(
+            project="P",
+            description="RUN_TOKEN=abc task A",
+            tags=["t"],
+            recall_learnings=True,
+            recall_limit=4,
+            recall_query="scope 2 units",
+        )
+    finally:
+        hooks.clear_hooks()
+    assert seen == [("P", "scope 2 units", ["t"], 4)]
+    assert "Recall: no learning cleared the floor (z>=1): 2 scored" in out
+    assert "Recall query: scope 2 units" in out
+    assert "Relevant learnings from past sessions" not in out
+    # The recall query is a search text only: the persisted session keeps the real description and tags.
+    assert server._current_session_id is not None
+    saved = await server.storage.get_session(server._current_session_id)
+    assert saved is not None
+    assert saved.metadata.description == "RUN_TOKEN=abc task A" and saved.metadata.tags == ["t"]
+
+
+async def test_banner_echoes_recall_query_even_without_a_hook(tmp_path, monkeypatch):
+    """Visible even when no extension answers, so a client can tell the argument was not dropped."""
+    _isolate(monkeypatch, tmp_path)
+    hooks.clear_hooks()
+    out = await server.trace_start_session(project="P", recall_learnings=True, recall_query="only a query")
+    assert "Recall query: only a query" in out
+    assert "Relevant learnings from past sessions" not in out
+
+
+async def test_recall_query_is_echoed_but_not_recalled_when_recall_is_off(tmp_path, monkeypatch):
+    _isolate(monkeypatch, tmp_path)
+    calls: list[tuple] = []
+
+    async def fake(project, context, tags, limit):
+        calls.append((project, context))
+        return hooks.RecallResult()
+
+    hooks.clear_hooks()
+    hooks.register_recall_hook(fake)
+    try:
+        out = await server.trace_start_session(project="P", description="d", recall_query="q")
+    finally:
+        hooks.clear_hooks()
+    assert calls == []  # recall stays opt-in
+    assert "Recall query: q (recall_learnings is off; nothing was recalled)" in out
+    assert "Relevant learnings" not in out and "Recall:" not in out
+
+
+async def test_blank_recall_query_is_acknowledged_and_the_description_is_used(tmp_path, monkeypatch):
+    _isolate(monkeypatch, tmp_path)
+    seen: list[str] = []
+
+    async def fake(project, context, tags, limit):
+        seen.append(context)
+        return hooks.RecallResult()
+
+    hooks.clear_hooks()
+    hooks.register_recall_hook(fake)
+    try:
+        out = await server.trace_start_session(
+            project="P", description="scope 2 units", recall_learnings=True, recall_query="   "
+        )
+        off = await server.trace_start_session(project="P", description="scope 2 units", recall_query="")
+    finally:
+        hooks.clear_hooks()
+    assert seen == ["scope 2 units"]
+    assert "Recall query: (blank, used the description)" in out
+    assert "Recall query: (blank)" in off
+
+
+async def test_banner_renders_results_and_notice_together(tmp_path, monkeypatch):
+    _isolate(monkeypatch, tmp_path)
+
+    async def fake(project, context, tags, limit):
+        assert (project, context, tags, limit) == ("P", "RUN_TOKEN=abc task A", None, 5)  # the description, as given
+        return hooks.RecallResult(
+            results=[
+                {"learning": {"category": "gotcha", "content": "x"}, "score": 0.5, "matched": True},
+                {"learning": {"category": "learning", "content": "y"}, "score": 0.1, "matched": False},
+            ],
+            notice="query cleaned to 'task A'",
+        )
+
+    hooks.clear_hooks()
+    hooks.register_recall_hook(fake)
+    try:
+        out = await server.trace_start_session(project="P", description="RUN_TOKEN=abc task A", recall_learnings=True)
+    finally:
+        hooks.clear_hooks()
+    assert "  - [gotcha] x (relevance: 50%)" in out
+    assert "  - [learning] y (relevance: 10%, weak match)" in out
+    assert "Recall: query cleaned to 'task A'" in out
+    assert "Recall query:" not in out  # the description was used; nothing to echo
+    assert out.rstrip().endswith("All tool calls, decisions, and annotations will be recorded.")
