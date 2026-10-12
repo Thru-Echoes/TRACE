@@ -421,6 +421,31 @@ class TestBackendSelection:
             with pytest.raises(LLMFallbackError, match="Strict LLM mode"):
                 get_default_backend(config)
 
+    @pytest.mark.parametrize("local_only", [False, True])
+    def test_a_key_alone_does_not_make_strict_mode_refuse_keyword_recall(self, local_only: bool):
+        """Nothing cloud-related was asked for, so the only permitted path (BM25) must not be refused."""
+        config = LearnConfig(
+            openai_api_key="sk-test",
+            llm_enabled=False,
+            strict_llm=True,
+            local_only=local_only,
+            embedding_backend="auto",
+        )
+        with (
+            patch("trace_mcp.extensions.learn.embeddings._HAS_FASTEMBED", False),
+            patch("trace_mcp.extensions.learn.embeddings._HAS_MODEL2VEC", True),
+        ):
+            backend = get_default_backend(config)
+        assert isinstance(backend, BM25Backend)
+
+    def test_strict_mode_still_refuses_when_openai_embeddings_were_requested_but_unavailable(self):
+        from trace_mcp.extensions.learn.config import LLMFallbackError
+
+        config = LearnConfig(openai_api_key="sk-test", llm_enabled=False, strict_llm=True, embedding_backend="openai")
+        with patch("trace_mcp.extensions.learn.embeddings._HAS_OPENAI", False):
+            with pytest.raises(LLMFallbackError):
+                get_default_backend(config)
+
     def test_llm_when_configured(self):
         config = LearnConfig(openai_api_key="sk-test", llm_enabled=True, embedding_backend="none")
         with patch("trace_mcp.extensions.learn.matching._HAS_OPENAI", True):

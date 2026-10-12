@@ -163,7 +163,7 @@ editing a `.env`.
 
 **Permissive mode** (`TRACE_STRICT_LLM=false`) — LLM failures fall back to BM25/rule-based with a `WARNING` log. Use this in environments where degraded operation is preferable to hard failures (e.g., CI fixtures, or environments without reliable network access).
 
-If `OPENAI_API_KEY` is not set at all, strict mode is disabled automatically and the local embedding tier (or BM25 without one) is used without error — there's nothing to be strict about.
+If `OPENAI_API_KEY` is not set at all, strict mode is disabled automatically and the local embedding tier (or BM25 without one) is used without error — there's nothing to be strict about. A key alone does not change that: strict mode refuses the keyword fallback only when a cloud path was requested (`TRACE_LLM_ENABLED=true` or `TRACE_EMBEDDING_BACKEND=openai`) and cannot be served, or when an explicitly requested local backend is not installed.
 
 ## Storage
 
