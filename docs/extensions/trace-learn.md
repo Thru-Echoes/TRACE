@@ -6,7 +6,7 @@ The `trace-learn` extension is loaded by default. It provides cross-session memo
 
 Knowledge flows through three layers:
 
-1. **Session start** — When a new session starts, TRACE auto-recalls the most relevant past learnings based on the session description and tags.
+1. **Session start** — With `recall_learnings=True`, TRACE recalls past learnings for the session description (or `recall_query` when the description is an identifier or run label) and tags, and says what the recall did.
 2. **On-demand search** — At any time, `trace_learn_recall` can search for relevant knowledge.
 3. **Decision proposal** — When a decision is proposed, related past learnings are surfaced as warnings (e.g., a past correction about using the wrong conda environment).
 
@@ -14,15 +14,59 @@ At session end, new learnings are automatically extracted from annotations and r
 
 ## Matching backends
 
-trace-learn uses a tiered matching system for finding relevant learnings:
-
 | Backend | When used | How it works |
 |---------|-----------|--------------|
-| **LLM** (primary) | When `openai` is installed and `OPENAI_API_KEY` is configured | Sends context + candidate learnings to an OpenAI model for semantic relevance scoring. Understands synonyms, abbreviations, and conceptual similarity. Falls back to BM25 on any error. |
-| **BM25** (fallback) | When no API key is available, or as pre-filter for LLM | Pure-Python BM25 ranking with stemming and tag boosting. Handles term frequency and document length normalization. Zero external dependencies. |
-| **Jaccard** (legacy) | Backward compatibility only | Simple token-overlap scoring. Kept as absolute fallback. |
+| **Embedding + BM25 hybrid** (default when `fastembed` is installed) | `fastembed` is installed (the default launch extras include it); OpenAI embeddings only on explicit opt-in; the static `model2vec` tier only on explicit request, since it measured below BM25 alone | Each learning gets a cosine similarity (the query is encoded separately from stored documents) and a BM25 score; the two rank lists are fused by reciprocal rank fusion (k=60). Results sort by fused score, then raw similarity, then decay, then newest creation time: decay scales the displayed score but never reorders candidates whose evidence differs. Tag overlap joins the fusion only when the caller passes tags that some learning shares. |
+| **LLM** (opt-in) | `TRACE_LLM_ENABLED=true` + key and no embedding provider | Sends context + candidates to an OpenAI model for relevance scores. Falls back to BM25 on error. |
+| **BM25** (default without `fastembed`) | No transformer provider and no LLM | Pure-Python BM25 with stemming. Zero external dependencies. On the benchmark store it matched the best hybrid on ordinary queries. |
+| **Jaccard** (legacy) | Backward compatibility only | Token overlap. |
 
-**Auto-selection:** LLM if the `openai` package is installed and an API key is configured, otherwise BM25.
+**Auto-selection:** fastembed → LLM → BM25 alone. The
+`backend` field of every recall response names what ranked it, for example
+`hybrid:embedding:minishlab/potion-retrieval-32M+bm25`.
+
+## How a recall is scored
+
+Recall ranks, it does not cut. Every result carries `score` (similarity × decay),
+`matched`, and `signals` (`similarity`, `z`, `bm25`, `tag_overlap`, `decay`, `fused`),
+so the session's model can judge relevance itself.
+
+- **Floor, not cutoff.** Cosine values are not comparable across models, and on the
+  project's own 352-learning benchmark store no absolute cutoff separated relevant from
+  irrelevant learnings for any model tried. A candidate is `matched` when its similarity
+  is at least one standard deviation above the store's mean for this query (`z >= 1`), or
+  it has a lexical hit (`bm25 >= 0.15`), or it shares a tag with the query.
+- **Small stores** (fewer than 8 learnings) skip the z floor, which means nothing on so
+  few items, and return everything up to the limit, ranked, ties newest-first, each
+  flagged by the remaining signals. A chain of sessions therefore always sees its own
+  notes.
+- **Weak candidates.** When fewer than `limit` learnings are matched, up to three of the
+  nearest follow with `matched: false`. They never count as recalled (no `recall_count`
+  change) and never appear in decision warnings.
+- **The response says what happened.** `trace_learn_recall` reports `matched`, `scored`,
+  `floor`, `backend` and the `query` actually scored; a `notice` field explains an empty,
+  small-store or cleaned-query recall. The session-start banner carries the same notice.
+- **Explicit `threshold`** on `trace_learn_recall` runs the legacy path: the backend's
+  combined score (similarity mixed with tag overlap) times decay, filtered by
+  `score >= threshold` and ordered by that score, over the candidates the backend scored.
+- **Decay.** The displayed `score` is similarity × `2^(-age / half_life)` (default half-life
+  365 days, measured from the last time the learning surfaced); learnings surfaced three or
+  more times never drop below 0.8. Decay does not reorder candidates with different
+  evidence; it only breaks ties after fused score and similarity (so an evergreen learning
+  outranks a fresher one of equal evidence). Measured on the benchmark store, letting decay
+  scale the fused score cost 0.17 MRR@10 for BM25 alone, because adjacent fused ranks differ
+  by a few percent while a 365-day decay spans up to half. The explicit-`threshold` legacy
+  path still orders by its decayed combined score. See the configuration table for the knobs.
+
+## Query cleaning
+
+A session description can be a run label plus a slug (`RUN_TOKEN=3b09311f2873 task A
+norrell_photonics`), which carries almost no topical signal for any ranker. Before
+scoring, recall drops bare hex runs, uuids, long digit runs, upper-case `KEY=value`
+labels and assignments whose value is one of those, and splits `snake_case` into words.
+Lower-case assignments with topical values stay as words (`ssl_verify=false` becomes
+`ssl verify false`). When nothing topical survives, the original text is used. The
+cleaned text is reported as `query`, and the notice says when cleaning changed it.
 
 ## BM25 stemming
 
@@ -35,17 +79,19 @@ BM25 includes a lightweight suffix-stripping stemmer that handles common English
 
 This ensures that "decisions" in a query matches "decision" in a stored learning, and "logging" matches "log" — a class of morphological mismatches that previously caused recall failures.
 
-## Per-backend thresholds
+## Match floors per backend
 
-Each backend has a tuned default threshold to balance recall against false positives:
+Without an explicit `threshold`, each non-embedding backend marks a result matched at its
+own floor; the embedding backend uses the relative floor described above.
 
-| Backend | Default threshold | Rationale |
-|---------|-------------------|-----------|
-| BM25 | 0.15 | Higher than naive 0.1 to filter keyword-overlap noise |
-| LLM | 0.20 | LLM scores are more semantically meaningful |
-| Jaccard | 0.10 | Legacy, more permissive |
+| Backend | Match floor |
+|---------|-------------|
+| Embedding + BM25 hybrid | `z >= 1`, or `bm25 >= 0.15`, or a shared tag |
+| BM25 | 0.15 |
+| LLM | 0.20 |
+| Jaccard | 0.10 |
 
-Thresholds can be overridden per-call via the `threshold` parameter on `trace_learn_recall`.
+Passing `threshold` to `trace_learn_recall` switches to the legacy absolute cutoff.
 
 ## Extraction
 
@@ -117,7 +163,7 @@ editing a `.env`.
 
 **Permissive mode** (`TRACE_STRICT_LLM=false`) — LLM failures fall back to BM25/rule-based with a `WARNING` log. Use this in environments where degraded operation is preferable to hard failures (e.g., CI fixtures, or environments without reliable network access).
 
-If `OPENAI_API_KEY` is not set at all, strict mode is disabled automatically and BM25 is used without error — there's nothing to be strict about.
+If `OPENAI_API_KEY` is not set at all, strict mode is disabled automatically and the local embedding tier (or BM25 without one) is used without error — there's nothing to be strict about.
 
 ## Storage
 
