@@ -109,13 +109,21 @@ def recall_notice(summary: matching.RecallSummary, *, original_query: str) -> st
     scoring. It is what makes an empty recall distinguishable from an empty store.
     """
     parts: list[str] = []
+    if summary.degraded:
+        parts.append(f"query embedding failed ({summary.degraded}); ranked by keywords only")
+    best = f"{summary.best_similarity:.2f}" if summary.best_similarity is not None else "n/a"
+    weak = f"; {summary.returned} nearest shown as weak matches" if summary.returned else "; nothing returned"
     if summary.store_size == 0:
         parts.append("no learnings stored yet for this project")
+    elif summary.gated:
+        gate = f"{summary.gate:g}" if summary.gate is not None else "n/a"
+        parts.append(
+            f"nothing in the store resembles this query (best similarity {best} under the {gate} gate "
+            f"for {summary.backend}){weak}"
+        )
     elif summary.small_store:
         parts.append(f"small store of {summary.store_size}: all {summary.returned} returned, {summary.matched} matched")
     elif summary.matched == 0:
-        best = f"{summary.best_similarity:.2f}" if summary.best_similarity is not None else "n/a"
-        weak = f"; {summary.returned} nearest shown as weak matches" if summary.returned else "; nothing returned"
         parts.append(
             f"no learning cleared the floor ({summary.floor}): {summary.scored} scored, "
             f"best similarity {best} under {summary.backend}{weak}"
@@ -392,6 +400,7 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                 limit=limit,
                 backend=backend,
                 decay_config=_decay_params,
+                gate=_eff.recall_gate,
             )
             if any(r["matched"] for r in outcome.results) or embedded:
                 _persist_recall_bookkeeping(ks, project)
@@ -509,6 +518,7 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                     limit=limit,
                     backend=backend,
                     decay_config=_decay_params,
+                    gate=_eff.recall_gate,
                 )
                 results = outcome.results
                 bookkeeping_notice: str | None = None

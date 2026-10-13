@@ -199,6 +199,9 @@ class LearnConfig:
     # point it at any local server (Ollama / LM Studio / text-embeddings-inference
     # / vLLM). None → the SDK default (api.openai.com or its own OPENAI_BASE_URL).
     embedding_base_url: str | None = None
+    # Absolute `matched` gate for recall: "auto" (calibrated per model, see
+    # matching.SIMILARITY_GATES), "off", or a number. Env: TRACE_RECALL_GATE.
+    recall_gate: str = "auto"
     # Where the key came from — "environment", "project", "global", or None.
     # Reported (never the key itself) so a project silently borrowing the
     # machine-wide credential is visible rather than assumed intentional.
@@ -282,6 +285,7 @@ def load_config() -> LearnConfig:
         "TRACE_EMBEDDING_MODEL",
         "OPENAI_BASE_URL",
         "TRACE_OPENAI_BASE_URL",
+        "TRACE_RECALL_GATE",
     ):
         env_val = os.environ.get(key)
         if env_val is not None and env_val.strip():
@@ -384,6 +388,7 @@ def load_config() -> LearnConfig:
         bm25_k1=float(merged.get("TRACE_BM25_K1", "1.5")),
         bm25_b=float(merged.get("TRACE_BM25_B", "0.75")),
         tag_weight=float(merged.get("TRACE_TAG_WEIGHT", "0.3")),
+        recall_gate=merged.get("TRACE_RECALL_GATE", "auto").strip() or "auto",
         decay_enabled=decay_enabled,
         decay_half_life_days=float(merged.get("TRACE_DECAY_HALF_LIFE_DAYS", "365.0")),
         evergreen_recall_threshold=int(merged.get("TRACE_EVERGREEN_RECALL_THRESHOLD", "3")),
