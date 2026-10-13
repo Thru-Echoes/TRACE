@@ -41,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The default OpenAI model for LLM relevance scoring and learning extraction is
+  now `gpt-6-luna`** (previously `gpt-5.4-mini`). It applies when neither
+  `TRACE_LLM_MODEL` nor `TRACE_LLM_EXTRACTION_MODEL` is set. The id now lives in one
+  constant, `DEFAULT_LLM_MODEL`, which the dataclass defaults and the config loader's
+  fallbacks share, and a test fails when the README configuration table or the
+  trace-learn doc restates a different id, so the docs cannot drift from the code
+  again. Cloud matching and extraction stay opt-in, and the embedding model is
+  unchanged.
 - **The docs describe OpenAI embeddings as a measured, scoped opt-in.** On fifteen real
   stores with judged relevance, `text-embedding-3-small` scored 0.028 nDCG@10 above the
   local `arctic-embed-s` default (90% interval +0.013 to +0.044), below the +0.05 bar for

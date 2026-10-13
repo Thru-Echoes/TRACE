@@ -404,7 +404,7 @@ class TestLLMExtraction:
     def _make_config(self, strict: bool = False) -> LearnConfig:
         return LearnConfig(
             openai_api_key="test-key",
-            llm_extraction_model="gpt-5.4-mini",
+            llm_extraction_model="gpt-6-luna",
             llm_enabled=True,
             strict_llm=strict,
         )

@@ -332,8 +332,8 @@ class TestE2EWithLLM:
     def _make_config(self) -> LearnConfig:
         return LearnConfig(
             openai_api_key="test-key",
-            llm_model="gpt-5.4-mini",
-            llm_extraction_model="gpt-5.4-mini",
+            llm_model="gpt-6-luna",
+            llm_extraction_model="gpt-6-luna",
             llm_enabled=True,
         )
 

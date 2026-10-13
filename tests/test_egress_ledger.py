@@ -89,7 +89,7 @@ class TestAttestEgress:
         attest_egress(
             provider="openai",
             endpoint="chat.completions",
-            model="gpt-5.4-mini",
+            model="gpt-6-luna",
             purpose="extraction",
             content_class="session-events",
             item_count=7,

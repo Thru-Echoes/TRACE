@@ -401,8 +401,8 @@ A cloud call attempted with no key, or with a key the provider rejects, is repor
 | `AI_GATEWAY_API_KEY` | — | Vercel AI Gateway credential, read only when `TRACE_JEV_PROVIDER=vercel_gateway` |
 | `TRACE_JEV_MODEL` | provider default | `jev-latest` for direct TypeSafe; fixed to `typesafe-ai/jev` for Gateway |
 | `TRACE_JEV_GATEWAY_ZERO_DATA_RETENTION` | `false` | Explicit Gateway `zeroDataRetention` provider option |
-| `TRACE_LLM_MODEL` | `gpt-5.4-mini` | Model for LLM relevance scoring |
-| `TRACE_LLM_EXTRACTION_MODEL` | `gpt-5.4-mini` | Model for LLM learning extraction |
+| `TRACE_LLM_MODEL` | `gpt-6-luna` | Model for LLM relevance scoring |
+| `TRACE_LLM_EXTRACTION_MODEL` | `gpt-6-luna` | Model for LLM learning extraction |
 | `TRACE_LLM_ENABLED` | `false` | Cloud LLM matching/extraction is opt-in: set `true` (with `OPENAI_API_KEY`) to enable |
 | `TRACE_STRICT_LLM` | `true` if key set, else `false` | Fail loudly on LLM errors instead of silent BM25 fallback |
 | `TRACE_BM25_K1` | `1.5` | BM25 term frequency saturation parameter |

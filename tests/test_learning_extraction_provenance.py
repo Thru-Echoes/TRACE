@@ -58,7 +58,7 @@ class TestExtractionMethodProvenance:
 
         config = LearnConfig(
             openai_api_key="sk-test",
-            llm_extraction_model="gpt-5.4-mini",
+            llm_extraction_model="gpt-6-luna",
             llm_enabled=True,
             strict_llm=False,
         )
@@ -90,7 +90,7 @@ class TestExtractionMethodProvenance:
         assert new_ids
         lrn = ks.learnings[0]
         assert lrn.extraction_method == "llm"
-        assert lrn.generated_by == "gpt-5.4-mini"
+        assert lrn.generated_by == "gpt-6-luna"
 
     def test_manual_add_marks_manual(self):
         ks = KnowledgeStore(project="prov-test-project")
@@ -119,7 +119,7 @@ class TestExtractionMethodProvenance:
         """learning_to_dict (tool/API serialization) must carry the fields so
         clients can distinguish model-generated from quoted content."""
         ks = KnowledgeStore(project="prov-test-project")
-        lrn = add_learning(ks, content="x", extraction_method="llm", generated_by="gpt-5.4-mini")
+        lrn = add_learning(ks, content="x", extraction_method="llm", generated_by="gpt-6-luna")
         d = learning_to_dict(lrn)
         assert d["extraction_method"] == "llm"
-        assert d["generated_by"] == "gpt-5.4-mini"
+        assert d["generated_by"] == "gpt-6-luna"
