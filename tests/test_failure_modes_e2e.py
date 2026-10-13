@@ -1161,7 +1161,7 @@ class TestProtocolViolations:
                     rid,
                     server="analysis-pipeline",
                     tool_name="run_model",
-                    input={"model": "gpt-5.4-mini", "data": "fabricated_dataset.csv"},
+                    input={"model": "gpt-6-luna", "data": "fabricated_dataset.csv"},
                     output="{'accuracy': 0.99}",
                     status="success",
                     duration_ms=1234,
