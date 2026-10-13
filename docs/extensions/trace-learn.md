@@ -16,7 +16,7 @@ At session end, new learnings are automatically extracted from annotations and r
 
 | Backend | When used | How it works |
 |---------|-----------|--------------|
-| **Embedding + BM25 hybrid** (default when `fastembed` is installed) | `fastembed` is installed (the default launch extras include it); OpenAI embeddings only on explicit opt-in; the static `model2vec` tier only on explicit request, since it measured below BM25 alone | Each learning gets a cosine similarity (the query is encoded separately from stored documents) and a BM25 score; the two rank lists are fused by reciprocal rank fusion (k=60). Results sort by fused score, then raw similarity, then decay, then newest creation time: decay scales the displayed score but never reorders candidates whose evidence differs. Tag overlap joins the fusion only when the caller passes tags that some learning shares. |
+| **Embedding + BM25 hybrid** (default when `fastembed` is installed) | `fastembed` is installed (the default launch extras include it); OpenAI embeddings only on explicit opt-in (measured about 0.03 nDCG@10 better than the local default on judged queries, at 200 ms per recall, no recall offline, and full text egress; see `docs/embeddings.md`); the static `model2vec` tier only on explicit request, since it measured below BM25 alone | Each learning gets a cosine similarity (the query is encoded separately from stored documents) and a BM25 score; the two rank lists are fused by reciprocal rank fusion (k=60). Results sort by fused score, then raw similarity, then decay, then newest creation time: decay scales the displayed score but never reorders candidates whose evidence differs. Tag overlap joins the fusion only when the caller passes tags that some learning shares. |
 | **LLM** (opt-in) | `TRACE_LLM_ENABLED=true` + key and no embedding provider | Sends context + candidates to an OpenAI model for relevance scores. Falls back to BM25 on error. |
 | **BM25** (default without `fastembed`) | No transformer provider and no LLM | Pure-Python BM25 with stemming. Zero external dependencies. On the benchmark store it matched the best hybrid on ordinary queries. |
 | **Jaccard** (legacy) | Backward compatibility only | Token overlap. |
@@ -42,10 +42,21 @@ so the session's model can judge relevance itself.
   irrelevant learnings for any model tried. A candidate is `matched` when its similarity
   is at least one standard deviation above the store's mean for this query (`z >= 1`), or
   it has a lexical hit (`bm25 >= 0.15`), or it shares a tag with the query.
+- **Gate, so that "matched" means something.** The relative floor always admits the top of
+  the store, even for a query about nothing in it (measured: 98 to 100% of items returned
+  for off-topic queries were `matched` under every backend). Recall therefore also checks
+  the best raw similarity of the whole store against an absolute gate calibrated per model
+  (`arctic-embed-s` 0.625, `text-embedding-3-small` 0.365, keyword ranking 0.76 on
+  normalised BM25 for stores of 30 or more learnings; see
+  [`docs/embeddings.md`](../embeddings.md#when-the-query-cannot-be-embedded-and-what-matched-guarantees)).
+  A strong lexical hit (normalised BM25 of 0.80 or more) overrides a failed gate. When the
+  gate fails nothing is `matched`, the nearest candidates come back as weak matches, the
+  response says `gated` and the notice reads "nothing in the store resembles this query".
+  Models not yet calibrated have no gate. `TRACE_RECALL_GATE=auto|off|<number>`.
 - **Small stores** (fewer than 8 learnings) skip the z floor, which means nothing on so
   few items, and return everything up to the limit, ranked, ties newest-first, each
-  flagged by the remaining signals. A chain of sessions therefore always sees its own
-  notes.
+  flagged by the remaining signals (the gate still applies to the flags). A chain of
+  sessions therefore always sees its own notes.
 - **Weak candidates.** When fewer than `limit` learnings are matched, up to three of the
   nearest follow with `matched: false`. They never count as recalled (no `recall_count`
   change) and never appear in decision warnings.
@@ -170,6 +181,10 @@ editing a `.env`.
 **Permissive mode** (`TRACE_STRICT_LLM=false`) — LLM failures fall back to BM25/rule-based with a `WARNING` log. Use this in environments where degraded operation is preferable to hard failures (e.g., CI fixtures, or environments without reliable network access).
 
 If `OPENAI_API_KEY` is not set at all, strict mode is disabled automatically and the local embedding tier (or BM25 without one) is used without error — there's nothing to be strict about. A key alone does not change that: strict mode refuses the keyword fallback only when a cloud path was requested (`TRACE_LLM_ENABLED=true` or `TRACE_EMBEDDING_BACKEND=openai`) and cannot be served, or when an explicitly requested local backend is not installed.
+
+The same split applies at query time. Every recall embeds the query, and that call can fail (no network for OpenAI embeddings, model files missing for `fastembed`). Permissive mode ranks that recall by keywords and says so: the `backend` field reads `bm25 (query embedding failed under ...)` and the `notice` names the failure. Strict mode raises instead. A refused key is reported in both modes. Previously this failure produced a bare "Failed to recall learnings".
+
+The `fastembed` model files live under `~/.trace/models` (override `TRACE_MODEL_CACHE_DIR`), not in the temporary directory fastembed would use on its own, so a cleared temp directory no longer costs a 130 MB re-download or an offline failure.
 
 ## Storage
 

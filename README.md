@@ -388,6 +388,8 @@ A cloud call attempted with no key, or with a key the provider rejects, is repor
 | `TRACE_LOCAL_ONLY` | `false` | No-egress kill switch. **Ratchets**: any source may set it `true`; none may set it `false` over a source that set it `true`. |
 | `TRACE_EMBEDDING_BACKEND` | `auto` | `auto` (fastembed when installed, otherwise BM25 alone), `fastembed`, `model2vec` (explicit only; the static tier measured below BM25), `openai` (explicit opt-in only), or `none` |
 | `TRACE_EMBEDDING_MODEL` | backend default | Model id for the chosen backend: `minishlab/potion-retrieval-32M` for model2vec, `snowflake/snowflake-arctic-embed-s` for fastembed, `text-embedding-3-small` for openai |
+| `TRACE_RECALL_GATE` | `auto` | Absolute gate behind recall's `matched` flag: `auto` (calibrated per model; a model not yet calibrated has none), `off`, or a number on the best raw similarity |
+| `TRACE_MODEL_CACHE_DIR` | `~/.trace/models/` | Where `fastembed` keeps its downloaded model files (fastembed's `FASTEMBED_CACHE_PATH` is honoured when this is unset) |
 | `TRACE_SESSIONS_DIR` | `~/.trace/sessions/` | Directory for session JSON files |
 | `TRACE_KNOWLEDGE_DIR` | `~/.trace/knowledge/` | Directory for trace-learn knowledge stores |
 | `TRACE_EGRESS_LOG` | `~/.trace/egress.jsonl` | Cloud-egress ledger: one JSONL line per cloud call trace-learn makes (the fact of the call — provider, endpoint, model, purpose, item count — never the content) |

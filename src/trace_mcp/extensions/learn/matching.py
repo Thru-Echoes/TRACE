@@ -532,9 +532,15 @@ class EmbeddingBackend:
         tag_weight: float = 0.3,
         bm25_fallback_k1: float = 1.5,
         bm25_fallback_b: float = 0.75,
+        strict: bool = False,
     ) -> None:
         self._provider = provider
         self._tag_weight = tag_weight
+        # Strict mode: a failed query embedding raises instead of ranking by keywords.
+        self.strict = strict
+        # Why the last ``text_scores`` call ranked by keywords instead of vectors, or None.
+        # Reset on every call; read by ``recall_ranked`` to label the result honestly.
+        self.fallback_reason: str | None = None
         # Lexical partner for hybrid fusion, and the stand-in scorer for
         # learnings that have no vector yet.
         self.bm25 = BM25Backend(
@@ -545,6 +551,7 @@ class EmbeddingBackend:
 
     async def text_scores(self, learnings: list[Learning], context: str) -> list[float]:
         """Cosine similarity in [0, 1] per learning; BM25 stand-in for learnings with no vector."""
+        self.fallback_reason = None
         if not learnings:
             return []
         scores = [0.0] * len(learnings)
@@ -557,7 +564,31 @@ class EmbeddingBackend:
 
             # Query-side encoding (instruction prefix where the model needs one);
             # documents were embedded with embed_texts when they were stored.
-            query_vec = await embed_query(self._provider, context)
+            try:
+                query_vec = await embed_query(self._provider, context)
+            except Exception as exc:
+                from trace_mcp.extensions.learn.config import ApiKeyRejectedError, LLMFallbackError
+
+                # A refused credential is a configuration failure and is reported as such in
+                # every mode. Anything else (network down, model files missing, provider bug)
+                # degrades to keyword ranking unless strict mode says a degraded answer is
+                # worse than no answer. Either way the caller learns what happened: this used
+                # to escape as a bare exception and surface as "Failed to recall learnings".
+                if isinstance(exc, ApiKeyRejectedError):
+                    raise
+                if self.strict:
+                    raise LLMFallbackError(
+                        f"Query embedding failed (provider={self._provider.model_name}): {exc}. "
+                        f"Strict mode is ON — set TRACE_STRICT_LLM=false to rank by keywords when "
+                        f"the embedding provider is unavailable."
+                    ) from exc
+                logger.warning(
+                    "Query embedding failed (provider=%s); ranking this recall by keywords only: %s",
+                    self._provider.model_name,
+                    exc,
+                )
+                self.fallback_reason = f"{type(exc).__name__}: {exc}"[:200]
+                return await self.bm25.text_scores(learnings, context)
             matrix = np.array([lrn.embedding for _, lrn in with_emb], dtype=np.float32)
             sims = cosine_similarity_matrix(query_vec, matrix)
             for j, (i, _) in enumerate(with_emb):
@@ -643,6 +674,7 @@ def get_default_backend(
             tag_weight=config.tag_weight,
             bm25_fallback_k1=config.bm25_k1,
             bm25_fallback_b=config.bm25_b,
+            strict=config.strict_llm,
         )
 
     # Tier 2: LLM backend (sends learnings to GPT for scoring)
@@ -737,6 +769,31 @@ Z_FLOOR = 1.0  # a candidate stands out when its similarity is >= 1 sd above the
 SMALL_STORE = 8  # below this many learnings a floor is statistically meaningless: return everything
 UNMATCHED_CAP = 3  # weak candidates appended when fewer than `limit` learnings cleared the floor
 
+# Query-level gates behind `matched`. The relative z floor ranks well within a query but says
+# nothing about whether anything in the store resembles the query at all: measured on 200
+# off-topic queries (cooking, hiking, generic web development) against five real stores, every
+# arm returned ten "matched" items for every one of them. An absolute gate on the best raw
+# similarity does separate: calibrated 2026-10-13 against those 200 off-topic queries and 147
+# real time-consistent queries over fifteen stores, with the lexical override below in force.
+# Cosine scales differ by model, so the gate is keyed by provider model name; a model that is
+# not listed has no gate (the previous behaviour) until it is calibrated the same way.
+SIMILARITY_GATES: dict[str, float] = {
+    "snowflake/snowflake-arctic-embed-s": 0.625,  # keeps 95% of real queries, rejects 93% of off-topic ones
+    "snowflake/snowflake-arctic-embed-m": 0.32,  # keeps 93%, rejects 90%
+    "text-embedding-3-small": 0.365,  # keeps 98%, rejects 93%
+}
+# A best normalised BM25 at or above this keeps a query open even when the similarity gate
+# fails: identifier-shaped queries embed poorly yet can match a learning word for word.
+LEXICAL_OVERRIDE = 0.80
+# Keyword-only ranking (no embedding provider, or the query embedding failed): off-topic
+# queries reached a best normalised BM25 of 0.70 (median) through incidental shared words,
+# real queries 0.88; this cut keeps about 90% of real queries and rejects about 90% of off-topic.
+BM25_GATE = 0.76
+# Normalised BM25 rides on the store's IDF scale, which grows with the number of learnings;
+# the calibration covered stores of 30 to 469. Below this size the automatic keyword gate is
+# not applied (cosine does not depend on store size, so the similarity gates always apply).
+GATE_MIN_STORE = 30
+
 
 @dataclass(frozen=True)
 class RecallSummary:
@@ -752,6 +809,43 @@ class RecallSummary:
     best_z: float | None
     small_store: bool
     query: str
+    # True when the best raw similarity fell under the model's absolute gate (and no lexical
+    # override applied): every result is then a weak candidate and nothing is `matched`.
+    gated: bool = False
+    gate: float | None = None
+    # Set when the query embedding failed and the ranking fell back to keywords (permissive
+    # mode): the reason, so the response can say what happened instead of passing it off.
+    degraded: str | None = None
+
+
+def resolve_gate(backend: MatchingBackend | None, setting: str | float | None = "auto") -> float | None:
+    """The absolute `matched` gate for *backend* under *setting*. Pure.
+
+    ``setting`` is the ``TRACE_RECALL_GATE`` value: ``"auto"`` picks the calibrated gate for the
+    backend (``SIMILARITY_GATES`` by provider model for an embedding backend, ``BM25_GATE`` for
+    keyword ranking, none for anything else), ``"off"`` or ``None`` disables the gate, and a
+    number is used as given. Any other text raises ``ValueError`` so a typo cannot silently
+    turn the gate off.
+    """
+    if setting is None:
+        return None
+    if isinstance(setting, bool):
+        raise ValueError(f"TRACE_RECALL_GATE must be 'auto', 'off' or a number, got {setting!r}")
+    if isinstance(setting, int | float):
+        return float(setting)
+    text = str(setting).strip().lower()
+    if text == "off":
+        return None
+    if text == "auto":
+        if isinstance(backend, EmbeddingBackend):
+            return SIMILARITY_GATES.get(backend._provider.model_name)
+        if isinstance(backend, BM25Backend):
+            return BM25_GATE
+        return None
+    try:
+        return float(text)
+    except ValueError:
+        raise ValueError(f"TRACE_RECALL_GATE must be 'auto', 'off' or a number, got {setting!r}") from None
 
 
 @dataclass
@@ -832,8 +926,16 @@ async def recall_ranked(
     backend: MatchingBackend | None = None,
     decay_config: DecayParams | None = None,
     now: datetime | None = None,
+    gate: str | float | None = "auto",
 ) -> RecallOutcome:
     """Rank *learnings* for *context* and say what happened.
+
+    ``gate`` is the ``TRACE_RECALL_GATE`` setting (see ``resolve_gate``): when the best raw
+    similarity of the whole store falls under the backend's absolute gate and no learning
+    has a strong lexical hit (``LEXICAL_OVERRIDE``), nothing is ``matched``, the nearest
+    candidates are returned as weak matches and the summary says ``gated``. When an
+    embedding backend could not embed the query and ranked by keywords instead, the summary
+    carries ``degraded`` with the reason and the backend name says so.
 
     Default (``threshold`` is None): reciprocal rank fusion of the backend's
     similarity ranks with BM25 ranks (embedding backends) and tag-overlap ranks
@@ -886,9 +988,15 @@ async def recall_ranked(
     tag_overlap = [_tag_overlap(lrn.tags, context_tags) for lrn in learnings]
     bm25: list[float] | None = None
     small = False
+    gated = False
+    gate_value: float | None = None
+    fallback: str | None = None
 
     if threshold is not None:
         pairs, raw = await _legacy_scores(backend, learnings, context, context_tags)
+        fallback = getattr(backend, "fallback_reason", None)
+        if fallback is not None:
+            name = f"bm25 (query embedding failed under {name})"
         scored_idx = [i for i, _ in pairs]
         score = {i: sc * decay[i] for i, sc in pairs}
         fused = score
@@ -909,9 +1017,32 @@ async def recall_ranked(
         scored_count = len(pairs)
     else:
         sims = await backend.text_scores(learnings, context)
-        hybrid = isinstance(backend, EmbeddingBackend)
+        # A permissive embedding backend that could not embed the query has returned
+        # keyword scores: rank them as keywords (no fusion with themselves) and say so.
+        fallback = getattr(backend, "fallback_reason", None)
+        hybrid = isinstance(backend, EmbeddingBackend) and fallback is None
+        if fallback is not None:
+            name = f"bm25 (query embedding failed under {name})"
         if hybrid:
+            assert isinstance(backend, EmbeddingBackend)
             bm25 = await backend.bm25.text_scores(learnings, context)
+        # Absolute gate: does anything in the store resemble the query at all? Keyword scores
+        # (a BM25 backend, or the fallback above) are gated as keywords.
+        gate_backend: MatchingBackend | None = backend
+        if fallback is not None and isinstance(backend, EmbeddingBackend):
+            gate_backend = backend.bm25
+        gate_value = resolve_gate(gate_backend, gate)
+        if (
+            gate_value is not None
+            and isinstance(gate_backend, BM25Backend)
+            and n < GATE_MIN_STORE
+            and str(gate).strip().lower() == "auto"
+        ):
+            gate_value = None  # the keyword gate is calibrated for stores of GATE_MIN_STORE and more
+        best_sim = max(sims) if sims else None
+        if gate_value is not None and best_sim is not None and best_sim < gate_value:
+            lexical_best = max(bm25) if bm25 else 0.0
+            gated = lexical_best < LEXICAL_OVERRIDE
         # Fusion lists: the similarity always; BM25 and tags only when they carry
         # any evidence, because an all-zero list adds the same constant to every
         # fused score and shifts ties. Decay is NOT in the fusion: it orders ties
@@ -941,9 +1072,17 @@ async def recall_ranked(
                 else f"z>={Z_FLOOR:g} or bm25>={lexical_floor:g}"
             )
         else:
-            base = float(getattr(backend, "default_threshold", 0.1))
+            # Keyword scores use the keyword floor, also when an embedding backend fell back.
+            base = (
+                BM25Backend.default_threshold
+                if fallback is not None
+                else float(getattr(backend, "default_threshold", 0.1))
+            )
             matched = {i: sims[i] >= base or tag_overlap[i] > 0.0 for i in range(n)}
             floor = f"small store of {n}: all returned; matched at score>={base:g}" if small else f"score>={base:g}"
+        if gated:
+            matched = dict.fromkeys(range(n), False)
+            floor += f"; gated: best similarity {best_sim:.2f} under the {gate_value:g} gate for {name}"
         order = sorted(range(n), key=lambda i: (fused[i], similarity[i], decay[i], learnings[i].created), reverse=True)
         if small:
             surfaced = order[:limit]
@@ -987,6 +1126,9 @@ async def recall_ranked(
         best_z=round(max(known_z), 2) if (known_z := [v for v in z.values() if v is not None]) else None,
         small_store=small,
         query=context,
+        gated=gated,
+        gate=gate_value,
+        degraded=fallback,
     )
     return RecallOutcome(results, summary)
 

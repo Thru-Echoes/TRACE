@@ -12,7 +12,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A failed query embedding no longer takes recall down with it.** Stored learnings
+  carry vectors, but every recall also embeds the query, and that call failed as a bare
+  exception when the OpenAI endpoint was unreachable or the `fastembed` model files were
+  missing, so the tool answered "Failed to recall learnings" in both strict and permissive
+  mode. In permissive mode the ranker now ranks that recall by keywords, names the
+  backend `bm25 (query embedding failed under ...)` and carries the reason in the
+  `notice`; strict mode raises `LLMFallbackError` as it does for other embedding
+  failures; a refused key is still reported as such in every mode.
+- **`matched` now means something.** The hybrid ranker's relative floor always admits
+  the top of the store, so on 200 off-topic queries against five real stores every
+  backend flagged 98 to 100% of returned items `matched`, and decision proposals received
+  warnings about anything. Recall now also gates on the best raw similarity of the whole
+  store, with per-model values calibrated against those queries and 147 real ones
+  (`arctic-embed-s` 0.625, `arctic-embed-m` 0.32, `text-embedding-3-small` 0.365;
+  keyword ranking 0.76 on normalised BM25 for stores of 30 or more learnings), a lexical
+  override at 0.80 for identifier-shaped queries, and no gate for models not yet
+  calibrated. A gated recall returns the nearest candidates as weak matches, says `gated`
+  in its summary and "nothing in the store resembles this query" in its notice, and feeds
+  no decision warnings. `TRACE_RECALL_GATE` accepts `auto`, `off`, or a number.
+- **`fastembed` model files live under `~/.trace/models`** (`TRACE_MODEL_CACHE_DIR`,
+  or fastembed's own `FASTEMBED_CACHE_PATH`) instead of the per-user temporary directory
+  fastembed defaults to, which the operating system may clear; a cleared cache cost a
+  130 MB re-download on the next recall, or a failed recall without network. The first
+  recall after upgrading downloads the model once into the new location.
+
 ### Changed
+
+- **The docs describe OpenAI embeddings as a measured, scoped opt-in.** On fifteen real
+  stores with judged relevance, `text-embedding-3-small` scored 0.028 nDCG@10 above the
+  local `arctic-embed-s` default (90% interval +0.013 to +0.044), below the +0.05 bar for
+  changing the recommendation, at 200 ms per recall against 6 ms, no recall offline,
+  four-times larger store files and full text egress; `arctic-embed-m` added nothing over
+  `arctic-embed-s`; the hybrid beat keyword-only ranking by 0.074. `docs/embeddings.md`
+  carries the numbers and the trade-off.
 
 - **The server runs on the mcp 2.x SDK; the dependency is now `mcp>=2,<3`.**
   mcp 2.0 removed `mcp.server.fastmcp`, which `server.py` imported at module
