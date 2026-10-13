@@ -15,11 +15,15 @@ From lightest/lowest-quality to heaviest/highest, and from fully-local to cloud:
 | `none` (BM25) | Lexical ranking only | none | none | lexical baseline (great for identifiers/paths) |
 | `model2vec` | Static token→vector (`potion-retrieval-32M`) | `numpy` (no PyTorch) | none | explicit only: on the benchmark below it scored below BM25 alone on ordinary queries, with no significant gain on paraphrases |
 | `fastembed` | Small ONNX transformer (`arctic-embed-s`) | `onnxruntime` (no PyTorch) | none¹ | **the local default**: on the benchmark below its point estimate equalled BM25's on ordinary queries and was significantly higher on paraphrased ones; fused with BM25 at recall |
-| `openai` | OpenAI embeddings API | `openai` | **content → endpoint** | highest, but off-machine |
+| `openai` | OpenAI embeddings API (`text-embedding-3-small`) | `openai` | **content → endpoint** | a small measured edge over `arctic-embed-s` (+0.03 nDCG@10 on judged queries, see below), no model download; 200 ms per recall against 6 ms, no recall at all offline, 4x larger store files, and every learning and query leaves the machine |
 | `auto` *(default)* | `fastembed` when installed, otherwise BM25 alone | — | none | best available **local** |
 
-¹ `fastembed` downloads the model weights once (quantized int8 ONNX) and caches
-them; after that it runs fully offline. It never transmits your learning content.
+¹ `fastembed` downloads the model weights once (quantized int8 ONNX, about 130 MB for
+the default model) into `~/.trace/models` (override with `TRACE_MODEL_CACHE_DIR`, or
+fastembed's own `FASTEMBED_CACHE_PATH`); after that it runs fully offline. Left to its own
+default fastembed would use the per-user temporary directory, which the operating system
+may clear, and the next recall would download again or fail without network. It never
+transmits your learning content.
 The runtime underneath it carries one telemetry facility of its own, described in
 [ONNX Runtime telemetry](#onnx-runtime-telemetry-in-the-fastembed-tier) below.
 
@@ -214,12 +218,64 @@ significantly better on paraphrases (+0.020 to +0.103 and +0.011 to +0.087). The
 download is about 130 MB; embedding 352 learnings took 20 to 30 s with the model already on
 disk, on an Apple Silicon laptop; both are single observations, not bounds.
 
+A second, larger comparison (fifteen stores, 2091 learnings, 136 real session and decision
+queries, each retrieving only from the learnings that existed before its session, relevance
+graded 0/1/2 by a language-model judge on the pooled top-10 of every arm, with a second
+judge from another vendor agreeing on average) measured the production hybrid with
+`arctic-embed-s` at 0.710 nDCG@10 against 0.637 for BM25 alone (+0.074, 90% interval
++0.051 to +0.097), `arctic-embed-m` at 0.708 (no gain), and OpenAI `text-embedding-3-small`
+at 0.738 (+0.028 over `arctic-embed-s`, +0.013 to +0.044). The OpenAI edge is real and
+consistent across stores and query types, and the items only it surfaced were useful about
+twice as often as the items only `arctic-embed-s` surfaced; it stays below the +0.05 bar set
+for changing the recommendation, and it costs 200 ms per recall against 6 ms, a hard failure
+offline, store files four times larger (15 MB at 482 learnings, loading in 259 ms against
+17 ms), vectors that are not bit-identical between calls, and full text egress. Session
+descriptions written as keywords matched equally under every arm; the embedding earns its
+keep on queries whose wording differs from the learning's. The same run found that the
+`matched` label was true for 98 to 100% of items returned for 200 off-topic queries under
+every arm, which led to the gate described in the next section.
+
 `auto` no longer selects `model2vec`: a launch config that carries only `model2vec`
 runs recall on BM25 alone until `fastembed` is added (the default launch extras now
 include it). The first recall with `fastembed` downloads about 130 MB of weights once
 and embeds a few hundred learnings (20 to 30 s observed on an Apple Silicon laptop with the weights already on disk). For an explicit
 `TRACE_EMBEDDING_BACKEND=model2vec`, the default model is `potion-retrieval-32M` (was
 `potion-base-8M`; stores re-embed lazily).
+
+## When the query cannot be embedded, and what `matched` guarantees
+
+**Query-time fallback.** The stored learnings carry vectors, but every recall also has to
+embed the query, and that call can fail: no network for the OpenAI path, model files
+missing for `fastembed`, a provider error. The ranker then falls back to keyword (BM25)
+ranking for that recall, labels the backend `bm25 (query embedding failed under ...)`, and
+the response carries a `notice` naming the failure. Under strict mode
+(`TRACE_STRICT_LLM=true`, the default when a key is configured) the same failure raises
+instead, on the view that a degraded answer is worse than no answer. A refused API key is
+reported as such in every mode. Before this, the failure escaped as a bare exception and
+the tool answered "Failed to recall learnings" in either mode.
+
+**The absolute gate.** The hybrid ranker marks a result `matched` when it stands out from
+the rest of the store for this query (a relative z floor) or has a lexical hit. That ranks
+well within a query but says nothing about whether anything in the store resembles the
+query at all: on 200 off-topic queries (cooking, hiking, generic web development) against
+five real stores, every arm returned ten `matched` items for every query. Recall therefore
+also applies a **query-level gate on the best raw similarity**, calibrated per model against
+those off-topic queries and 147 real ones:
+
+| model | gate on best similarity | keeps real queries | rejects off-topic queries |
+|---|---|---|---|
+| `snowflake/snowflake-arctic-embed-s` | 0.625 | 95% | 93% |
+| `snowflake/snowflake-arctic-embed-m` | 0.32 | 93% | 90% |
+| `text-embedding-3-small` | 0.365 | 98% | 93% |
+| keyword ranking (BM25 alone, or the fallback above), stores of 30 or more learnings | 0.76 on the best normalised BM25 | about 90% | about 90% |
+
+A best normalised BM25 of 0.80 or more overrides a failed similarity gate, because an
+identifier-shaped query can embed poorly yet match a learning word for word. When the gate
+fails, every result is returned as a weak candidate with `matched: false`, the summary says
+`gated`, the notice reads "nothing in the store resembles this query", and the decision-warning
+path surfaces nothing. Cosine scales differ by model, so a model not in the table has no gate
+until it is calibrated the same way (TRACE then behaves as before). `TRACE_RECALL_GATE`
+accepts `auto` (the table), `off`, or a number.
 
 ## Future plan (not yet implemented): first-class arbitrary custom models
 

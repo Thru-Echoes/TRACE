@@ -27,6 +27,8 @@ only, which the provider adds. Documents are always embedded as-is.
 from __future__ import annotations
 
 import logging
+import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from trace_mcp.extensions.learn.egress import attest_egress
@@ -263,6 +265,19 @@ class Model2VecEmbeddingProvider:
 # ── fastembed provider (local ONNX transformer, no PyTorch) ──────────────
 
 
+def fastembed_cache_dir() -> Path:
+    """Where fastembed keeps its model files. Pure.
+
+    Left to itself fastembed uses the per-user temporary directory, which the operating
+    system may clear; the next recall then downloads the model again (about 130 MB) or, with
+    no network, fails. TRACE therefore pins the cache under its own home. Precedence:
+    ``TRACE_MODEL_CACHE_DIR``, then fastembed's own ``FASTEMBED_CACHE_PATH``, then
+    ``~/.trace/models``. The directory is created by fastembed on first use.
+    """
+    override = os.environ.get("TRACE_MODEL_CACHE_DIR") or os.environ.get("FASTEMBED_CACHE_PATH")
+    return Path(override) if override else Path.home() / ".trace" / "models"
+
+
 class FastEmbedEmbeddingProvider:
     """Generate embeddings locally via fastembed (ONNX Runtime, no PyTorch).
 
@@ -285,10 +300,14 @@ class FastEmbedEmbeddingProvider:
         self._model: Any = None
 
     def _get_model(self) -> Any:
-        """Load and cache the fastembed model on first use (lazy load)."""
+        """Load and cache the fastembed model on first use (lazy load).
+
+        Side effects: the first call on a machine downloads the model files (about 130 MB
+        for the default model) into ``fastembed_cache_dir()``.
+        """
         if self._model is None:
             assert TextEmbedding is not None  # guaranteed by _HAS_FASTEMBED gate in __init__
-            self._model = TextEmbedding(model_name=self.model_name)
+            self._model = TextEmbedding(model_name=self.model_name, cache_dir=str(fastembed_cache_dir()))
         return self._model
 
     async def embed_texts(self, texts: list[str]) -> list[list[float]]:

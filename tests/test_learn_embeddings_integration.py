@@ -186,10 +186,11 @@ class TestBackendFallbackChain:
         assert len(results) == 2
 
     async def test_provider_failure_in_scoring(self):
-        """If provider.embed_texts raises, entire backend fails (caller handles)."""
-        provider = _mock_provider()
-        provider.embed_texts = AsyncMock(side_effect=RuntimeError("API down"))
-        backend = EmbeddingBackend(provider=provider)
+        """A provider that cannot embed the query degrades to keywords, or raises under strict mode.
+
+        The failure used to escape as a bare exception and surface to the user as
+        "Failed to recall learnings" in either mode.
+        """
         learnings = [
             Learning(
                 id="lrn_001",
@@ -198,8 +199,18 @@ class TestBackendFallbackChain:
                 embedding_model="test",
             ),
         ]
-        with pytest.raises(RuntimeError, match="API down"):
-            await backend.score_batch(learnings, "query")
+        provider = _mock_provider()
+        provider.embed_texts = AsyncMock(side_effect=RuntimeError("API down"))
+        permissive = EmbeddingBackend(provider=provider)
+        scores = await permissive.score_batch(learnings, "query")
+        assert len(scores) == 1
+        assert permissive.fallback_reason is not None and "API down" in permissive.fallback_reason
+
+        from trace_mcp.extensions.learn.config import LLMFallbackError
+
+        strict = EmbeddingBackend(provider=provider, strict=True)
+        with pytest.raises(LLMFallbackError, match="API down"):
+            await strict.score_batch(learnings, "query")
 
 
 # ── Model change integration ─────────────────────────────────────────────
