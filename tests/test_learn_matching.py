@@ -259,7 +259,7 @@ class TestLLMBackend:
     def _make_config(self, strict: bool = False) -> LearnConfig:
         return LearnConfig(
             openai_api_key="test-key-123",
-            llm_model="gpt-5.4-mini",
+            llm_model="gpt-6-luna",
             llm_enabled=True,
             strict_llm=strict,
         )
@@ -956,7 +956,7 @@ class TestTextScores:
 
     async def test_llm_text_scores_prefilter_and_densify_through_the_real_path(self):
         """61 learnings: BM25 pre-filters to 50, the LLM scores those, the rest are 0.0."""
-        config = LearnConfig(openai_api_key="test-key-123", llm_model="gpt-5.4-mini", llm_enabled=True, strict_llm=True)
+        config = LearnConfig(openai_api_key="test-key-123", llm_model="gpt-6-luna", llm_enabled=True, strict_llm=True)
         many = [Learning(id=f"lrn_{i:03d}", content=f"learning number {i}") for i in range(1, 62)]
         many[60] = Learning(id="lrn_061", content="the conda environment note")  # the only lexical hit
         mock_response = MagicMock()

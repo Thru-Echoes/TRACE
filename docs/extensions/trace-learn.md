@@ -119,8 +119,8 @@ place the key in **this project's own `.env`** and set `TRACE_LLM_ENABLED=true`:
 ```bash
 OPENAI_API_KEY=sk-...
 TRACE_LLM_ENABLED=true                   # Opt-in: cloud LLM is OFF by default
-TRACE_LLM_MODEL=gpt-5.4-mini             # Model for matching/scoring
-TRACE_LLM_EXTRACTION_MODEL=gpt-5.4-mini  # Model for extraction (can be different)
+TRACE_LLM_MODEL=gpt-6-luna               # Model for matching/scoring
+TRACE_LLM_EXTRACTION_MODEL=gpt-6-luna    # Model for extraction (can be different)
 TRACE_STRICT_LLM=true                    # Fail loudly on LLM errors (default: true when key set)
 ```
 

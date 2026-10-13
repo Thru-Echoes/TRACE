@@ -14,6 +14,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The default OpenAI model for LLM relevance scoring and learning extraction is
+  now `gpt-6-luna`** (previously `gpt-5.4-mini`). It applies when neither
+  `TRACE_LLM_MODEL` nor `TRACE_LLM_EXTRACTION_MODEL` is set. The id now lives in one
+  constant, `DEFAULT_LLM_MODEL`, which the dataclass defaults and the config loader's
+  fallbacks share, and a test fails when the README configuration table or the
+  trace-learn doc restates a different id, so the docs cannot drift from the code
+  again. Cloud matching and extraction stay opt-in, and the embedding model is
+  unchanged.
 - **The server runs on the mcp 2.x SDK; the dependency is now `mcp>=2,<3`.**
   mcp 2.0 removed `mcp.server.fastmcp`, which `server.py` imported at module
   scope, so trace-mcp could not import in any environment that also carried

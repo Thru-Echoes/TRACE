@@ -154,6 +154,13 @@ class ApiKeyRejectedError(LLMFallbackError):
     """
 
 
+# The OpenAI model TRACE calls for LLM relevance scoring (TRACE_LLM_MODEL) and
+# learning extraction (TRACE_LLM_EXTRACTION_MODEL) when the operator sets neither.
+# Single source of truth: the README configuration table and the trace-learn doc
+# restate it, and tests/test_learn_default_model_sites.py fails when they drift.
+DEFAULT_LLM_MODEL = "gpt-6-luna"
+
+
 @dataclass(frozen=True)
 class LearnConfig:
     """Configuration for trace-learn matching and extraction backends."""
@@ -163,8 +170,8 @@ class LearnConfig:
     # reachable via direct attribute access and dataclasses.asdict() — code
     # and tests must never log/assert on a real key value through those.
     openai_api_key: str | None = field(default=None, repr=False)
-    llm_model: str = "gpt-5.4-mini"
-    llm_extraction_model: str = "gpt-5.4-mini"
+    llm_model: str = DEFAULT_LLM_MODEL
+    llm_extraction_model: str = DEFAULT_LLM_MODEL
     # Cloud LLM matching/extraction is OPT-IN (local-first): an OPENAI_API_KEY
     # on the machine must not, by itself, route session content to a third
     # party. Enable with TRACE_LLM_ENABLED=true (a key is still required).
@@ -341,7 +348,7 @@ def load_config() -> LearnConfig:
             "TRACE strict LLM mode is ON (model=%s). "
             "LLM failures will raise errors instead of silently falling back to BM25. "
             "Set TRACE_STRICT_LLM=false to allow silent fallback.",
-            merged.get("TRACE_LLM_MODEL", "gpt-5.4-mini"),
+            merged.get("TRACE_LLM_MODEL", DEFAULT_LLM_MODEL),
         )
     elif api_key and raw_llm_enabled is None and not local_only:
         # A key exists but the user never chose: say so once at config load,
@@ -369,8 +376,8 @@ def load_config() -> LearnConfig:
 
     return LearnConfig(
         openai_api_key=api_key,
-        llm_model=merged.get("TRACE_LLM_MODEL", "gpt-5.4-mini"),
-        llm_extraction_model=merged.get("TRACE_LLM_EXTRACTION_MODEL", "gpt-5.4-mini"),
+        llm_model=merged.get("TRACE_LLM_MODEL", DEFAULT_LLM_MODEL),
+        llm_extraction_model=merged.get("TRACE_LLM_EXTRACTION_MODEL", DEFAULT_LLM_MODEL),
         llm_enabled=llm_enabled,
         strict_llm=strict_llm,
         local_only=local_only,
