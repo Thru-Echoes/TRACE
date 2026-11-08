@@ -12,12 +12,20 @@ from typing import Any
 from trace_mcp.schema import Session
 
 
+class SessionIdTakenError(FileExistsError):
+    """A session with this id already exists; the existing record is untouched."""
+
+
 class TraceStorage(ABC):
     """Abstract storage interface for TRACE sessions."""
 
     @abstractmethod
     async def create_session(self, session: Session) -> str:
-        """Create a new session. Returns session ID."""
+        """Create a new session. Returns session ID.
+
+        Must never replace an existing record: a backend raises
+        ``SessionIdTakenError`` when the id is already taken (INV-13).
+        """
         ...
 
     @abstractmethod

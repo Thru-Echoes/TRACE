@@ -229,12 +229,12 @@ one more copy to rot.
 ## 10. Invariants
 
 [`docs/INVARIANTS.md`](INVARIANTS.md) is the registry of correctness properties,
-each with its **exhaustive site-set** and the test that enforces it. Twelve are
-registered (INV-1 … INV-12): locked session writes, completed-session
+each with its **exhaustive site-set** and the test that enforces it. Thirteen are
+registered (INV-1 … INV-13): locked session writes, completed-session
 immutability, decision validation, canonical-key scoping, egress attestation,
 project/session coherence, registry writes, the knowledge lock, learn-tool
-scoping, version-declaration consistency, conformance of a fresh install, and
-learning-id uniqueness.
+scoping, version-declaration consistency, conformance of a fresh install,
+learning-id uniqueness, and exclusive session creation.
 
 The point is the defect *class*: every serious bug here has been *an invariant
 enforced in one place but not uniformly*. `tests/test_invariants.py` fails when
