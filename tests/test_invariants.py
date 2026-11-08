@@ -482,7 +482,7 @@ def test_inv13_session_creators_are_registered() -> None:
 
 
 def test_inv13_only_the_retrying_path_calls_the_backend() -> None:
-    """Calling ``create_session`` on anything but ``session_tools`` reaches the backend, which has no retry."""
+    """Touching ``create_session`` on anything but ``session_tools`` reaches the backend, which has no retry."""
     direct: set[tuple[str, str]] = set()
     for path in _src_files():
         for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
@@ -490,10 +490,9 @@ def test_inv13_only_the_retrying_path_calls_the_backend() -> None:
                 continue
             for sub in ast.walk(node):
                 if (
-                    isinstance(sub, ast.Call)
-                    and isinstance(sub.func, ast.Attribute)
-                    and sub.func.attr == "create_session"
-                    and not (isinstance(sub.func.value, ast.Name) and sub.func.value.id == "session_tools")
+                    isinstance(sub, ast.Attribute)
+                    and sub.attr == "create_session"
+                    and not (isinstance(sub.value, ast.Name) and sub.value.id == "session_tools")
                 ):
                     direct.add((_rel(path), node.name))
     assert direct == {("tools/session_tools.py", "create_session")}, (

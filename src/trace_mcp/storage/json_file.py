@@ -26,8 +26,9 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_DIR = os.path.expanduser("~/.trace/sessions")
 
-# os.link failures that mean this filesystem has no hard links. Anything else
-# (a full disk, an I/O error) is a real failure and must reach the caller.
+# os.link errors meaning hard-link publication is unavailable here, because the
+# filesystem lacks hard links or a policy denies them. Anything else (a full
+# disk, an I/O error) is a real failure and must reach the caller.
 _HARD_LINKS_UNSUPPORTED = frozenset({errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS})
 
 
@@ -146,11 +147,15 @@ class JsonFileStorage(TraceStorage):
 
         The bytes are fsynced to a temp file and published with ``os.link``, so
         a reader never sees a partial record and the name is claimed atomically.
-        A filesystem without hard links falls back to writing through an
-        ``O_CREAT | O_EXCL`` descriptor, which claims the name just as atomically
-        but exposes the file while it is being written.
+        Where hard-link publication is unavailable, this falls back to writing
+        through an ``O_CREAT | O_EXCL`` descriptor, which claims the name just as
+        atomically but exposes the file while it is being written.
 
-        Side effects: creates ``path``; the temp file is always removed.
+        A failed fallback write leaves the claimed file in place: once the name is
+        visible another writer may have replaced it, so unlinking by path could
+        delete that writer's record.
+
+        Side effects: creates ``path``; removes the temp file.
 
         Raises:
             SessionIdTakenError: ``path`` already exists; it is left untouched.
@@ -177,12 +182,7 @@ class JsonFileStorage(TraceStorage):
             fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
         except FileExistsError:
             raise SessionIdTakenError(f"Session file already exists: {path}") from None
-        try:
-            _write_and_fsync(fd, data)
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(path)
-            raise
+        _write_and_fsync(fd, data)
 
     @contextlib.asynccontextmanager
     async def lock(

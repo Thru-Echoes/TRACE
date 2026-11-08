@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -39,23 +40,31 @@ def storage(tmp_path: Path) -> JsonFileStorage:
     return JsonFileStorage(directory=str(tmp_path))
 
 
+@pytest.fixture(params=["hard_link", "no_hard_link"])
+def publication(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPatch) -> str:
+    """Run a test over both ways of claiming the filename."""
+    if request.param == "no_hard_link":
+        monkeypatch.setattr(os, "link", _no_link)
+    return request.param
+
+
 async def test_second_create_with_same_id_is_refused_and_first_record_is_untouched(
-    storage: JsonFileStorage, tmp_path: Path
+    storage: JsonFileStorage, tmp_path: Path, publication: str
 ) -> None:
     await storage.create_session(_session(TAKEN_ID, "collab-a"))
     path = tmp_path / f"{TAKEN_ID}.json"
     original = path.read_bytes()
 
-    with pytest.raises(FileExistsError):
+    with pytest.raises(SessionIdTakenError):
         await storage.create_session(_session(TAKEN_ID, "collab-b"))
 
     assert path.read_bytes() == original
 
 
-async def test_refused_create_leaves_no_temp_files(storage: JsonFileStorage, tmp_path: Path) -> None:
+async def test_refused_create_leaves_no_temp_files(storage: JsonFileStorage, tmp_path: Path, publication: str) -> None:
     await storage.create_session(_session(TAKEN_ID, "collab-a"))
 
-    with pytest.raises(FileExistsError):
+    with pytest.raises(SessionIdTakenError):
         await storage.create_session(_session(TAKEN_ID, "collab-b"))
 
     assert [p.name for p in tmp_path.iterdir()] == [f"{TAKEN_ID}.json"]
@@ -68,14 +77,14 @@ async def test_ids_that_sanitize_to_one_filename_cannot_overwrite_each_other(
     path = tmp_path / "trace_a_b.json"
     original = path.read_bytes()
 
-    with pytest.raises(FileExistsError):
+    with pytest.raises(SessionIdTakenError):
         await storage.create_session(_session("trace_a/b", "collab-b"))
 
     assert path.read_bytes() == original
 
 
 async def test_concurrent_creators_of_one_id_produce_exactly_one_winner(
-    storage: JsonFileStorage, tmp_path: Path
+    storage: JsonFileStorage, tmp_path: Path, publication: str
 ) -> None:
     contenders = [_session(TAKEN_ID, f"collab-{i}") for i in range(16)]
 
@@ -86,7 +95,7 @@ async def test_concurrent_creators_of_one_id_produce_exactly_one_winner(
 
     wins = [i for i, r in enumerate(results) if r == TAKEN_ID]
     assert len(wins) == 1
-    assert all(isinstance(r, FileExistsError) for i, r in enumerate(results) if i != wins[0])
+    assert all(isinstance(r, SessionIdTakenError) for i, r in enumerate(results) if i != wins[0])
     stored = await storage.get_session(TAKEN_ID)
     assert stored.metadata.project == f"collab-{wins[0]}"
     assert [p.name for p in tmp_path.iterdir()] == [f"{TAKEN_ID}.json"]
@@ -103,19 +112,48 @@ async def test_create_is_a_complete_valid_record_without_hard_links(
     assert [p.name for p in tmp_path.iterdir()] == [f"{TAKEN_ID}.json"]
 
 
-async def test_refusal_holds_without_hard_links(
+async def test_the_published_file_is_already_complete(
+    storage: JsonFileStorage, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_link = os.link
+    ids_seen_at_publication: list[str] = []
+
+    def link_then_read(src: str, dst: str) -> None:
+        real_link(src, dst)
+        ids_seen_at_publication.append(json.loads(Path(dst).read_text())["id"])
+
+    monkeypatch.setattr(os, "link", link_then_read)
+
+    await storage.create_session(_session(TAKEN_ID, "collab-a"))
+
+    assert ids_seen_at_publication == [TAKEN_ID]
+
+
+async def test_a_failed_fallback_write_does_not_delete_a_concurrent_update(
     storage: JsonFileStorage, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr(os, "link", _no_link)
-    await storage.create_session(_session(TAKEN_ID, "collab-a"))
     path = tmp_path / f"{TAKEN_ID}.json"
-    original = path.read_bytes()
+    updated = json.dumps(_session(TAKEN_ID, "collab-b").model_dump(mode="json"))
+    real_fsync = os.fsync
+    fsync_calls = 0
 
-    with pytest.raises(FileExistsError):
-        await storage.create_session(_session(TAKEN_ID, "collab-b"))
+    def update_then_fail(fd: int) -> None:
+        """Fail the destination's fsync, after another writer has replaced that file."""
+        nonlocal fsync_calls
+        fsync_calls += 1
+        if fsync_calls == 2:  # 1 is the discarded temp file, 2 is the claimed destination
+            storage._write_file(path, updated)
+            raise OSError(errno.EIO, "input/output error")
+        real_fsync(fd)
 
-    assert path.read_bytes() == original
-    assert [p.name for p in tmp_path.iterdir()] == [f"{TAKEN_ID}.json"]
+    monkeypatch.setattr(os, "link", _no_link)
+    monkeypatch.setattr(os, "fsync", update_then_fail)
+
+    with pytest.raises(OSError) as raised:
+        await storage.create_session(_session(TAKEN_ID, "collab-a"))
+
+    assert raised.value.errno == errno.EIO
+    assert path.read_text() == updated
 
 
 async def test_a_real_link_failure_is_raised_and_does_not_fall_back(
@@ -144,7 +182,7 @@ async def test_update_still_replaces_an_existing_record(storage: JsonFileStorage
 
 
 async def test_tool_path_mints_a_fresh_id_on_collision(
-    storage: JsonFileStorage, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    storage: JsonFileStorage, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, publication: str
 ) -> None:
     await storage.create_session(_session(TAKEN_ID, "collab-a"))
     path = tmp_path / f"{TAKEN_ID}.json"

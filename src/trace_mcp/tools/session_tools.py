@@ -552,7 +552,8 @@ async def create_session(
     ``project`` label through the alias table instead.
 
     A minted id that is already taken is discarded and a fresh one tried (INV-13),
-    so a collision can neither overwrite the existing record nor fail the caller.
+    so a collision cannot overwrite the existing record. Exhausting the attempts
+    raises to the caller.
 
     Side effects: writes the new session file; registers it in *active_sessions*.
 

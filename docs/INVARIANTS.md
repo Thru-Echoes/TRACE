@@ -488,19 +488,25 @@ and nothing on disk showed it had existed.
 - Routes into it — `tools/session_tools.py :: start_session`,
   `server.py :: _ensure_session`, `server.py :: trace_start_session`.
 
-**Known limitation.** Where the filesystem reports that hard links are
-unsupported, creation falls back to writing through an `O_CREAT | O_EXCL`
-descriptor. Any other `os.link` failure is raised. The fallback's claim is still
-exclusive, but the file is visible while it is written, so a crash can leave a
-partial record. Aggregate reads leave such a file out, and `get_session` raises
-`JSONDecodeError` on it.
+**Known limitation.** Where `os.link` reports that hard-link publication is
+unavailable (the filesystem lacks hard links or a policy denies them), creation
+falls back to writing through an `O_CREAT | O_EXCL` descriptor. Any other
+`os.link` failure is raised. The fallback's claim is still exclusive, but the
+file is visible while it is written, so a concurrent `get_session` can raise
+`JSONDecodeError`, and a crash or failed write can leave a partial record. A
+failed write deliberately does not unlink the file: another writer may already
+have replaced it. Aggregate reads leave a partial file out.
+
+**Guard scope.** The AST guards are syntactic regression checks on the named
+functions, not a call-graph proof.
 
 **Tests.** `tests/test_invariants.py :: test_inv13_session_creators_are_registered`,
 `:: test_inv13_only_the_retrying_path_calls_the_backend`,
 `:: test_inv13_backend_create_is_exclusive`, and
 `tests/test_session_create_exclusive.py` (byte-identical first record, concurrent
-creators, the no-hard-link path, real link failures, a store path that is not a
-directory, fresh-id retry, and bounded failure).
+creators on both publication paths, complete-file publication, a fallback failure
+that must not delete a concurrent update, real link failures, a store path that is
+not a directory, fresh-id retry, and bounded failure).
 
 **Status.** ENFORCED.
 
