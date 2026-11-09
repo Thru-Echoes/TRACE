@@ -14,6 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **LLM requests now work with the default model.** Scoring and extraction sent
+  `temperature=0.0`, which `gpt-6-luna` rejects with HTTP 400, so every such request failed
+  unless a model override was set. Neither sends a temperature now, so an overriding model
+  runs at its own default.
+- **A source-only change to a local clone now reaches the next launch.** `uvx` kept reusing a
+  cached environment. `[tool.uv] cache-keys` fixes this with uv 0.11 or newer. The
+  session-start banner now reports running code that differs from its source, and
+  `trace_health_check` reports a digest of the running build.
+- **Project-keyed read tools now honor the pin.** `trace_list_sessions`,
+  `trace_project_summary`, and `trace_health_check` could show another project's data on a
+  pinned server. They now resolve an omitted project to the pin and refuse another project
+  unless `TRACE_ALLOW_CROSS_PROJECT_READS=1`. Registered as INV-16.
 - **An acknowledged write is now durable where the platform allows it.** Session writes synced the file but
   not the directory holding its name, so a power loss could undo a create, a replace, or a
   delete already reported as successful. The project registry and knowledge stores did not

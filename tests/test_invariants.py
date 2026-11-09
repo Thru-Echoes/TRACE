@@ -613,3 +613,65 @@ def test_inv15_delete_takes_the_session_lock() -> None:
     assert "lock" in _json_backend_calls("delete_session"), (
         "INV-15 violation: an unlocked delete lets a stale updater overwrite a recreated id."
     )
+
+
+# ── INV-16: a pinned server scopes every core read tool ───────────────────
+INV16_READ_TOOLS = {
+    "trace_get_session",
+    "trace_get_events",
+    "trace_get_decisions",
+    "trace_get_decision_chain",
+    "trace_search",
+    "trace_export",
+    "trace_list_sessions",
+    "trace_project_summary",
+    "trace_health_check",
+}
+INV16_WRITE_TOOLS = {
+    "trace_start_session",
+    "trace_end_session",
+    "trace_log_tool_call",
+    "trace_log_annotation",
+    "trace_log_contribution",
+    "trace_log_state_change",
+    "trace_propose_decision",
+    "trace_resolve_decision",
+}
+INV16_SCOPE_CHECKS = {"check_read_scope", "get_read_scope_project", "_check_read_scope_by_id"}
+
+
+def _core_tools() -> dict[str, ast.AsyncFunctionDef]:
+    """Every function in ``server.py`` registered with ``@mcp.tool()``."""
+    tree = ast.parse((SRC / "server.py").read_text())
+    return {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.AsyncFunctionDef)
+        and any(
+            isinstance(d, ast.Call) and isinstance(d.func, ast.Attribute) and d.func.attr == "tool"
+            for d in node.decorator_list
+        )
+    }
+
+
+def test_inv16_every_core_tool_is_classified() -> None:
+    tools = set(_core_tools())
+    assert tools == INV16_READ_TOOLS | INV16_WRITE_TOOLS, (
+        "INV-16 (docs/INVARIANTS.md): the core tool set changed. A new read tool must apply the pin. "
+        f"Unclassified: {sorted(tools - INV16_READ_TOOLS - INV16_WRITE_TOOLS)}."
+    )
+
+
+def test_inv16_every_read_tool_applies_the_pin() -> None:
+    tools = _core_tools()
+    for name in sorted(INV16_READ_TOOLS):
+        calls = {n for sub in ast.walk(tools[name]) if isinstance(sub, ast.Call) and (n := _call_name(sub))}
+        assert calls & INV16_SCOPE_CHECKS, f"INV-16 violation: {name} does not apply the project pin."
+
+
+def test_inv16_health_check_scopes_both_of_its_addressing_modes() -> None:
+    tool = _core_tools()["trace_health_check"]
+    calls = {n for sub in ast.walk(tool) if isinstance(sub, ast.Call) and (n := _call_name(sub))}
+    assert {"get_read_scope_project", "_check_read_scope_by_id"} <= calls, (
+        "INV-16 violation: trace_health_check takes a project and a session id, and must scope both."
+    )

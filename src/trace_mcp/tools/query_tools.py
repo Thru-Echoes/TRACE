@@ -431,6 +431,8 @@ async def health_check(
     health probe never becomes an unbounded full-store read; ``scan_truncated``
     flags when more sessions exist beyond the scan window.
     """
+    from trace_mcp.conformance.staleness import get_running_build_digest
+
     # Storage paths (reported for diagnostics only — never control flow).
     sessions_dir = storage.location()
     sessions_dir_exists = sessions_dir != "unknown" and Path(sessions_dir).is_dir()
@@ -455,7 +457,15 @@ async def health_check(
             logger.warning("health_check: skipping unreadable session %s: %s", session_id, exc)
             skipped_sessions.append(session_id)
     else:
-        summaries = await storage.list_sessions(project=project, limit=scan_cap)
+        from trace_mcp.project_identity import RegistryUnavailableError
+
+        try:
+            summaries = await storage.list_sessions(project=project, limit=scan_cap)
+        except RegistryUnavailableError as exc:
+            # Sessions cannot be attributed to a project, so none are counted. The
+            # report must still run: its identity section is what names this failure.
+            logger.warning("health_check: not counting sessions: %s", exc)
+            summaries = []
         scan_truncated = len(summaries) >= scan_cap
         for s in summaries:
             try:
@@ -481,6 +491,7 @@ async def health_check(
 
     return {
         "version": trace_mcp.__version__,
+        "build_digest": get_running_build_digest(),
         "storage": {
             "sessions_dir": sessions_dir,
             "sessions_dir_exists": sessions_dir_exists,

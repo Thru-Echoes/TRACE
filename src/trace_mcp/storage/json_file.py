@@ -139,7 +139,11 @@ def _read_listable_session(path: Path) -> dict[str, Any] | None:
     except (OSError, ValueError):
         logger.warning("Skipping malformed or vanished session file: %s", path)
         return None
-    if not isinstance(raw, dict) or not isinstance(raw.get("metadata", {}), dict):
+    if (
+        not isinstance(raw, dict)
+        or not isinstance(raw.get("metadata", {}), dict)
+        or not isinstance(raw.get("events", []), list)
+    ):
         logger.warning("Skipping malformed session file: %s", path)
         return None
     return raw

@@ -27,12 +27,19 @@ to start because this check could not run.
 Side effects: reads ``<project_dir>/.mcp.json`` and two files under the source
 tree it names. Writes nothing.
 
+Two builds can also share a version and differ in code, so the running package is
+compared with the source tree file by file as well.
+
 Exports:
-    get_stale_build_notice   advisory line for the session-start banner, or None
+    get_stale_build_notice     advisory line for the session-start banner, or None
+    get_tree_digest            short digest of the Python files under a directory
+    get_running_build_digest   that digest for the running package
 """
 
 from __future__ import annotations
 
+import functools
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -43,6 +50,34 @@ from trace_mcp.schema import SCHEMA_VERSION
 
 _PACKAGE_VERSION_RE = re.compile(r"^version\s*=\s*[\"']([^\"']+)[\"']", re.MULTILINE)
 _SCHEMA_VERSION_RE = re.compile(r"^SCHEMA_VERSION\s*=\s*[\"']([^\"']+)[\"']", re.MULTILINE)
+
+
+def get_tree_digest(root: Path) -> str:
+    """A short digest of every Python file under *root*, including their paths.
+
+    Side effects: reads those files.
+    """
+    digest = hashlib.sha256()
+    for relative in sorted(path.relative_to(root).as_posix() for path in root.rglob("*.py")):
+        digest.update(relative.encode())
+        digest.update(b"\0")
+        digest.update((root / relative).read_bytes())
+    return digest.hexdigest()[:12]
+
+
+@functools.lru_cache(maxsize=1)
+def get_running_build_digest() -> str:
+    """The digest of the running package, or ``"unknown"`` if it cannot be read.
+
+    Computed once and kept, because the files of an editable install can change
+    under a running process. The server calls this at startup for that reason.
+
+    Side effects: reads the package's Python files on the first call.
+    """
+    try:
+        return get_tree_digest(Path(__file__).resolve().parents[1])
+    except OSError:
+        return "unknown"
 
 
 def _source_dir_from_config(project_dir: Path) -> Path | None:
@@ -106,6 +141,22 @@ def _declared_versions(source_dir: Path) -> tuple[str | None, str | None]:
     return package, schema
 
 
+def _different_code_notice(source_dir: Path) -> str | None:
+    """A notice when the running code differs from a full source tree of the same version."""
+    source_package = source_dir / "src" / "trace_mcp"
+    if not (source_package / "server.py").is_file():
+        return None
+    running, source = get_running_build_digest(), get_tree_digest(source_package)
+    if running in {source, "unknown"}:
+        return None
+    return (
+        f"⚠️  This server is running different code from its source, although both report "
+        f"version {__version__} (running build {running}, source {source}). Restart the host "
+        "session to pick up the current code. If this notice returns after a restart, upgrade uv "
+        "to 0.11 or newer, because older versions keep serving a cached build from a local clone."
+    )
+
+
 def get_stale_build_notice(project_dir: Path | None = None) -> str | None:
     """Advisory line naming a running build older than its source, or None.
 
@@ -132,7 +183,7 @@ def get_stale_build_notice(project_dir: Path | None = None) -> str | None:
         if declared_schema and declared_schema != SCHEMA_VERSION:
             drift.append(f"wire {SCHEMA_VERSION} running vs {declared_schema} in source")
         if not drift:
-            return None
+            return _different_code_notice(source_dir)
 
         return (
             f"⚠️  This server is running an older build than its source: {'; '.join(drift)}. "

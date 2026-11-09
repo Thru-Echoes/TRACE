@@ -47,6 +47,14 @@ In short: self-contained, durable prose; preferred subject shape
   trigger a publish, version tags and Releases are safe to create — e.g. for
   Zenodo DOI archival — while the pause is in effect.
 
+## Launching from a local clone
+
+Consumer projects launch the server with `uvx --from <clone>`. A source-only change reaches
+them on the next launch only with uv 0.11 or newer, together with the `[tool.uv] cache-keys`
+in `pyproject.toml`. An older uv keeps serving the cached build. The session-start banner
+reports a running build whose code differs from its source, and `trace_health_check` reports
+the running build's digest.
+
 ## Maintenance backlog
 
 - Keep the CONTRIBUTING test-count headline current as the suite grows (the
