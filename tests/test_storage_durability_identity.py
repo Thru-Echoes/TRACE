@@ -319,7 +319,7 @@ class TestRecency:
         monkeypatch.setattr(storage, "_session_files_newest_first", lambda: [vanished, *existing])
         assert [s["id"] for s in await storage.list_sessions()] == [SESSION_ID]
 
-    @pytest.mark.parametrize("content", [b"[]", b'{"metadata": null}', b"\xff\xfe", b"{not json"])
+    @pytest.mark.parametrize("content", [b"[]", b'{"metadata": null}', b'{"events": null}', b"\xff\xfe", b"{not json"])
     async def test_one_malformed_file_does_not_take_down_listings(
         self, storage: JsonFileStorage, tmp_path: Path, content: bytes
     ) -> None:

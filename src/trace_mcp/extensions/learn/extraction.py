@@ -416,7 +416,6 @@ async def extract_from_session_llm(
                 {"role": "user", "content": prompt},
             ],
             response_format={"type": "json_object"},
-            temperature=0.0,
         )
 
         raw = response.choices[0].message.content or '{"learnings": []}'

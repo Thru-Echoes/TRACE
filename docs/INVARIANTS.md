@@ -600,6 +600,37 @@ created under the same id while it holds the lock.
 
 ---
 
+## INV-16 — A pinned server scopes every core read tool
+
+**Invariant.** On a process pinned with `TRACE_PROJECT`, every core read tool is limited to
+the pinned project. A read addressed by session id goes through `check_read_scope`. A read
+addressed by project goes through `get_read_scope_project`, which resolves an omitted
+project to the pin and refuses another project. `TRACE_ALLOW_CROSS_PROJECT_READS=1`
+overrides both.
+
+**Why this is an integrity invariant.** The pin is documented to fail closed for
+cross-project reads. A tool that skips it exposes another project's sessions and counts
+while the documentation says that cannot happen.
+
+**Exhaustive site-set:** `server.py :: trace_get_session`, `:: trace_get_events`,
+`:: trace_get_decisions`, `:: trace_get_decision_chain`, `:: trace_search`,
+`:: trace_export`, `:: trace_list_sessions`, `:: trace_project_summary`,
+`:: trace_health_check`. Learn tools are covered by INV-9. Write tools fail closed
+separately.
+
+**Known limitations.** `trace_health_check` still reports store-level diagnostics such as
+storage paths and the names of stray knowledge stores. When the project registry is
+unreadable it counts no sessions and reports the registry failure.
+
+**Tests.** `tests/test_invariants.py :: test_inv16_every_core_tool_is_classified`,
+`:: test_inv16_every_read_tool_applies_the_pin`,
+`:: test_inv16_health_check_scopes_both_of_its_addressing_modes`, and
+`tests/test_read_scope_pin.py`.
+
+**Status.** ENFORCED.
+
+---
+
 *To add an invariant: give it the next `INV-N`, state it, enumerate the
 exhaustive site-set, name the guard + test, and add a check that fails when a
 new site violates it — in `tests/test_invariants.py` for the AST/enumeration

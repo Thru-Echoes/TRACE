@@ -12,13 +12,14 @@ import json
 import logging
 import os
 import sys
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from mcp.server.mcpserver import MCPServer
 
 from trace_mcp import __version__
 from trace_mcp import extension_hooks as hooks
 from trace_mcp import project_identity as pident
+from trace_mcp.conformance.staleness import get_running_build_digest
 from trace_mcp.schema import (
     ActorType,
     AnnotationCategory,
@@ -53,6 +54,7 @@ STREAMABLE_HTTP_PATH = "/mcp"
 # serverInfo reports trace-mcp's own version rather than the mcp library's
 # (guarded by tests/test_installation_health.py and tests/test_e2e_server.py).
 mcp = MCPServer("trace", version=__version__)
+get_running_build_digest()  # record this build before its files can change on disk
 storage = JsonFileStorage()
 active_sessions: dict[str, Session] = {}
 _current_session_id: str | None = None
@@ -150,6 +152,42 @@ def check_read_scope(session: Session) -> None:
         f"session belongs to project '{other}' but this server is pinned to '{bound.key}'. "
         "Cross-project reads are denied; set TRACE_ALLOW_CROSS_PROJECT_READS=1 to override."
     )
+
+
+def get_read_scope_project(project: str | None) -> str | None:
+    """The project a project-keyed read may see on this process (INV-16).
+
+    Unpinned, or with ``TRACE_ALLOW_CROSS_PROJECT_READS=1``, returns *project*
+    unchanged. Pinned, an omitted project resolves to the pin and any label that
+    resolves to another project is refused.
+
+    Raises:
+        ProjectMismatchError: the process is pinned and *project* is another project.
+    """
+    bound = pident.get_bound_project()
+    if bound is None or os.environ.get("TRACE_ALLOW_CROSS_PROJECT_READS") == "1":
+        return project
+    if not project or pident.key_for_label(project) == bound.key:
+        return bound.key
+    raise pident.ProjectMismatchError(
+        f"project '{project}' is not the project this server is pinned to ('{bound.key}'). "
+        "Cross-project reads are denied; set TRACE_ALLOW_CROSS_PROJECT_READS=1 to override."
+    )
+
+
+async def _check_read_scope_by_id(session_id: str) -> None:
+    """Apply ``check_read_scope`` to a session id.
+
+    A missing or unreadable session exposes nothing, and the caller reports it.
+
+    Raises:
+        ProjectMismatchError: the session belongs to another project under a pin.
+    """
+    try:
+        session = await storage.get_session(session_id)
+    except (FileNotFoundError, ValueError):
+        return
+    check_read_scope(session)
 
 
 # ── Auto-Session Infrastructure ────────────────────────────────────────────
@@ -917,7 +955,8 @@ async def trace_project_summary(
     category, and unique participants. Useful for paper-ready statistics.
     """
     try:
-        summary = await query_tools.project_summary(storage, project=project)
+        scoped = cast(str, get_read_scope_project(project))  # a given project stays a string
+        summary = await query_tools.project_summary(storage, project=scoped)
         return _compact(summary)
     except Exception as e:
         logger.exception("Error generating project summary")
@@ -935,7 +974,10 @@ async def trace_health_check(
     (total, by type, by actor type). Optionally scoped to a project or session.
     """
     try:
-        result = await query_tools.health_check(storage, project=project, session_id=session_id)
+        scoped = get_read_scope_project(project)
+        if session_id:
+            await _check_read_scope_by_id(session_id)
+        result = await query_tools.health_check(storage, project=scoped, session_id=session_id)
         return _compact(result)
     except Exception as e:
         logger.exception("Error running health check")
@@ -981,7 +1023,7 @@ async def trace_list_sessions(
 ) -> str:
     """List all TRACE sessions, optionally filtered by project name."""
     try:
-        summaries = await storage.list_sessions(project=project, limit=limit)
+        summaries = await storage.list_sessions(project=get_read_scope_project(project), limit=limit)
         return _compact(summaries)
     except Exception as e:
         logger.exception("Error listing sessions")
