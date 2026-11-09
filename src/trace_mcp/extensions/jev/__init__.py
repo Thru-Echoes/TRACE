@@ -6,7 +6,7 @@ import json
 from typing import TYPE_CHECKING
 
 from trace_mcp import project_identity as pident
-from trace_mcp.extensions.jev.client import assess_event
+from trace_mcp.extensions.jev.client import assess_and_record
 from trace_mcp.extensions.jev.config import effective_config, load_config
 
 if TYPE_CHECKING:
@@ -21,11 +21,12 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
 
     @mcp.tool()
     async def trace_jev_assess_candidate(session_id: str, event_id: str, project: str | None = None) -> str:
-        """Ask Jev whether an existing TRACE event may merit durable human review.
+        """Experimental: ask Jev whether a logged TRACE event may merit human review.
 
-        This read-only advisory tool accepts only decision, annotation, and
-        contribution events. It never creates or mutates provenance, resolves a
-        decision, or makes an admission/governance claim. Jev model confidence
+        This advisory tool accepts only resolved decisions, annotations, and
+        contributions. It never creates or mutates provenance, resolves a decision,
+        or makes an admission/governance claim. It saves its result to a local
+        results file so the advice can later be checked. Jev model confidence
         is returned separately and is never written to decision.confidence,
         which is reserved for producer-recorded measured effects.
         """
@@ -36,7 +37,7 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
             event = next((item for item in session.events if item.id == event_id), None)
             if event is None:
                 raise ValueError(f"event {event_id!r} not found in session {session_id!r}")
-            result = await assess_event(
+            result = await assess_and_record(
                 event,
                 effective_config(config, label),
                 project=label,

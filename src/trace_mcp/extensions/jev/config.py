@@ -10,6 +10,8 @@ from trace_mcp import project_identity as pident
 
 _GLOBAL_ENV = Path.home() / ".trace" / ".env"
 
+DEFAULT_DIRECT_MODEL = "jev-1.13.0"
+
 
 def _parse_dotenv(path: Path) -> dict[str, str]:
     if not path.is_file():
@@ -42,7 +44,7 @@ def _truthy(value: str | None) -> bool:
 class JevConfig:
     enabled: bool = False
     api_key: str | None = field(default=None, repr=False)
-    model: str = "jev-latest"
+    model: str = DEFAULT_DIRECT_MODEL
     provider: str = "typesafe"
     gateway_zero_data_retention: bool = False
     local_only: bool = False
@@ -72,7 +74,7 @@ def load_config() -> JevConfig:
         if provider == "vercel_gateway"
         else merged.get("TYPESAFE_AI_API_KEY") or merged.get("TYPESAFE_API_KEY")
     )
-    default_model = "typesafe-ai/jev" if provider == "vercel_gateway" else "jev-latest"
+    default_model = "typesafe-ai/jev" if provider == "vercel_gateway" else DEFAULT_DIRECT_MODEL
     return JevConfig(
         enabled=_truthy(merged.get("TRACE_JEV_ENABLED")) and not local_only,
         api_key=api_key,
