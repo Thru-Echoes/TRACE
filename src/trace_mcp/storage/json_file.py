@@ -16,15 +16,20 @@ import re
 import tempfile
 import time
 from collections.abc import AsyncIterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from trace_mcp.durability import ensure_durable_dir, fsync_dir
 from trace_mcp.schema import SCHEMA_VERSION, Session
 from trace_mcp.storage.base import SessionIdTakenError, TraceStorage
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DIR = os.path.expanduser("~/.trace/sessions")
+
+# On Windows, os.kill(pid, 0) terminates the process instead of probing it.
+_PID_PROBE_IS_SAFE = os.name != "nt"
 
 # os.link errors meaning hard-link publication is unavailable here, because the
 # filesystem lacks hard links or a policy denies them. Anything else (a full
@@ -79,7 +84,7 @@ def _holder_status(token: bytes) -> str:
         pid = int(token.split(b":", 1)[0])
     except (ValueError, IndexError):
         return "unknown"
-    if pid <= 0:
+    if pid <= 0 or not _PID_PROBE_IS_SAFE:
         return "unknown"
     try:
         os.kill(pid, 0)
@@ -93,7 +98,12 @@ def _holder_status(token: bytes) -> str:
 
 
 def sanitize_name(name: str) -> str:
-    """Sanitize a session ID or project name for safe filesystem use."""
+    """Sanitize a session ID or project name for safe filesystem use.
+
+    The mapping is lossy: distinct names can produce one filename. Session reads
+    and writes use ``_is_alias`` to keep those names from reaching each other's
+    records (INV-15).
+    """
     cleaned = re.sub(r"[^\w\-.]", "_", name)  # only alphanum, _, -, .
     cleaned = cleaned.replace("..", "_")  # no parent traversal
     cleaned = cleaned.lstrip(".")  # no hidden files
@@ -103,6 +113,72 @@ def sanitize_name(name: str) -> str:
     return cleaned
 
 
+def _read_stored_id(path: Path) -> object:
+    """The ``id`` field of the session file at ``path``, or None if the file is corrupt.
+
+    Raises:
+        OSError: the file could not be read, so its owner is unknown.
+    """
+    try:
+        with open(path) as f:
+            raw = json.load(f)
+    except ValueError:
+        return None
+    return raw.get("id") if isinstance(raw, dict) else None
+
+
+def _read_listable_session(path: Path) -> dict[str, Any] | None:
+    """The parsed session at ``path``, or None if a listing should leave it out.
+
+    One bad file must not take down every listing, so a vanished, corrupt, or
+    misshapen file is skipped.
+    """
+    try:
+        with open(path) as f:
+            raw = json.load(f)
+    except (OSError, ValueError):
+        logger.warning("Skipping malformed or vanished session file: %s", path)
+        return None
+    if not isinstance(raw, dict) or not isinstance(raw.get("metadata", {}), dict):
+        logger.warning("Skipping malformed session file: %s", path)
+        return None
+    return raw
+
+
+def _created_at(raw: dict[str, Any]) -> datetime:
+    """A session's stored creation time, or the earliest datetime if missing or invalid.
+
+    A timestamp with no offset is read as UTC, the timezone TRACE records in.
+    """
+    try:
+        parsed = datetime.fromisoformat(raw.get("created"))  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return datetime.min.replace(tzinfo=UTC)
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _session_day(path: Path) -> str:
+    """The ``trace_<YYYYMMDD>`` prefix of a session filename."""
+    return "_".join(path.stem.split("_", 2)[:2])
+
+
+def _recency_key(path: Path) -> tuple[str, int, str]:
+    """Sort key for reading the likely-newest session files first.
+
+    A session id holds its creation day and then random hex, so the name orders
+    days and nothing finer. Within a day the last write stands in for creation
+    order, which lets a bounded scan start at the right files without opening
+    them. A later update to an older session moves it ahead, so this is a proxy.
+    The filename breaks exact ties so the order is deterministic.
+    """
+    day = _session_day(path)
+    try:
+        last_write = path.stat().st_mtime_ns
+    except OSError:
+        last_write = 0
+    return day, last_write, path.name
+
+
 class JsonFileStorage(TraceStorage):
     """Stores TRACE sessions as individual JSON files."""
 
@@ -110,10 +186,39 @@ class JsonFileStorage(TraceStorage):
         self._dir = Path(directory or os.environ.get("TRACE_SESSIONS_DIR", _DEFAULT_DIR))
 
     def _ensure_dir(self) -> None:
-        self._dir.mkdir(parents=True, exist_ok=True)
+        ensure_durable_dir(self._dir)
+
+    def _session_files_newest_first(self) -> list[Path]:
+        return sorted(self._dir.glob("trace_*.json"), key=_recency_key, reverse=True)
 
     def _session_path(self, session_id: str) -> Path:
         return self._dir / f"{sanitize_name(session_id)}.json"
+
+    def _is_alias(self, path: Path, stored_id: object, requested_id: str) -> bool:
+        """True when the record at ``path`` holds a different id that resolves to the same file.
+
+        The filesystem decides, so case and Unicode normalization count only where
+        it treats those names as one file. A stored id with a file of its own is
+        not an alias, so an older file whose name differs from its id stays readable.
+
+        Args:
+            path: the file ``requested_id`` resolved to.
+            stored_id: the ``id`` read from it; anything but a string is ignored.
+            requested_id: the id the caller asked for.
+
+        Raises:
+            OSError: the comparison failed, so the record's owner is unknown.
+        """
+        if not isinstance(stored_id, str) or stored_id == requested_id:
+            return False
+        try:
+            return self._session_path(stored_id).samefile(path)
+        except (FileNotFoundError, ValueError):
+            return False  # the stored id has no file of its own, or no valid filename
+        except OSError as e:
+            if e.errno == errno.ENAMETOOLONG:
+                return False  # no file can have that name
+            raise
 
     def location(self) -> str:
         """The sessions directory backing this store."""
@@ -128,7 +233,8 @@ class JsonFileStorage(TraceStorage):
 
         The fsync forces the bytes to disk before the atomic os.replace, so a
         crash cannot leave a truncated/empty session file — durability for the
-        provenance record. Cross-platform: no fcntl.
+        provenance record. The directory is then synced so the new name survives
+        a power loss (INV-14). Cross-platform: no fcntl.
         """
         self._ensure_dir()
         fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
@@ -141,6 +247,7 @@ class JsonFileStorage(TraceStorage):
             except OSError:
                 pass
             raise
+        fsync_dir(path.parent)
 
     def _write_file_exclusive(self, path: Path, data: str) -> None:
         """Create ``path`` holding ``data``, refusing to replace an existing file.
@@ -153,21 +260,23 @@ class JsonFileStorage(TraceStorage):
 
         A failed fallback write leaves the claimed file in place: once the name is
         visible another writer may have replaced it, so unlinking by path could
-        delete that writer's record.
+        delete that writer's record. A failed directory sync leaves it for the same
+        reason.
 
-        Side effects: creates ``path``; removes the temp file.
+        Side effects: creates ``path``; removes the temp file; syncs the directory.
 
         Raises:
             SessionIdTakenError: ``path`` already exists; it is left untouched.
-            OSError: the write failed for any other reason.
+            OSError: the write or the directory sync failed for any other reason.
         """
         self._ensure_dir()
         fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        published = False
         try:
             _write_and_fsync(fd, data)
             try:
                 os.link(tmp_path, str(path))
-                return
+                published = True
             except FileExistsError:
                 raise SessionIdTakenError(f"Session file already exists: {path}") from None
             except OSError as e:
@@ -178,11 +287,13 @@ class JsonFileStorage(TraceStorage):
             with contextlib.suppress(OSError):
                 os.unlink(tmp_path)
 
-        try:
-            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
-        except FileExistsError:
-            raise SessionIdTakenError(f"Session file already exists: {path}") from None
-        _write_and_fsync(fd, data)
+        if not published:
+            try:
+                fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+            except FileExistsError:
+                raise SessionIdTakenError(f"Session file already exists: {path}") from None
+            _write_and_fsync(fd, data)
+        fsync_dir(path.parent)
 
     @contextlib.asynccontextmanager
     async def lock(
@@ -210,8 +321,9 @@ class JsonFileStorage(TraceStorage):
 
         The lock file carries an identifying token (``<pid>:<time_ns>``) so the
         stale-steal path can re-verify the lock is byte- and mtime-identical to
-        the one it judged stale before unlinking it — closing the TOCTOU window
-        where a writer could delete another writer's *fresh* lock.
+        the one it judged stale before unlinking it. That narrows the window where
+        a writer could delete another writer's *fresh* lock but does not close it,
+        because the check and the unlink are separate steps.
 
         Side effects: creates/removes ``<session>.lock`` in the sessions dir
         (excluded from list/scan globs, which match ``trace_*.json``).
@@ -287,6 +399,8 @@ class JsonFileStorage(TraceStorage):
         path = self._session_path(session.id)
         if not path.exists():
             raise FileNotFoundError(f"Session file not found: {path}")
+        if self._is_alias(path, _read_stored_id(path), session.id):
+            raise FileNotFoundError(f"Session not found: {session.id}")
         data = json.dumps(session.model_dump(mode="json"), indent=2)
         self._write_file(path, data)
 
@@ -296,6 +410,8 @@ class JsonFileStorage(TraceStorage):
             raise FileNotFoundError(f"Session not found: {session_id}")
         with open(path) as f:
             raw = json.load(f)
+        if isinstance(raw, dict) and self._is_alias(path, raw.get("id"), session_id):
+            raise FileNotFoundError(f"Session not found: {session_id}")
         file_version = raw.get("trace_version") if isinstance(raw, dict) else None
         if _is_future_schema_version(file_version):
             logger.warning(
@@ -316,32 +432,33 @@ class JsonFileStorage(TraceStorage):
         # avoids a json_file <-> project_identity module cycle.
         from trace_mcp.project_identity import key_for_label, session_project_key
 
-        self._ensure_dir()
+        self._dir.mkdir(parents=True, exist_ok=True)  # a read must not fail on a durability sync
         query_key = key_for_label(project) if project else None
         summaries: list[dict[str, Any]] = []
-        files = sorted(self._dir.glob("trace_*.json"), reverse=True)
-        for path in files:
-            if len(summaries) >= limit:
+        previous_day: str | None = None
+        for path in self._session_files_newest_first():
+            # A filename orders days only, so finish a day before applying the limit.
+            day = _session_day(path)
+            if len(summaries) >= limit and day != previous_day:
                 break
-            try:
-                with open(path) as f:
-                    raw = json.load(f)
-                meta = raw.get("metadata", {})
-                if query_key is not None and session_project_key(meta) != query_key:
-                    continue
-                proj = meta.get("project", "")
-                summaries.append(
-                    {
-                        "id": raw.get("id", path.stem),
-                        "project": proj,
-                        "status": raw.get("status", "unknown"),
-                        "created": raw.get("created", ""),
-                        "event_count": len(raw.get("events", [])),
-                    }
-                )
-            except (json.JSONDecodeError, KeyError):
-                logger.warning("Skipping malformed session file: %s", path)
-        return summaries
+            previous_day = day
+            raw = _read_listable_session(path)
+            if raw is None:
+                continue
+            meta = raw.get("metadata", {})
+            if query_key is not None and session_project_key(meta) != query_key:
+                continue
+            summaries.append(
+                {
+                    "id": raw.get("id", path.stem),
+                    "project": meta.get("project", ""),
+                    "status": raw.get("status", "unknown"),
+                    "created": raw.get("created", ""),
+                    "event_count": len(raw.get("events", [])),
+                }
+            )
+        summaries.sort(key=_created_at, reverse=True)
+        return summaries[:limit]
 
     async def session_brief(
         self, project: str | None = None, scan_cap: int = 25, read_ceiling: int = 200
@@ -362,6 +479,12 @@ class JsonFileStorage(TraceStorage):
         with more files beyond it, ``window_exhausted`` says so — the caller can
         report "none found in the newest N" instead of "none exist".
 
+        ``most_recent`` is the match with the latest stored ``created`` time among
+        the files read. A session id orders days and nothing finer, so within a day
+        files are read most recently written first. If ``scan_cap`` matches were
+        written after the newest session was, that session is not read. Only JSON
+        reads are bounded; listing the directory and one ``stat`` per file are not.
+
         Returns: ``matched``, ``most_recent`` (brief of the newest match, or
         None), ``scanned`` (files read), ``capped`` (more files exist beyond
         what was scanned), ``window_exhausted`` (the read ceiling was hit with
@@ -373,28 +496,29 @@ class JsonFileStorage(TraceStorage):
         # the json_file <-> project_identity cycle).
         from trace_mcp.project_identity import key_for_label, session_project_key
 
-        self._ensure_dir()
+        self._dir.mkdir(parents=True, exist_ok=True)  # a read must not fail on a durability sync
         query_key = key_for_label(project) if project else None
-        files = sorted(self._dir.glob("trace_*.json"), reverse=True)
+        files = self._session_files_newest_first()
         total = len(files)
         scanned = 0
         matched = 0
         most_recent: dict[str, Any] | None = None
+        newest_at: datetime | None = None
         for path in files[:read_ceiling]:
             if matched >= scan_cap:
                 break
             scanned += 1
-            try:
-                with open(path) as f:
-                    raw = json.load(f)
-            except (json.JSONDecodeError, OSError):
+            raw = _read_listable_session(path)
+            if raw is None:
                 continue
             meta = raw.get("metadata", {})
             if query_key is not None and session_project_key(meta) != query_key:
                 continue
             proj = meta.get("project", "")
             matched += 1
-            if most_recent is None:
+            created_at = _created_at(raw)
+            if newest_at is None or created_at > newest_at:
+                newest_at = created_at
                 most_recent = {
                     "id": raw.get("id", path.stem),
                     "project": proj,
@@ -412,8 +536,20 @@ class JsonFileStorage(TraceStorage):
         }
 
     async def delete_session(self, session_id: str) -> None:
-        path = self._session_path(session_id)
-        if not path.exists():
-            raise FileNotFoundError(f"Session not found: {session_id}")
-        path.unlink()
+        """Delete a session under its lock, so it cannot interleave with a locked update (INV-15).
+
+        The lock is not reentrant: calling this while holding it times out.
+
+        Side effects: removes the session file; syncs the directory.
+
+        Raises:
+            FileNotFoundError: no record holds ``session_id``.
+            TimeoutError: the session lock could not be acquired.
+        """
+        async with self.lock(session_id):
+            path = self._session_path(session_id)
+            if not path.exists() or self._is_alias(path, _read_stored_id(path), session_id):
+                raise FileNotFoundError(f"Session not found: {session_id}")
+            path.unlink()
+            fsync_dir(path.parent)
         logger.info("Deleted session file: %s", path)

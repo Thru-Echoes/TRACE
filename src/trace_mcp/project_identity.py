@@ -53,6 +53,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 # Core → core import. ``_holder_status`` is the single PID-liveness policy behind
 # the session lock; reusing it (rather than re-deriving it) keeps lock-steal
 # safety a single implementation — the same reasoning as INV-1.
+from trace_mcp.durability import ensure_durable_dir, fsync_dir
 from trace_mcp.storage.json_file import _holder_status
 
 if TYPE_CHECKING:
@@ -403,19 +404,23 @@ def _atomic_write_registry(path: Path, registry: ProjectRegistry) -> None:
     """Serialize *registry* to *path* atomically (temp + ``os.replace``).
 
     The SOLE registry write path — every mutation routes through
-    ``locked_registry`` which calls this under the lock (INV-7).
+    ``locked_registry`` which calls this under the lock (INV-7). The file and its
+    directory are synced so the registry survives a power loss (INV-14).
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_durable_dir(path.parent)
     data = json.dumps(registry.model_dump(mode="json"), indent=2) + "\n"
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), prefix=".projects-", suffix=".tmp")
     try:
         with os.fdopen(fd, "w") as handle:
             handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
         os.replace(tmp, path)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
+    fsync_dir(path.parent)
 
 
 @contextlib.contextmanager

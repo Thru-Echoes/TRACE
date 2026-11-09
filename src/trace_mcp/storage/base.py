@@ -45,7 +45,10 @@ class TraceStorage(ABC):
 
     @abstractmethod
     async def delete_session(self, session_id: str) -> None:
-        """Delete a session."""
+        """Delete a session, refusing to interleave with a locked update of it.
+
+        Implementations must hold the session's lock while deleting (INV-15).
+        """
         ...
 
     def location(self) -> str:

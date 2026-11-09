@@ -497,6 +497,9 @@ file is visible while it is written, so a concurrent `get_session` can raise
 failed write deliberately does not unlink the file: another writer may already
 have replaced it. Aggregate reads leave a partial file out.
 
+**External writers.** This invariant covers the storage backend. A program that writes
+session files directly must follow `docs/integrations/external-writers.md`.
+
 **Guard scope.** The AST guards are syntactic regression checks on the named
 functions, not a call-graph proof.
 
@@ -507,6 +510,91 @@ functions, not a call-graph proof.
 creators on both publication paths, complete-file publication, a fallback failure
 that must not delete a concurrent update, real link failures, a store path that is
 not a directory, fresh-id retry, and bounded failure).
+
+**Status.** ENFORCED.
+
+---
+
+## INV-14 — A published name survives a power loss
+
+**Invariant.** A write that creates, replaces, or deletes a session file, the project
+registry, or a knowledge store does not return success until the file's bytes and its
+parent directory have been synced. Before a process first uses a store directory, it
+syncs every ancestor of that directory, because existence does not show that another
+process finished making the name durable. `trace_mcp.durability` holds the directory sync
+and its platform contract.
+
+**Why this is an integrity invariant.** `fsync` on a file does not make its name durable.
+The name lives in the directory, so a power loss could undo a session the caller had been
+told was recorded.
+
+**Platform contract.** Where `os.O_DIRECTORY` exists, the directory is synced and a failure
+is raised. A filesystem that reports it cannot sync directories is tolerated with one
+warning per directory. An ancestor that is read-only or that the process cannot open is
+skipped, since this process cannot have just added a name there. Reads never sync. Windows has no directory
+sync, so the step is skipped. The guarantee
+is whatever `os.fsync` provides on the host; on macOS that excludes a drive-cache flush.
+
+**Exhaustive site-set:**
+- Durable publishers — `storage/json_file.py :: _write_file`, `:: _write_file_exclusive`;
+  `project_identity.py :: _atomic_write_registry`; `extensions/learn/store.py :: save_store`.
+- Durable delete — `storage/json_file.py :: delete_session`.
+- Regenerable, exempt — `scratchpad.py :: _atomic_write` and
+  `extensions/learn/store.py :: save_embeddings_cache`.
+- Operator-run with backups, exempt — `identity_cli.py :: cmd_merge_stores`.
+
+**Known limitation.** A directory-sync failure is reported after the name has changed, so
+the caller sees an error while the record stays visible. It is not removed, because another
+writer may already depend on it. A process does not re-sync a store's ancestors if one of
+them is moved while it runs, or if the store is deleted and recreated at the same path on a
+reused inode. Operator-run migrations in `identity_cli.py` keep their
+existing backups and are outside this invariant, as are append-only logs.
+
+**Tests.** `tests/test_invariants.py :: test_inv14_every_publisher_is_classified`,
+`:: test_inv14_durable_publishers_sync_the_file_and_the_directory`,
+`:: test_inv14_session_delete_syncs_the_directory`, and
+`tests/test_storage_durability_identity.py :: TestDirectoryDurability`,
+`:: TestDirectorySyncPlatformContract`.
+
+**Status.** ENFORCED.
+
+---
+
+## INV-15 — A session id addresses one record
+
+**Invariant.** `get_session`, `update_session`, and `delete_session` treat a file whose
+stored id differs from the requested id, but resolves to that same file, as not found.
+`locked_disk_session` refuses a file that holds any session other than the one requested,
+so an update cannot land on a record whose lock the caller does not hold. `delete_session`
+holds the session's lock, so a delete cannot interleave with a locked read-modify-write.
+
+**Why this is an integrity invariant.** `sanitize_name` is lossy and some filesystems
+ignore case or Unicode normalization, so distinct ids can share one file. Without this
+check, one id could read, replace, or delete another id's record. An unlocked delete
+followed by a re-create let an updater that had already loaded the old record overwrite
+the new one.
+
+**Compatibility.** A file whose stored id has a file of its own is not an alias and stays
+readable under its filename, so no migration is needed, but `locked_disk_session` will not
+write it. A corrupt file can still be replaced by `update_session`. A file that cannot be
+read raises rather than being treated as unowned.
+
+**Known limitations.** The lock inherits the stale-lock steal race documented on
+`JsonFileStorage.lock`: two contenders can both judge a dead holder's lock stale, and one
+can then remove the other's new lock. `create_session` takes no lock, so a writer that
+loaded nothing from disk and is using its fallback session can still replace a session
+created under the same id while it holds the lock.
+
+**Exhaustive site-set:** `storage/json_file.py :: get_session`, `:: update_session`,
+`:: delete_session`; `storage/locked.py :: locked_disk_session`.
+
+**Guard scope.** The AST guards are syntactic regression checks on the named methods.
+
+**Tests.** `tests/test_invariants.py :: test_inv15_every_id_addressed_access_refuses_aliases`,
+`:: test_inv15_delete_takes_the_session_lock`,
+`:: test_inv15_locked_write_refuses_another_record`, and
+`tests/test_storage_durability_identity.py :: TestOneRecordPerSessionId`,
+`:: TestDeleteTakesTheSessionLock`.
 
 **Status.** ENFORCED.
 

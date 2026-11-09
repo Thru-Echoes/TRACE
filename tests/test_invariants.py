@@ -513,3 +513,103 @@ def test_inv13_backend_create_is_exclusive() -> None:
     assert not write_calls & {"_write_file", "replace", "rename"}, (
         "INV-13 violation: the exclusive write can replace an existing session."
     )
+
+
+# ── INV-14: a published name survives a power loss ────────────────────────
+# Every function that publishes with os.replace or os.link is either a durable
+# publisher, which must sync the file and its directory, or an exempt writer of
+# data that can be regenerated.
+INV14_DURABLE_PUBLISHERS = {
+    ("storage/json_file.py", "_write_file"),
+    ("storage/json_file.py", "_write_file_exclusive"),
+    ("project_identity.py", "_atomic_write_registry"),
+    ("extensions/learn/store.py", "save_store"),
+}
+INV14_REGENERABLE_PUBLISHERS = {
+    ("scratchpad.py", "_atomic_write"),
+    ("extensions/learn/store.py", "save_embeddings_cache"),
+}
+INV14_OPERATOR_RUN_PUBLISHERS = {
+    ("identity_cli.py", "cmd_merge_stores"),
+}
+
+
+def _function_calls(relpath: str, function: str) -> set[str]:
+    """Names called anywhere inside ``function`` in the file at ``relpath``."""
+    tree = ast.parse((SRC / relpath).read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == function:
+            return {name for sub in ast.walk(node) if isinstance(sub, ast.Call) and (name := _call_name(sub))}
+    raise AssertionError(f"{relpath}::{function} disappeared; the invariant guard has nothing to check.")
+
+
+def _is_publishing_call(call: ast.Call) -> bool:
+    """True for ``os.replace/rename/link``, ``shutil.move``, or a pathlib ``rename``/``replace``.
+
+    ``str.replace`` takes two arguments, which separates it from ``Path.replace``.
+    """
+    func = call.func
+    if not isinstance(func, ast.Attribute):
+        return False
+    module = func.value.id if isinstance(func.value, ast.Name) else None
+    if module == "os":
+        return func.attr in {"replace", "rename", "link"}
+    if module == "shutil":
+        return func.attr == "move"
+    return func.attr == "rename" or (func.attr == "replace" and len(call.args) == 1)
+
+
+def _os_publishers() -> set[tuple[str, str]]:
+    """Every (relpath, function) whose body publishes a name by rename, replace, link, or move."""
+    found: set[tuple[str, str]] = set()
+    for path in _src_files():
+        for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and any(
+                isinstance(sub, ast.Call) and _is_publishing_call(sub) for sub in ast.walk(node)
+            ):
+                found.add((_rel(path), node.name))
+    return found
+
+
+def test_inv14_every_publisher_is_classified() -> None:
+    """A new publisher must be registered as durable or as regenerable."""
+    registered = INV14_DURABLE_PUBLISHERS | INV14_REGENERABLE_PUBLISHERS | INV14_OPERATOR_RUN_PUBLISHERS
+    publishers = _os_publishers()
+    assert publishers == registered, (
+        "INV-14 (docs/INVARIANTS.md): the set of publishing functions changed. "
+        f"Unregistered: {sorted(publishers - registered)}; stale: {sorted(registered - publishers)}."
+    )
+
+
+def test_inv14_durable_publishers_sync_the_file_and_the_directory() -> None:
+    for relpath, function in sorted(INV14_DURABLE_PUBLISHERS):
+        calls = _function_calls(relpath, function)
+        assert "fsync_dir" in calls, f"INV-14 violation: {relpath}::{function} does not sync its directory."
+        assert calls & {"fsync", "_write_and_fsync"}, f"INV-14 violation: {relpath}::{function} does not sync its file."
+
+
+def test_inv14_session_delete_syncs_the_directory() -> None:
+    assert "fsync_dir" in _json_backend_calls("delete_session"), (
+        "INV-14 violation: a delete can be undone by power loss."
+    )
+
+
+# ── INV-15: a session id addresses one record ─────────────────────────────
+def test_inv15_every_id_addressed_access_refuses_aliases() -> None:
+    for method in ("get_session", "update_session", "delete_session"):
+        assert "_is_alias" in _json_backend_calls(method), (
+            f"INV-15 violation: {method} can reach a record stored under a different id."
+        )
+
+
+def test_inv15_locked_write_refuses_another_record() -> None:
+    source = (SRC / "storage" / "locked.py").read_text()
+    assert "disk.id != session_id" in source, (
+        "INV-15 violation: locked_disk_session can hand a caller a record whose lock it does not hold."
+    )
+
+
+def test_inv15_delete_takes_the_session_lock() -> None:
+    assert "lock" in _json_backend_calls("delete_session"), (
+        "INV-15 violation: an unlocked delete lets a stale updater overwrite a recreated id."
+    )
