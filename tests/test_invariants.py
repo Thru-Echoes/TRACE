@@ -16,7 +16,10 @@ registry each test enforces.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
+
+import pytest
 
 import trace_mcp
 
@@ -675,3 +678,56 @@ def test_inv16_health_check_scopes_both_of_its_addressing_modes() -> None:
     assert {"get_read_scope_project", "_check_read_scope_by_id"} <= calls, (
         "INV-16 violation: trace_health_check takes a project and a session id, and must scope both."
     )
+
+
+# ── INV-17: lock files are removed only through trace_mcp.lockfile ────────
+# Exclusive creation is safe alone. Removal by name is what lets a writer delete a
+# newer lock, so every lock implementation must remove through the guarded helpers.
+INV17_LOCK_IMPLEMENTATIONS: set[tuple[str, str]] = {
+    ("storage/json_file.py", "lock"),
+    ("project_identity.py", "exclusive_file_lock"),
+}
+INV17_EXCLUSIVE_CREATORS: set[tuple[str, str]] = {
+    ("lockfile.py", "create_lock"),
+    ("storage/json_file.py", "_write_file_exclusive"),
+}
+
+
+def _functions_using_name(name: str) -> set[tuple[str, str]]:
+    found: set[tuple[str, str]] = set()
+    for path in _src_files():
+        tree = ast.parse(path.read_text(), filename=str(path))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                for sub in ast.walk(node):
+                    if (isinstance(sub, ast.Attribute) and sub.attr == name) or (
+                        isinstance(sub, ast.Name) and sub.id == name
+                    ):
+                        found.add((_rel(path), node.name))
+    return found
+
+
+def test_inv17_no_unregistered_exclusive_creator() -> None:
+    assert _functions_using_name("O_EXCL") == INV17_EXCLUSIVE_CREATORS, (
+        "INV-17 violation: a new O_EXCL site may be a hand-rolled lock. Use trace_mcp.lockfile, "
+        "or register a non-lock use in INV17_EXCLUSIVE_CREATORS."
+    )
+
+
+@pytest.mark.parametrize("helper", ["create_lock", "steal_if_stale", "release_lock"])
+def test_inv17_every_lock_uses_the_shared_helpers(helper: str) -> None:
+    assert _functions_calling(helper) == INV17_LOCK_IMPLEMENTATIONS, (
+        f"INV-17 violation: {helper} must be called by exactly the registered lock implementations."
+    )
+
+
+def test_inv17_nothing_outside_lockfile_removes_a_lock_by_name() -> None:
+    offenders: list[str] = []
+    for path in _src_files():
+        if _rel(path) == "lockfile.py":
+            continue
+        for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+            if isinstance(node, ast.Call) and _call_name(node) in {"unlink", "remove", "replace", "rename"}:
+                if re.search(r"(?<![a-z])lock", ast.unparse(node).lower()):
+                    offenders.append(f"{_rel(path)}:{node.lineno}")
+    assert not offenders, f"INV-17 violation: lock files removed outside trace_mcp.lockfile: {offenders}"

@@ -14,6 +14,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Recovering from a crashed writer can no longer let two writers in at once.** When two
+  writers both found a dead holder's lock, one could steal it and create its own, and the
+  other could then delete that new lock, losing an update without any error. Releasing a
+  lock also removed it by name without checking ownership. Session, registry, and knowledge
+  locks now remove lock files through one guarded path, registered as INV-17. The guarantee
+  holds once every running server has restarted.
 - **LLM requests now work with the default model.** Scoring and extraction sent
   `temperature=0.0`, which `gpt-6-luna` rejects with HTTP 400, so every such request failed
   unless a model override was set. Neither sends a temperature now, so an overriding model

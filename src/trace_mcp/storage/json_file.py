@@ -14,22 +14,19 @@ import logging
 import os
 import re
 import tempfile
-import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from trace_mcp.durability import ensure_durable_dir, fsync_dir
+from trace_mcp.lockfile import create_lock, new_lock_token, release_lock, steal_if_stale
 from trace_mcp.schema import SCHEMA_VERSION, Session
 from trace_mcp.storage.base import SessionIdTakenError, TraceStorage
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DIR = os.path.expanduser("~/.trace/sessions")
-
-# On Windows, os.kill(pid, 0) terminates the process instead of probing it.
-_PID_PROBE_IS_SAFE = os.name != "nt"
 
 # os.link errors meaning hard-link publication is unavailable here, because the
 # filesystem lacks hard links or a policy denies them. Anything else (a full
@@ -69,32 +66,6 @@ def _is_future_schema_version(file_version: str | None) -> bool:
         return _minor_version(file_version) > _minor_version(SCHEMA_VERSION)
     except ValueError:
         return False
-
-
-def _holder_status(token: bytes) -> str:
-    """Liveness of the process named in a lock token (``<pid>:<time_ns>``).
-
-    Returns ``"dead"`` (holder process is gone — safe to steal), ``"alive"``
-    (holder is running — must NOT steal, however old the lock), or
-    ``"unknown"`` (token unparseable / legacy-empty, or liveness not
-    determinable on this platform — fall back to the time-based steal). Valid
-    only under the single-host advisory-lock assumption the lock documents.
-    """
-    try:
-        pid = int(token.split(b":", 1)[0])
-    except (ValueError, IndexError):
-        return "unknown"
-    if pid <= 0 or not _PID_PROBE_IS_SAFE:
-        return "unknown"
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return "dead"
-    except PermissionError:
-        return "alive"  # process exists, owned by another user
-    except OSError:
-        return "unknown"  # e.g. signal-0 liveness unsupported on this platform
-    return "alive"
 
 
 def sanitize_name(name: str) -> str:
@@ -323,56 +294,27 @@ class JsonFileStorage(TraceStorage):
         single-host advisory only (``O_EXCL`` does not synchronize across NFS /
         distinct mounts); TRACE's deployment is a local per-user ``~/.trace``.
 
-        The lock file carries an identifying token (``<pid>:<time_ns>``) so the
-        stale-steal path can re-verify the lock is byte- and mtime-identical to
-        the one it judged stale before unlinking it. That narrows the window where
-        a writer could delete another writer's *fresh* lock but does not close it,
-        because the check and the unlink are separate steps.
+        A lock is removed only through ``trace_mcp.lockfile``, which re-reads it
+        under a removal guard, so a writer cannot delete another writer's newer
+        lock (INV-17).
 
         Side effects: creates/removes ``<session>.lock`` in the sessions dir
         (excluded from list/scan globs, which match ``trace_*.json``).
 
         Raises:
-            TimeoutError: the lock could not be acquired within ``timeout``.
+            TimeoutError: the lock could not be acquired within ``timeout``, or
+                its removal guard cannot work in this directory.
         """
         self._ensure_dir()
         lock_path = self._dir / f"{sanitize_name(session_id)}.lock"
-        token = f"{os.getpid()}:{time.time_ns()}".encode()
-        acquired = False
+        token = new_lock_token()
         waited = 0.0
-        while True:
-            try:
-                fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                try:
-                    os.write(fd, token)
-                finally:
-                    os.close(fd)
-                acquired = True
-                break
-            except FileExistsError:
-                pass  # someone holds it — decide below whether to steal
-
-            # Steal the lock only if its holder is provably DEAD (single-host
-            # PID liveness), or — for an unparseable/legacy token whose holder
-            # cannot be checked — if it is older than ``steal_after`` (time
-            # backstop). A LIVE holder is never stolen, however old its lock.
-            # The byte+mtime re-verify before unlink avoids deleting a different,
-            # fresher lock (the TOCTOU the empty pre-fix lock file allowed).
-            stole = False
-            try:
-                token_seen = lock_path.read_bytes()
-                before = os.stat(lock_path)
-                holder = _holder_status(token_seen)
-                stale_by_time = (time.time() - before.st_mtime) > steal_after
-                if holder == "dead" or (holder == "unknown" and stale_by_time):
-                    after = os.stat(lock_path)
-                    if after.st_mtime_ns == before.st_mtime_ns and lock_path.read_bytes() == token_seen:
-                        os.unlink(lock_path)
-                        stole = True
-            except OSError:
-                pass  # lock vanished mid-check — fall through to retry (counts vs budget)
-            if stole:
-                continue  # freed it — retry the create immediately
+        while not create_lock(lock_path, token):
+            # Steal only if the holder is provably dead or, when it cannot be
+            # checked, the lock is older than ``steal_after``. A running holder's
+            # lock is never stolen, however old.
+            if steal_if_stale(lock_path, steal_after):
+                continue  # freed it, so retry the create immediately
             if waited >= timeout:
                 raise TimeoutError(
                     f"Could not acquire the per-session lock for '{session_id}' "
@@ -385,11 +327,7 @@ class JsonFileStorage(TraceStorage):
         try:
             yield
         finally:
-            if acquired:
-                try:
-                    os.unlink(lock_path)
-                except OSError:
-                    pass
+            release_lock(lock_path, token)
 
     async def create_session(self, session: Session) -> str:
         """Persist a new session. Raises ``SessionIdTakenError`` if the id is taken (INV-13)."""
