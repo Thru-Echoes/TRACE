@@ -448,3 +448,68 @@ def test_inv12_store_writes_refuse_an_aliased_store() -> None:
         f"INV-12 violation: these write paths no longer refuse an aliased store: {sorted(missing)}. "
         "Writing to a store with duplicate learning ids spreads the aliasing."
     )
+
+
+# ── INV-13: session creation never replaces an existing record ────────────
+# Every function that reaches create_session, on the backend or the tool path.
+# A new caller must be registered here deliberately: only
+# tools/session_tools.py::create_session handles a taken id by minting another.
+INV13_SESSION_CREATORS = {
+    ("tools/session_tools.py", "create_session"),
+    ("tools/session_tools.py", "start_session"),
+    ("server.py", "_ensure_session"),
+    ("server.py", "trace_start_session"),
+}
+
+
+def _json_backend_calls(method: str) -> set[str]:
+    """Names called inside the named method of the JSON storage backend."""
+    tree = ast.parse((SRC / "storage" / "json_file.py").read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef) and node.name == method:
+            return {name for sub in ast.walk(node) if isinstance(sub, ast.Call) and (name := _call_name(sub))}
+    raise AssertionError(f"JsonFileStorage.{method} disappeared — INV-13's guard has nothing to check.")
+
+
+def test_inv13_session_creators_are_registered() -> None:
+    """A new route to session creation must be registered, and a removed one unregistered."""
+    creators = _functions_calling("create_session")
+    assert creators == INV13_SESSION_CREATORS, (
+        "INV-13 (docs/INVARIANTS.md): the session-creation call sites changed. "
+        f"Unregistered: {sorted(creators - INV13_SESSION_CREATORS)}; "
+        f"stale: {sorted(INV13_SESSION_CREATORS - creators)}. A new caller must handle a taken id."
+    )
+
+
+def test_inv13_only_the_retrying_path_calls_the_backend() -> None:
+    """Touching ``create_session`` on anything but ``session_tools`` reaches the backend, which has no retry."""
+    direct: set[tuple[str, str]] = set()
+    for path in _src_files():
+        for node in ast.walk(ast.parse(path.read_text(), filename=str(path))):
+            if not isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+                continue
+            for sub in ast.walk(node):
+                if (
+                    isinstance(sub, ast.Attribute)
+                    and sub.attr == "create_session"
+                    and not (isinstance(sub.value, ast.Name) and sub.value.id == "session_tools")
+                ):
+                    direct.add((_rel(path), node.name))
+    assert direct == {("tools/session_tools.py", "create_session")}, (
+        f"INV-13 violation: these functions call the storage backend's create_session directly: {sorted(direct)}. "
+        "Go through session_tools.create_session, which mints a fresh id when one is taken."
+    )
+
+
+def test_inv13_backend_create_is_exclusive() -> None:
+    """``create_session`` must publish through ``os.link``, never through a replace."""
+    create_calls = _json_backend_calls("create_session")
+    assert "_write_file_exclusive" in create_calls, "INV-13 violation: create_session is no longer exclusive."
+    assert not create_calls & {"_write_file", "replace", "rename"}, (
+        "INV-13 violation: create_session reaches a write that replaces an existing session."
+    )
+    write_calls = _json_backend_calls("_write_file_exclusive")
+    assert "link" in write_calls, "INV-13 violation: the exclusive write no longer publishes with os.link."
+    assert not write_calls & {"_write_file", "replace", "rename"}, (
+        "INV-13 violation: the exclusive write can replace an existing session."
+    )

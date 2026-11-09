@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import errno
 import json
 import logging
 import os
@@ -19,11 +20,27 @@ from pathlib import Path
 from typing import Any
 
 from trace_mcp.schema import SCHEMA_VERSION, Session
-from trace_mcp.storage.base import TraceStorage
+from trace_mcp.storage.base import SessionIdTakenError, TraceStorage
 
 logger = logging.getLogger(__name__)
 
 _DEFAULT_DIR = os.path.expanduser("~/.trace/sessions")
+
+# os.link errors meaning hard-link publication is unavailable here, because the
+# filesystem lacks hard links or a policy denies them. Anything else (a full
+# disk, an I/O error) is a real failure and must reach the caller.
+_HARD_LINKS_UNSUPPORTED = frozenset({errno.EPERM, errno.ENOTSUP, errno.EOPNOTSUPP, errno.ENOSYS})
+
+
+def _write_and_fsync(fd: int, data: str) -> None:
+    """Write ``data`` to an open descriptor and force it to disk.
+
+    Side effects: writes to and closes ``fd``.
+    """
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
 
 
 def _minor_version(v: str) -> tuple[int, int]:
@@ -116,10 +133,7 @@ class JsonFileStorage(TraceStorage):
         self._ensure_dir()
         fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
         try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                f.write(data)
-                f.flush()
-                os.fsync(f.fileno())
+            _write_and_fsync(fd, data)
             os.replace(tmp_path, str(path))
         except BaseException:
             try:
@@ -127,6 +141,48 @@ class JsonFileStorage(TraceStorage):
             except OSError:
                 pass
             raise
+
+    def _write_file_exclusive(self, path: Path, data: str) -> None:
+        """Create ``path`` holding ``data``, refusing to replace an existing file.
+
+        The bytes are fsynced to a temp file and published with ``os.link``, so
+        a reader never sees a partial record and the name is claimed atomically.
+        Where hard-link publication is unavailable, this falls back to writing
+        through an ``O_CREAT | O_EXCL`` descriptor, which claims the name just as
+        atomically but exposes the file while it is being written.
+
+        A failed fallback write leaves the claimed file in place: once the name is
+        visible another writer may have replaced it, so unlinking by path could
+        delete that writer's record.
+
+        Side effects: creates ``path``; removes the temp file.
+
+        Raises:
+            SessionIdTakenError: ``path`` already exists; it is left untouched.
+            OSError: the write failed for any other reason.
+        """
+        self._ensure_dir()
+        fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            _write_and_fsync(fd, data)
+            try:
+                os.link(tmp_path, str(path))
+                return
+            except FileExistsError:
+                raise SessionIdTakenError(f"Session file already exists: {path}") from None
+            except OSError as e:
+                if e.errno not in _HARD_LINKS_UNSUPPORTED:
+                    raise
+                logger.warning("Hard links unavailable in %s; creating with O_EXCL", path.parent)
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_path)
+
+        try:
+            fd = os.open(str(path), os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        except FileExistsError:
+            raise SessionIdTakenError(f"Session file already exists: {path}") from None
+        _write_and_fsync(fd, data)
 
     @contextlib.asynccontextmanager
     async def lock(
@@ -220,9 +276,10 @@ class JsonFileStorage(TraceStorage):
                     pass
 
     async def create_session(self, session: Session) -> str:
+        """Persist a new session. Raises ``SessionIdTakenError`` if the id is taken (INV-13)."""
         path = self._session_path(session.id)
         data = json.dumps(session.model_dump(mode="json"), indent=2)
-        self._write_file(path, data)
+        self._write_file_exclusive(path, data)
         logger.info("Created session file: %s", path)
         return session.id
 

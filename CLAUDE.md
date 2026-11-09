@@ -86,12 +86,12 @@ provides a `register(mcp, storage)` function.
 
 Correctness invariants are registered in [`docs/INVARIANTS.md`](docs/INVARIANTS.md)
 — one entry per invariant with its exhaustive site-set and enforcing test.
-Twelve are registered and enforced (INV-1 … INV-12), covering session writes,
+Thirteen are registered and enforced (INV-1 … INV-13), covering session writes,
 completed-session immutability, decision validation, canonical-key project
 scoping, cloud-egress attestation, project/session coherence, registry writes,
 the knowledge-store lock, learn-tool label guarding, version-declaration
-consistency, conformance of a freshly initialized project, and learning-id
-uniqueness.
+consistency, conformance of a freshly initialized project, learning-id
+uniqueness, and exclusive session creation.
 `tests/test_invariants.py` runs as a dedicated CI step and **fails when a new
 site appears that is not registered** — a new `storage.update_session` caller
 outside `locked_disk_session`, a new OpenAI call site that does not

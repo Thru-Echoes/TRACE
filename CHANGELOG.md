@@ -14,6 +14,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Creating a session can no longer overwrite an existing one.** `create_session` ended
+  in `os.replace` with no check on the target, so an id collision destroyed the earlier
+  record and left no sign it had existed. Generated ids carry 24 random bits per day, and
+  pipelines that write into the same store mint ids in the same namespace. Creation now
+  claims the filename atomically and raises `SessionIdTakenError` when it is taken, and the
+  session tools mint a fresh id and retry a bounded number of times. `update_session`
+  still replaces. Registered as INV-13.
 - **A failed query embedding no longer takes recall down with it.** Stored learnings
   carry vectors, but every recall also embeds the query, and that call failed as a bare
   exception when the OpenAI endpoint was unreachable or the `fastembed` model files were

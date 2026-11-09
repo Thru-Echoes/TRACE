@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import platform
 import re
 import sys
@@ -12,8 +13,14 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from trace_mcp.schema import Actor, Environment, Session, SessionMetadata, TraceEvent
-from trace_mcp.storage.base import TraceStorage
+from trace_mcp.storage.base import SessionIdTakenError, TraceStorage
 from trace_mcp.storage.locked import locked_disk_session
+
+logger = logging.getLogger(__name__)
+
+# How many ids to mint before giving up. A collision needs the same 24-bit
+# suffix on the same day, so several in a row point at a broken generator.
+SESSION_ID_ATTEMPTS = 5
 
 # ── Attribution Audit Models ─────────────────────────────────────────────
 
@@ -543,26 +550,37 @@ async def create_session(
     only when the process is pinned and therefore has an authoritative answer;
     left ``None``, the session carries the legacy shape and readers resolve its
     ``project`` label through the alias table instead.
-    """
-    session_id = _generate_session_id()
-    actor_list = [Actor(**p) for p in participants] if participants else []
-    env = _auto_environment()
 
-    session = Session(
-        id=session_id,
-        metadata=SessionMetadata(
-            project=project,
-            project_key=project_key,
-            experiment_id=experiment_id,
-            description=description,
-            participants=actor_list,
-            environment=env,
-            tags=tags or [],
-        ),
+    A minted id that is already taken is discarded and a fresh one tried (INV-13),
+    so a collision cannot overwrite the existing record. Exhausting the attempts
+    raises to the caller.
+
+    Side effects: writes the new session file; registers it in *active_sessions*.
+
+    Raises:
+        SessionIdTakenError: no unused id was found in ``SESSION_ID_ATTEMPTS`` tries.
+    """
+    actor_list = [Actor(**p) for p in participants] if participants else []
+    metadata = SessionMetadata(
+        project=project,
+        project_key=project_key,
+        experiment_id=experiment_id,
+        description=description,
+        participants=actor_list,
+        environment=_auto_environment(),
+        tags=tags or [],
     )
-    await storage.create_session(session)
-    active_sessions[session_id] = session
-    return session
+
+    for _ in range(SESSION_ID_ATTEMPTS):
+        session = Session(id=_generate_session_id(), metadata=metadata)
+        try:
+            await storage.create_session(session)
+        except SessionIdTakenError:
+            logger.warning("Session id %s is already taken; minting another", session.id)
+            continue
+        active_sessions[session.id] = session
+        return session
+    raise SessionIdTakenError(f"Could not mint an unused session id in {SESSION_ID_ATTEMPTS} attempts.")
 
 
 async def start_session(

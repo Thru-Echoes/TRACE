@@ -464,6 +464,54 @@ names the repair command).
 
 ---
 
+## INV-13 — Session creation never replaces an existing record  · ENFORCED
+
+**Statement.** Creating a session through the storage backend claims its
+filename atomically and raises `SessionIdTakenError` if the name is taken,
+leaving the existing record untouched. The session-creation tool path treats a
+taken id by minting a fresh one, a bounded number of times, and then fails
+loudly. It never falls back to a replace. Within the backend, only
+`update_session` replaces a session file, and it requires that the file already
+exists. The importers' `--output` is out of scope: it writes to a path the
+operator names and does not go through the store.
+
+**Why this is an integrity invariant.** Generated ids carry 24 random bits per
+day, and external pipelines that share the store mint ids in the same namespace.
+When creation ended in `os.replace`, a collision destroyed the earlier session
+and nothing on disk showed it had existed.
+
+**Exhaustive site-set:**
+- Exclusive write — `src/trace_mcp/storage/json_file.py ::
+  JsonFileStorage._write_file_exclusive`, called by `create_session`.
+- Fresh-id retry — `src/trace_mcp/tools/session_tools.py :: create_session`, the
+  one caller of the backend's `create_session`.
+- Routes into it — `tools/session_tools.py :: start_session`,
+  `server.py :: _ensure_session`, `server.py :: trace_start_session`.
+
+**Known limitation.** Where `os.link` reports that hard-link publication is
+unavailable (the filesystem lacks hard links or a policy denies them), creation
+falls back to writing through an `O_CREAT | O_EXCL` descriptor. Any other
+`os.link` failure is raised. The fallback's claim is still exclusive, but the
+file is visible while it is written, so a concurrent `get_session` can raise
+`JSONDecodeError`, and a crash or failed write can leave a partial record. A
+failed write deliberately does not unlink the file: another writer may already
+have replaced it. Aggregate reads leave a partial file out.
+
+**Guard scope.** The AST guards are syntactic regression checks on the named
+functions, not a call-graph proof.
+
+**Tests.** `tests/test_invariants.py :: test_inv13_session_creators_are_registered`,
+`:: test_inv13_only_the_retrying_path_calls_the_backend`,
+`:: test_inv13_backend_create_is_exclusive`, and
+`tests/test_session_create_exclusive.py` (byte-identical first record, concurrent
+creators on both publication paths, complete-file publication, a fallback failure
+that must not delete a concurrent update, real link failures, a store path that is
+not a directory, fresh-id retry, and bounded failure).
+
+**Status.** ENFORCED.
+
+---
+
 *To add an invariant: give it the next `INV-N`, state it, enumerate the
 exhaustive site-set, name the guard + test, and add a check that fails when a
 new site violates it — in `tests/test_invariants.py` for the AST/enumeration
