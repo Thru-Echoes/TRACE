@@ -21,6 +21,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
+from trace_mcp.durability import ensure_durable_dir, fsync_dir
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning
 
 if TYPE_CHECKING:
@@ -178,7 +179,7 @@ def save_store(store: KnowledgeStore, directory: str | None = None) -> Path:
     _refuse_duplicate_ids(store)
 
     path = _store_path(store.project, directory)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_durable_dir(path.parent)
 
     # Refresh the updated timestamp on every save
     store.updated = datetime.now(UTC)
@@ -190,6 +191,8 @@ def save_store(store: KnowledgeStore, directory: str | None = None) -> Path:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
         os.replace(tmp_path, str(path))
     except BaseException:
         # Clean up temp file on any failure
@@ -198,6 +201,7 @@ def save_store(store: KnowledgeStore, directory: str | None = None) -> Path:
         except OSError:
             pass
         raise
+    fsync_dir(path.parent)  # INV-14: the new name must survive a power loss
 
     # Best-effort sidecar cache for fast embedding search
     save_embeddings_cache(store, directory)

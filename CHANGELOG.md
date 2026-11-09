@@ -14,6 +14,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **An acknowledged write is now durable where the platform allows it.** Session writes synced the file but
+  not the directory holding its name, so a power loss could undo a create, a replace, or a
+  delete already reported as successful. The project registry and knowledge stores did not
+  sync their files either. All three now do, with a stated platform contract in
+  `trace_mcp.durability`, which also makes the path to a store durable before first use.
+  Registered as INV-14.
+- **The session-start banner no longer picks an arbitrary session from the latest day.** `session_brief` and
+  `list_sessions` ordered files by name, and a session id orders days and nothing finer, so
+  an earlier session from the same day could be reported as the most recent. Both now rank
+  by the stored `created` time. `list_sessions` ranks every session of a day before applying
+  its limit. `session_brief` still opens a bounded number of files, reading a day's most
+  recently written files first, so it can miss the newest session on a very busy day.
+- **Distinct session ids can no longer share one record.** Filename sanitization is lossy,
+  so two ids could resolve to one file and read, replace, or delete each other's record.
+  Those accesses now report the session as not found, and existing records need no
+  migration. A locked write refuses a file holding any other session, and `delete_session`
+  holds the session lock, so it cannot interleave with a locked update. Registered as INV-15.
+- **One malformed session file no longer takes down every listing.** A file holding valid
+  JSON of the wrong shape, or invalid UTF-8, aborted `list_sessions` and the session-start
+  brief. It is now skipped, and reads no longer depend on a durability sync.
+- **Waiting for a session lock can no longer kill the holder on Windows.** The liveness
+  probe used `os.kill(pid, 0)`, which terminates the process there. Windows now falls back to
+  the lock's age.
+- **Programs that write the session store directly now have a written contract**, in
+  `docs/integrations/external-writers.md`. TRACE's storage guarantees cannot cover code it
+  does not run.
 - **Creating a session can no longer overwrite an existing one.** `create_session` ended
   in `os.replace` with no check on the target, so an id collision destroyed the earlier
   record and left no sign it had existed. Generated ids carry 24 random bits per day, and

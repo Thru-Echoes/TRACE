@@ -57,6 +57,7 @@ async def locked_disk_session(
 
     Raises:
         TimeoutError: the per-session lock could not be acquired (fail-closed).
+        ValueError: the file for ``session_id`` holds a different session (INV-15).
     """
     lock_factory = getattr(storage, "lock", None)
     lock_cm = lock_factory(session_id) if lock_factory is not None else contextlib.nullcontext()
@@ -65,4 +66,7 @@ async def locked_disk_session(
             disk = await storage.get_session(session_id)
         except FileNotFoundError:
             disk = fallback
+        if disk.id != session_id:
+            # An update targets disk.id, whose lock this caller does not hold.
+            raise ValueError(f"The file for session '{session_id}' holds session '{disk.id}'; refusing to write it.")
         yield disk
