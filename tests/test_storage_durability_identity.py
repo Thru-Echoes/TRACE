@@ -20,7 +20,7 @@ from typing import Any
 
 import pytest
 
-from trace_mcp import durability, project_identity
+from trace_mcp import durability, lockfile, project_identity
 from trace_mcp.extensions.learn import store as learn_store
 from trace_mcp.extensions.learn.models import KnowledgeStore
 from trace_mcp.schema import Session, SessionMetadata
@@ -468,9 +468,9 @@ class TestLockProbe:
         def must_not_run(*_args: Any) -> None:
             pytest.fail("os.kill terminates the target process on Windows")
 
-        monkeypatch.setattr(json_file, "_PID_PROBE_IS_SAFE", False)
+        monkeypatch.setattr(lockfile, "_PID_PROBE_IS_SAFE", False)
         monkeypatch.setattr(os, "kill", must_not_run)
-        assert json_file._holder_status(b"1234:5678") == "unknown"
+        assert lockfile.get_holder_status(b"1234:5678") == "unknown"
 
 
 class TestDeleteTakesTheSessionLock:

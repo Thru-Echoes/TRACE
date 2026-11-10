@@ -50,11 +50,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-# Core → core import. ``_holder_status`` is the single PID-liveness policy behind
-# the session lock; reusing it (rather than re-deriving it) keeps lock-steal
-# safety a single implementation — the same reasoning as INV-1.
 from trace_mcp.durability import ensure_durable_dir, fsync_dir
-from trace_mcp.storage.json_file import _holder_status
+from trace_mcp.lockfile import create_lock, new_lock_token, release_lock, steal_if_stale
 
 if TYPE_CHECKING:
     from trace_mcp.storage.base import TraceStorage
@@ -276,50 +273,26 @@ def exclusive_file_lock(
 ) -> Iterator[None]:
     """Sync fail-closed advisory lock — the ``JsonFileStorage.lock`` pattern.
 
-    Exclusive lock file (``O_CREAT | O_EXCL``), no fcntl/filelock dependency. A
+    Exclusive lock file (``O_CREAT | O_EXCL``), with no third-party dependency. A
     held lock is stolen only if its holder process is provably dead (single-host
-    PID liveness via ``_holder_status``) or — for an unparseable/legacy token —
-    if it is older than *steal_after*; a live holder is never stolen. A byte +
-    mtime re-verify guards the steal against a TOCTOU where a fresh lock replaces
-    the stale one mid-check. **Fail closed:** raises ``TimeoutError`` rather than
+    PID liveness) or — for an unparseable/legacy token — if it is older than
+    *steal_after*; a live holder is never stolen. Removal goes through
+    ``trace_mcp.lockfile``, so a newer lock cannot be deleted (INV-17).
+    **Fail closed:** raises ``TimeoutError`` rather than
     proceeding unlocked (S4/registry writes must be visible, not silently raced).
 
     Reused by the knowledge-store lock in S4 (keyed by canonical key there).
 
     Raises:
-        TimeoutError: the lock could not be acquired within *timeout*.
+        TimeoutError: the lock could not be acquired within *timeout*, or its
+            removal guard cannot work in this directory.
     """
     lock_path = Path(lock_path)
     lock_path.parent.mkdir(parents=True, exist_ok=True)
-    token = f"{os.getpid()}:{time.time_ns()}".encode()
-    acquired = False
+    token = new_lock_token()
     waited = 0.0
-    while True:
-        try:
-            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-            try:
-                os.write(fd, token)
-            finally:
-                os.close(fd)
-            acquired = True
-            break
-        except FileExistsError:
-            pass  # held — decide below whether to steal
-
-        stole = False
-        try:
-            token_seen = lock_path.read_bytes()
-            before = os.stat(lock_path)
-            holder = _holder_status(token_seen)
-            stale_by_time = (time.time() - before.st_mtime) > steal_after
-            if holder == "dead" or (holder == "unknown" and stale_by_time):
-                after = os.stat(lock_path)
-                if after.st_mtime_ns == before.st_mtime_ns and lock_path.read_bytes() == token_seen:
-                    os.unlink(lock_path)
-                    stole = True
-        except OSError:
-            pass  # lock vanished mid-check — retry (counts against the budget)
-        if stole:
+    while not create_lock(lock_path, token):
+        if steal_if_stale(lock_path, steal_after):
             continue
         if waited >= timeout:
             raise TimeoutError(
@@ -331,11 +304,7 @@ def exclusive_file_lock(
     try:
         yield
     finally:
-        if acquired:
-            try:
-                os.unlink(lock_path)
-            except OSError:
-                pass
+        release_lock(lock_path, token)
 
 
 def load_registry(*, required: bool) -> ProjectRegistry | None:

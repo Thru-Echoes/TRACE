@@ -38,10 +38,10 @@ rather than ever proceeding unlocked.
   re-homes an `auto` session into a real project: stamps `metadata.project_key`
   and appends a `state_change`, append-shaped, under the same locked helper)
 
-**Enforcement.** `JsonFileStorage.lock` writes a `<pid>:<time_ns>` token and
+**Enforcement.** `JsonFileStorage.lock` writes a `<pid>:<time_ns>:<random>` token and
 steals a lock only when the holder PID is provably dead (single-host) or, for an
 unparseable/legacy token, when older than `steal_after`; it fails closed on
-timeout. A live holder's lock is never stolen.
+timeout. A live holder's lock is never stolen. Removal is covered by INV-17.
 
 **Tests.** `tests/test_integrity_hardening.py` (fail-closed, token, holder
 liveness), `tests/test_v042_storage_concurrency.py` (cross-process no-lost-update
@@ -579,9 +579,7 @@ readable under its filename, so no migration is needed, but `locked_disk_session
 write it. A corrupt file can still be replaced by `update_session`. A file that cannot be
 read raises rather than being treated as unowned.
 
-**Known limitations.** The lock inherits the stale-lock steal race documented on
-`JsonFileStorage.lock`: two contenders can both judge a dead holder's lock stale, and one
-can then remove the other's new lock. `create_session` takes no lock, so a writer that
+**Known limitations.** `create_session` takes no lock, so a writer that
 loaded nothing from disk and is using its fallback session can still replace a session
 created under the same id while it holds the lock.
 
@@ -626,6 +624,54 @@ unreadable it counts no sessions and reports the registry failure.
 `:: test_inv16_every_read_tool_applies_the_pin`,
 `:: test_inv16_health_check_scopes_both_of_its_addressing_modes`, and
 `tests/test_read_scope_pin.py`.
+
+**Status.** ENFORCED.
+
+---
+
+## INV-17 — A lock file is removed only by a writer entitled to remove it  · ENFORCED
+
+**Invariant.** Every removal of a TRACE lock file goes through `trace_mcp.lockfile`. A
+steal re-reads the lock under the removal guard and removes it only if its holder is still
+dead, or unknown and past `steal_after`. A release removes the lock only if it still holds
+this acquisition's token. Nothing is removed without the guard, and a directory where the
+guard cannot work is refused before a lock is taken.
+
+**Why this is an integrity invariant.** The lock is what makes a read-modify-write safe. If
+two writers both judge a dead holder's lock stale, one can steal it and create its own, and
+the other can then delete that new lock. Two writers are then inside at once, and one
+update is lost without any error.
+
+**How the guard closes it.** While the guard is held, no other process can remove the lock,
+and nothing can create one at a name that is still taken, so the file that was read is the
+file removed. The guard is an operating-system file lock on `.trace-lock-guard`, released
+by the operating system when its holder exits, so a crash cannot leave it stuck. A guard
+file replaced after it was opened does not count as held. The file should still not be
+deleted or replaced while a server runs, including by restoring a backup over a live store.
+
+**Exhaustive site-set:** `lockfile.py :: create_lock`, `:: steal_if_stale`,
+`:: release_lock`, used by `storage/json_file.py :: JsonFileStorage.lock` and
+`project_identity.py :: exclusive_file_lock` (which `locked_registry` and the knowledge-store
+`project_lock` reuse).
+
+**Known limitations.** A process running a build from before this invariant does not take
+the guard, so the guarantee holds once every running server has restarted. A release that
+finds the guard busy finishes on a background thread, and writers wait until it does; if
+the thread cannot be started, an error is logged and writers fail closed until that process
+exits. A
+holder that finds its lock taken over logs an error rather than raising, because its write
+has already finished. A child created by `fork` without `exec` while the guard is held would keep it until
+the child exits; TRACE does not fork this way. An empty token
+is judged by age, so a holder suspended for longer than `steal_after` between creating its
+lock and writing its token could lose it. A restored lock whose PID now belongs to another
+running process is never stolen, and writers fail closed with a timeout until it is
+removed; a holder that has exited but not been reaped by its parent looks running in the
+same way. The Windows guard (`msvcrt.locking`) has not been run on Windows.
+
+**Tests.** `tests/test_invariants.py :: test_inv17_no_unregistered_exclusive_creator`,
+`:: test_inv17_every_lock_uses_the_shared_helpers`,
+`:: test_inv17_nothing_outside_lockfile_removes_a_lock_by_name`, and
+`tests/test_lock_steal_race.py`.
 
 **Status.** ENFORCED.
 
