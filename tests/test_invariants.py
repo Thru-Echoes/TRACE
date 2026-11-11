@@ -531,6 +531,7 @@ INV14_DURABLE_PUBLISHERS = {
 INV14_REGENERABLE_PUBLISHERS = {
     ("scratchpad.py", "_atomic_write"),
     ("extensions/learn/store.py", "save_embeddings_cache"),
+    ("extensions/jev/bridge.py", "install_bridge"),
 }
 INV14_OPERATOR_RUN_PUBLISHERS = {
     ("identity_cli.py", "cmd_merge_stores"),

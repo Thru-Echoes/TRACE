@@ -11,11 +11,12 @@ import subprocess
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 from urllib.request import Request, urlopen
 
+from trace_mcp.extensions.jev.bridge import get_installed_bridge
 from trace_mcp.extensions.jev.config import JevConfig
+from trace_mcp.extensions.jev.results import append_result
 from trace_mcp.extensions.learn.egress import attest_egress
 from trace_mcp.schema import TraceEvent
 
@@ -23,6 +24,14 @@ ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 QUESTION_SET_VERSION = "trace-jev-candidate/v1"
 MAPPING_VERSION = "trace-jev-conservative/v1"
 MAX_BYTES = 64_000
+
+# Routes whose answers can change without any change here, per TypeSafe's guidance.
+_UNPINNED_MODELS = frozenset({"jev-latest", "jev-preview", "typesafe-ai/jev"})
+
+
+class EventNotAssessableError(ValueError):
+    """This event can never be sent. Other events in the session may still be."""
+
 
 Transport = Callable[[Request, float], bytes]
 GatewayRunner = Callable[[bytes, str], bytes]
@@ -42,8 +51,30 @@ def _digest(value: object) -> str:
     return "sha256:" + hashlib.sha256(encoded).hexdigest()
 
 
+def is_assessable(event: TraceEvent) -> bool:
+    """Return True for an annotation, a contribution, or a decision a person resolved.
+
+    Any other decision is excluded: one still awaiting a person, because seeing the
+    advice first would sway them, and one resolved by an AI or system actor, because
+    the advice is meant to be compared with human judgment.
+    """
+    if event.type == "decision":
+        decision = event.decision
+        return (
+            decision is not None
+            and decision.disposition != "proposed"
+            and decision.resolved_by is not None
+            and decision.resolved_by.type == "human"
+        )
+    return (event.type == "annotation" and event.annotation is not None) or (
+        event.type == "contribution" and event.contribution is not None
+    )
+
+
 def project_event(event: TraceEvent) -> dict[str, Any]:
     """Project only provenance prose; never send raw tool I/O or statistical confidence."""
+    if event.type == "decision" and not is_assessable(event):
+        raise EventNotAssessableError("Jev assessment accepts a decision only after a person has resolved it")
     base: dict[str, Any] = {
         "event_id": event.id,
         "event_type": event.type,
@@ -61,7 +92,9 @@ def project_event(event: TraceEvent) -> dict[str, Any]:
         base["content"] = event.contribution.description
         base["artifact"] = event.contribution.artifact
     else:
-        raise ValueError("Jev candidate assessment accepts only decision, annotation, or contribution events")
+        raise EventNotAssessableError(
+            "Jev candidate assessment accepts only decision, annotation, or contribution events"
+        )
     return base
 
 
@@ -142,7 +175,7 @@ def _post(request: Request, timeout: float) -> bytes:
 
 
 def _run_gateway(body: bytes, api_key: str) -> bytes:
-    bridge = Path(__file__).with_name("gateway_bridge.mjs")
+    bridge = get_installed_bridge()
     env = dict(os.environ)
     env.pop("AI_GATEWAY_API_KEY", None)
     env.pop("TYPESAFE_AI_API_KEY", None)
@@ -180,6 +213,8 @@ async def assess_event(
     if config.provider == "vercel_gateway" and config.model != "typesafe-ai/jev":
         raise ValueError("Vercel AI Gateway Jev requires TRACE_JEV_MODEL=typesafe-ai/jev")
     state = {"event": project_event(event)}
+    if config.provider == "vercel_gateway" and gateway_runner is _run_gateway:
+        get_installed_bridge()  # report a missing bridge plainly, before any egress is recorded
     request_questions = questions()
     if config.provider == "vercel_gateway":
         request_questions = {
@@ -191,7 +226,7 @@ async def assess_event(
         body["providerOptions"] = {"gateway": {"zeroDataRetention": config.gateway_zero_data_retention}}
     encoded = json.dumps(body, ensure_ascii=False, allow_nan=False).encode()
     if len(encoded) > MAX_BYTES:
-        raise ValueError("Jev advisory request exceeds the bounded input limit")
+        raise EventNotAssessableError("Jev advisory request exceeds the bounded input limit")
 
     attest_egress(
         provider="vercel-ai-gateway" if config.provider == "vercel_gateway" else "typesafe-ai",
@@ -250,6 +285,7 @@ async def assess_event(
 
     return {
         "schema_version": "trace/jev-advisory/v1",
+        "status": "experimental",
         "advice": map_advice(answers),
         "authority": "advisory_only",
         "source": {
@@ -272,5 +308,49 @@ async def assess_event(
             "This result cannot resolve or revise a TRACE decision, create provenance, or authorize governance/admission.",
             "Jev probabilities and distribution confidence are model signals, not TRACE decision.confidence measurements.",
             "Thresholds are conservative defaults and are not calibrated accuracy guarantees.",
+            *(
+                [f"{config.model} is not a pinned model, so its answers can change without a code change."]
+                if config.model in _UNPINNED_MODELS
+                else []
+            ),
         ],
     }
+
+
+async def assess_and_record(
+    event: TraceEvent,
+    config: JevConfig,
+    *,
+    project: str,
+    project_key: str,
+    transport: Transport = _post,
+    gateway_runner: GatewayRunner = _run_gateway,
+) -> dict[str, Any]:
+    """Assess an event and save the result for later comparison with human labels.
+
+    Args:
+        event: the event to assess.
+        config: the effective Jev configuration.
+        project: the display label.
+        project_key: the canonical project key.
+        transport: the HTTP sender for the direct route.
+        gateway_runner: the runner for the Gateway route.
+
+    Returns:
+        The advisory result plus ``saved_to``, which is None with an added warning
+        if saving failed, so the paid-for answer is still returned.
+
+    Raises:
+        ValueError: the event is ineligible, Jev is off, or the call failed.
+
+    Side effects: sends the event's text to the provider; appends to the results file.
+    """
+    result = await assess_event(
+        event, config, project=project, project_key=project_key, transport=transport, gateway_runner=gateway_runner
+    )
+    try:
+        result["saved_to"] = str(await asyncio.to_thread(append_result, project_key, result))
+    except OSError as exc:
+        result["saved_to"] = None
+        result["warnings"].append(f"This result was not saved: {exc}")
+    return result

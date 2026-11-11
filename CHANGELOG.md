@@ -12,6 +12,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`trace-mcp jev review` assesses a whole session when a person runs it.** It has a
+  `--dry-run` mode and a bound on events sent, it runs only for the current directory's
+  project, and it does not resend an event already assessed. Nothing runs it automatically.
+- **Jev advisory results are saved** to `~/.trace/jev/<project_key>.jsonl`, so advice can be
+  compared with human judgment later. A record holds answers and digests, not event text.
+
+### Changed
+
+- **Jev is labeled experimental, and accepts a decision only after a person has resolved it**,
+  because seeing the advice first would sway the person resolving it.
+- **The direct Jev route now defaults to the pinned `jev-1.13.0`** instead of `jev-latest`.
+  Results from a route that is not pinned carry a warning.
+
 ### Fixed
 
 - **Recovering from a crashed writer can no longer let two writers in at once.** When two
@@ -20,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   lock also removed it by name without checking ownership. Session, registry, and knowledge
   locks now remove lock files through one guarded path, registered as INV-17. The guarantee
   holds once every running server has restarted.
+- **The Jev Vercel AI Gateway route now works when TRACE is launched through `uvx`.** Its npm
+  packages were looked up beside a built copy of the bridge, where they do not exist, so every
+  Gateway call failed. `trace-mcp jev setup` installs the bridge in a stable directory.
 - **LLM requests now work with the default model.** Scoring and extraction sent
   `temperature=0.0`, which `gpt-6-luna` rejects with HTTP 400, so every such request failed
   unless a model override was set. Neither sends a temperature now, so an overriding model

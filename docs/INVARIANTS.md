@@ -539,8 +539,9 @@ is whatever `os.fsync` provides on the host; on macOS that excludes a drive-cach
 - Durable publishers — `storage/json_file.py :: _write_file`, `:: _write_file_exclusive`;
   `project_identity.py :: _atomic_write_registry`; `extensions/learn/store.py :: save_store`.
 - Durable delete — `storage/json_file.py :: delete_session`.
-- Regenerable, exempt — `scratchpad.py :: _atomic_write` and
-  `extensions/learn/store.py :: save_embeddings_cache`.
+- Regenerable, exempt — `scratchpad.py :: _atomic_write`,
+  `extensions/learn/store.py :: save_embeddings_cache`, and
+  `extensions/jev/bridge.py :: install_bridge`.
 - Operator-run with backups, exempt — `identity_cli.py :: cmd_merge_stores`.
 
 **Known limitation.** A directory-sync failure is reported after the name has changed, so

@@ -330,7 +330,7 @@ Claude: -> trace_end_session(summary="Analyzed 47 passages...")
 
 | Tool | Description |
 |------|-------------|
-| `trace_jev_assess_candidate` | Classify an existing provenance event as a possible durable candidate; read-only and advisory |
+| `trace_jev_assess_candidate` | Experimental: classify a logged event as a possible durable candidate; advisory, and never changes a session |
 
 ## Event types
 
@@ -348,7 +348,7 @@ The default `trace-learn` extension surfaces relevant past learnings at session 
 
 See [`docs/extensions/trace-learn.md`](https://github.com/Thru-Echoes/TRACE/blob/main/docs/extensions/trace-learn.md) for matching backends, BM25 stemming, per-backend thresholds, extraction details, and LLM configuration.
 
-The optional Jev advisory extension is documented in [`docs/extensions/jev.md`](https://github.com/Thru-Echoes/TRACE/blob/main/docs/extensions/jev.md). It is read-only, explicitly enabled, and keeps model confidence separate from measured decision confidence.
+The optional Jev advisory extension is documented in [`docs/extensions/jev.md`](https://github.com/Thru-Echoes/TRACE/blob/main/docs/extensions/jev.md). It is experimental, off by default, never changes a session, and keeps model confidence separate from measured decision confidence. `trace-mcp jev review` assesses a whole session when a person runs it.
 
 ## Configuration
 
@@ -399,7 +399,9 @@ A cloud call attempted with no key, or with a key the provider rejects, is repor
 | `TRACE_JEV_PROVIDER` | `typesafe` | Explicit Jev transport: `typesafe` or `vercel_gateway`; credentials never fall across providers |
 | `TYPESAFE_AI_API_KEY` | — | TypeSafe System One credential used only when `TRACE_JEV_ENABLED=true` |
 | `AI_GATEWAY_API_KEY` | — | Vercel AI Gateway credential, read only when `TRACE_JEV_PROVIDER=vercel_gateway` |
-| `TRACE_JEV_MODEL` | provider default | `jev-latest` for direct TypeSafe; fixed to `typesafe-ai/jev` for Gateway |
+| `TRACE_JEV_MODEL` | provider default | `jev-1.13.0` for direct TypeSafe; fixed to `typesafe-ai/jev` for Gateway |
+| `TRACE_JEV_RESULTS_DIR` | `~/.trace/jev` | Where advisory results are saved, one JSON Lines file per project |
+| `TRACE_JEV_BRIDGE_DIR` | `~/.trace/jev-bridge` | Where `trace-mcp jev setup` installs the Gateway bridge |
 | `TRACE_JEV_GATEWAY_ZERO_DATA_RETENTION` | `false` | Explicit Gateway `zeroDataRetention` provider option |
 | `TRACE_LLM_MODEL` | `gpt-6-luna` | Model for LLM relevance scoring |
 | `TRACE_LLM_EXTRACTION_MODEL` | `gpt-6-luna` | Model for LLM learning extraction |
