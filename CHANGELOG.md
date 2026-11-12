@@ -20,7 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   0.5.2). Until now the record held the proposal time only, and "resolved by a human" rested
   on the resolving session's statement with nowhere to quote the person. The server sets the
   time; the caller cannot. A human resolution given no quote is still recorded, and the
-  tool's response says so. Decisions resolved earlier lack both fields and are not
+  tool's response says so. The decision-log importer sets `resolved_at` from the time of the
+  line that resolves each decision. Decisions resolved earlier lack both fields and are not
   backfilled.
 - **`trace-mcp jev review` assesses a whole session when a person runs it.** It has a
   `--dry-run` mode and a bound on events sent, it runs only for the current directory's
