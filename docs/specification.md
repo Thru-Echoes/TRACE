@@ -1,6 +1,6 @@
 # Decision Provenance for AI-Assisted Workflows
 
-## Specification v0.5.1
+## Specification v0.5.2
 
 **Status**: Stable. Every revision through v0.5.0 is additive and backward-compatible with v0.3.x / v0.4.x; v0.5.1 is additive except that it narrows the previously open name `decision.confidence` (Appendix B). The package version may run ahead of this spec/wire version for hardening releases that change no schema fields.
 **Last Updated**: 2026-09-03
@@ -79,7 +79,7 @@ A session document is the top-level unit of this specification. Each document de
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `context` | string | SHOULD | URI identifying the specification version. Default: `"https://trace-protocol.org/v0.3"`. |
-| `trace_version` | string | SHOULD | Semantic version of the specification. Default: `"0.5.1"`. |
+| `trace_version` | string | SHOULD | Semantic version of the specification. Default: `"0.5.2"`. |
 | `id` | string | MUST | Unique identifier for this session. |
 | `created` | datetime | MUST | UTC ISO 8601 timestamp of session start. |
 | `ended` | datetime | MAY | UTC ISO 8601 timestamp of session end. Null while active. |
@@ -262,6 +262,8 @@ Records a methodological choice with full attribution and a defined lifecycle. T
 | `proposed_by` | Actor | MUST | The actor who proposed this decision. |
 | `disposition` | enum | MUST | One of: `"proposed"`, `"accepted"`, `"revised"`, `"rejected"`. Default: `"proposed"`. |
 | `resolved_by` | Actor | Conditional | The actor who resolved this decision. MUST be present when disposition is not `"proposed"`. |
+| `resolved_at` | datetime | MAY | When the decision was resolved (UTC, ISO 8601). Set by the recorder at resolution, never supplied by the caller. MUST be null while `disposition` is `"proposed"`. Absent on decisions resolved before v0.5.2 and on imported decisions whose source carries no resolution time; a consumer MUST treat absence as unknown, not as the proposal time. |
+| `resolution_snippet` | string | SHOULD | For a decision resolved by a human: the person's words that resolved it, quoted from the conversation (about 200 characters), or an explicit absence marker (§3.4.1). Supplied by the caller as `conversation_snippet` on `trace_resolve_decision`. MUST be null while `disposition` is `"proposed"`. Absent on decisions resolved before v0.5.2. It is the resolver's quotation, not a verification: a consumer that needs to know whether the words were said MUST check them against an independent record. A recorder MUST NOT refuse a resolution for lacking it. |
 | `revision_note` | string | Conditional | Explanation of why the decision was revised or rejected. SHOULD be present when disposition is `"revised"` or `"rejected"`. |
 | `revises_event_id` | string | MAY | ID of a previous decision event that this one revises, forming a decision chain. |
 | `suggestion_type` | enum | MAY | One of: `"proactive"` (AI volunteered), `"requested"` (human asked), `"collaborative"` (emerged from discussion). |
@@ -281,7 +283,7 @@ proposed ──────────┼─ revised ───→ (resolved, ma
 
 1. A decision is created with disposition `"proposed"` and a `proposed_by` actor.
 2. The decision remains in `"proposed"` state until explicitly resolved.
-3. Resolution sets the `disposition` to `"accepted"`, `"revised"`, or `"rejected"`, and records the `resolved_by` actor.
+3. Resolution sets the `disposition` to `"accepted"`, `"revised"`, or `"rejected"`, and records the `resolved_by` actor, in `resolved_at` the time of resolution, and in `resolution_snippet` the person's words when the caller supplies them.
 4. A revised decision SHOULD spawn a new decision event with `revises_event_id` pointing to the original.
 
 **Attribution rule**: The actor who proposes a decision MUST NOT be the same instance that resolves it, when the workflow involves multiple actors. This ensures the provenance record reflects genuine deliberation rather than self-approval. In single-actor workflows (e.g., a human working alone with an AI assistant), the human typically resolves decisions proposed by the AI, and vice versa.
@@ -445,6 +447,8 @@ Each event MUST populate exactly one type-specific data field, and it MUST match
 
 - When `disposition` is `"proposed"`, `resolved_by` MUST be null.
 - When `disposition` is `"accepted"`, `"revised"`, or `"rejected"`, `resolved_by` MUST be a valid Actor.
+- When `disposition` is `"proposed"`, `resolved_at` MUST be null.
+- When `disposition` is `"proposed"`, `resolution_snippet` MUST be null.
 - When `disposition` is `"revised"` or `"rejected"`, `revision_note` SHOULD be present.
 
 ### 4.3 Timestamps
@@ -733,7 +737,7 @@ rather than reconstructing an attribution it cannot know.
 ```json
 {
   "context": "https://trace-protocol.org/v0.3",
-  "trace_version": "0.5.1",
+  "trace_version": "0.5.2",
   "id": "trace_20260205_a1b2c3",
   "created": "2026-02-05T14:30:00Z",
   "ended": "2026-02-05T15:45:00Z",
@@ -763,6 +767,8 @@ rather than reconstructing an attribution it cannot know.
         "proposed_by": {"type": "ai", "id": "claude-opus-4.7"},
         "disposition": "revised",
         "resolved_by": {"type": "human", "id": "researcher-jane"},
+        "resolved_at": "2026-02-05T14:34:40Z",
+        "resolution_snippet": "Let's lower it to 0.80",
         "revision_note": "Human revised to 0.80 for higher recall — see evt_002",
         "suggestion_type": "proactive",
         "tags": ["methodology", "threshold"]
@@ -783,6 +789,7 @@ rather than reconstructing an attribution it cannot know.
         "proposed_by": {"type": "human", "id": "researcher-jane"},
         "disposition": "accepted",
         "resolved_by": {"type": "ai", "id": "claude-opus-4.7"},
+        "resolved_at": "2026-02-05T14:35:20Z",
         "revision_note": "Human directed lower threshold; AI applied. Originally proposed by AI at 0.85 (evt_001).",
         "revises_event_id": "evt_001",
         "tags": ["methodology", "threshold"]
@@ -848,6 +855,8 @@ rather than reconstructing an attribution it cannot know.
         "proposed_by": {"type": "ai", "id": "claude-opus-4.7"},
         "disposition": "accepted",
         "resolved_by": {"type": "human", "id": "researcher-jane"},
+        "resolved_at": "2026-02-05T15:36:10Z",
+        "resolution_snippet": "yes, do those three",
         "suggestion_type": "requested",
         "tags": ["methodology", "recall"]
       },
