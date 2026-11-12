@@ -3,8 +3,9 @@
 Two mechanisms:
 
 1. **Data-directory isolation** — TRACE_KNOWLEDGE_DIR, TRACE_SESSIONS_DIR,
-   TRACE_SCRATCHPAD_DIR, and TRACE_EGRESS_LOG point at a per-run temp
-   directory (the last is the egress-ledger file path), set in
+   TRACE_SCRATCHPAD_DIR, TRACE_EGRESS_LOG, TRACE_REGISTRY_PATH, and
+   TRACE_SHADOW_DIR point at a per-run temp directory (TRACE_EGRESS_LOG is the
+   egress-ledger file path), set in
    ``pytest_configure`` (NOT a fixture: ``server.py`` binds a module-level
    ``JsonFileStorage()`` at import, which happens during collection — before
    any session fixture runs). Subprocesses spawned by tests inherit the
@@ -45,6 +46,7 @@ _ISOLATED_VARS = (
     "TRACE_SCRATCHPAD_DIR",
     "TRACE_EGRESS_LOG",
     "TRACE_REGISTRY_PATH",
+    "TRACE_SHADOW_DIR",
 )
 _REAL_DATA_ENV = "TRACE_REAL_DATA_TESTS"
 _previous_env: dict[str, str | None] = {}
@@ -83,11 +85,11 @@ def pytest_configure(config: pytest.Config) -> None:
     Side effect: mutates os.environ (restored in pytest_unconfigure).
     """
     base = Path(tempfile.mkdtemp(prefix="trace-isolated-"))
-    # The first three are directories; TRACE_EGRESS_LOG and TRACE_REGISTRY_PATH
-    # are file paths (the egress ledger and the project registry). Same
-    # isolation contract either way: a test that forgets an explicit path must
-    # not be able to touch the developer's real ~/.trace.
-    subs = ("knowledge", "sessions", "scratchpads", "egress.jsonl", "projects.json")
+    # The first three and the last are directories; TRACE_EGRESS_LOG and
+    # TRACE_REGISTRY_PATH are file paths (the egress ledger and the project
+    # registry). Same isolation contract either way: a test that forgets an
+    # explicit path must not be able to touch the developer's real ~/.trace.
+    subs = ("knowledge", "sessions", "scratchpads", "egress.jsonl", "projects.json", "shadow")
     for name, sub in zip(_ISOLATED_VARS, subs, strict=True):
         _previous_env[name] = os.environ.get(name)
         os.environ[name] = str(base / sub)

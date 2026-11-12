@@ -537,7 +537,8 @@ is whatever `os.fsync` provides on the host; on macOS that excludes a drive-cach
 
 **Exhaustive site-set:**
 - Durable publishers — `storage/json_file.py :: _write_file`, `:: _write_file_exclusive`;
-  `project_identity.py :: _atomic_write_registry`; `extensions/learn/store.py :: save_store`.
+  `project_identity.py :: _atomic_write_registry`; `extensions/learn/store.py :: save_store`;
+  `extensions/learn/shadow/state.py :: _write_state` (the provenance-marks trial state file).
 - Durable delete — `storage/json_file.py :: delete_session`.
 - Regenerable, exempt — `scratchpad.py :: _atomic_write`,
   `extensions/learn/store.py :: save_embeddings_cache`, and
