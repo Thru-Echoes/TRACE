@@ -151,13 +151,21 @@ class DecisionConfidence(TraceModel):
 
 
 class DecisionData(TraceModel):
-    """Records a decision with full attribution and resolution status."""
+    """Records a decision with full attribution and resolution status.
+
+    ``resolved_at`` is set by the recorder at resolution, never by the caller.
+    ``resolution_snippet`` is the resolver's quotation of the person's words
+    that resolved the decision. Both are null while the decision is proposed,
+    and both are absent on records resolved before wire version 0.5.2.
+    """
 
     description: str
     rationale: str | None = None
     proposed_by: Actor
     disposition: DecisionDisposition = "proposed"
     resolved_by: Actor | None = None
+    resolved_at: datetime | None = None
+    resolution_snippet: str | None = None
     revision_note: str | None = None
     revises_event_id: str | None = None
     suggestion_type: SuggestionType | None = None
@@ -169,6 +177,11 @@ class DecisionData(TraceModel):
     def _validate_resolution(self) -> Self:
         if self.disposition != "proposed" and self.resolved_by is None:
             raise ValueError(f"resolved_by must be set when disposition is '{self.disposition}'")
+        if self.disposition == "proposed":
+            if self.resolved_at is not None:
+                raise ValueError("resolved_at must be null while the decision is proposed")
+            if self.resolution_snippet is not None:
+                raise ValueError("resolution_snippet must be null while the decision is proposed")
         if self.disposition in ("revised", "rejected") and not self.revision_note:
             warnings.warn(
                 f"revision_note should be set when disposition is '{self.disposition}'",
