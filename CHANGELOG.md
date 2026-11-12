@@ -14,6 +14,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A provenance-marks shadow comparison period, and the `trace-mcp shadow` command.** Marks
+  say where an event or a learning came from (`[accepted]`, `[proposed]`, `[ai-resolved]`,
+  `[quote-verified]`, `[resolution-unquoted]`, ...); they are computed from the session record
+  and never stored. While a period runs (`trace-mcp shadow start` until `trace-mcp shadow
+  stop`; there is no automatic end), each session end also runs a second extraction that
+  sends the 50 stored learnings nearest to the session instead of the whole store and keeps a
+  learning from a still-proposed decision worded as a proposal, and each recall records what
+  it would have shown with marks. The second arm writes only to a separate shadow store under
+  `~/.trace/shadow/` (`TRACE_SHADOW_DIR`); nothing a session sees changes, and a shadow failure
+  never changes or fails the live result. `trace-mcp shadow report` prints the comparison with
+  every count beside its denominator and can write a review sheet. See ADR 008.
+- **While a period runs, the hooks record the person's typed prompts and question-dialog
+  answers locally**, one JSONL file per host session under `~/.trace/shadow/<project>/words/`,
+  readable only by the user. They are stored on this machine and never sent to a provider;
+  they exist so a session's quote of the person can be checked against what the person
+  typed. Notices the host generates itself are not recorded. From day 30 of a period, the
+  session-start hook prints one reminder a day to run the report and stop the period.
+- **A fifth hook, `dialog-words.sh`, and hook version `[trace-hooks v0.6]`.** The new hook runs
+  after the question dialog and does nothing unless a period is running. `trace-mcp doctor`
+  and `fleet-check` report every project still on the previous hooks; re-run `trace-mcp-init`
+  in each project to install the new hooks and the updated instructions block.
 - **A resolved decision records when it was resolved and on whose words.**
   `trace_resolve_decision` now stamps `resolved_at` on the decision and accepts an optional
   `conversation_snippet`, stored as `resolution_snippet` (specification §3.6, wire version

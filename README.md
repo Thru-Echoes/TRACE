@@ -190,7 +190,7 @@ trace-mcp-init --client claude-code     # explicit
 trace-mcp-init --dry-run                # preview, no writes
 ```
 
-The Claude Code adapter installs four hooks:
+The Claude Code adapter installs five hooks:
 
 | Hook | Event | Purpose |
 |------|-------|---------|
@@ -198,6 +198,7 @@ The Claude Code adapter installs four hooks:
 | `prompt-reminder.sh` | `UserPromptSubmit` | Periodic nudge after several prompts without a session. Per-project rate-limited. |
 | `pretool-guard.sh` | `PreToolUse` (`Edit\|Write`) | Warns (or blocks) edits when no TRACE session is active. |
 | `decision-audit.sh` | `PostToolUse` (`mcp__trace__trace_end_session`) | Echoes the session-end attribution audit into the conversation. The matcher is the FULL namespaced tool name — a host matches tool names exactly, so a bare `trace_end_session` never fires. |
+| `dialog-words.sh` | `PostToolUse` (`AskUserQuestion`) | While a provenance-marks shadow period runs, saves the person's question-dialog answers locally (never sent anywhere); otherwise does nothing. `prompt-reminder.sh` saves typed prompts the same way, and `session-reminder.sh` reminds you to report on and stop a period from day 30. |
 
 Project detection uses, in order: the `.claude/trace.project` pin file written by `trace-mcp-init`, a `TRACE project name: "..."` line in `CLAUDE.md` (bold form accepted), the git repository basename, then the current working directory basename. Add the explicit marker if your repo name differs from the project name you want logged.
 
@@ -375,6 +376,19 @@ A cloud call attempted with no key, or with a key the provider rejects, is repor
 - **Key borrowed from `~/.trace/.env`** → a session-start notice, since a project silently using the machine-wide credential is the thing per-project keys exist to prevent.
 - **Configured backend cannot be built** → the extension still registers, with keyword matching and a notice on every recall. It never disappears silently: an extension that fails to register looks identical to one that was never installed.
 
+### Provenance-marks shadow period
+
+`trace-mcp shadow` runs a comparison period for provenance marks (see
+[ADR 008](https://github.com/Thru-Echoes/TRACE/blob/main/docs/adr/008-provenance-marks-trial.md)):
+`start` begins it for every project, `stop` ends it (nothing ends it automatically),
+`status` shows its state and per-project counts, `exclude`/`include KEY` leave one project out
+or bring it back, and `report [--from D] [--to D] [--project KEY] [--json] [--csv PATH]` prints
+the comparison and can write a review sheet. While it runs, each session end also runs a second
+extraction into a separate shadow store, each recall records what it would have shown with
+marks, and the hooks save the person's typed prompts and dialog answers on this machine; none of
+it changes what a session sees, and none of it is sent to a provider. Everything lives under
+`TRACE_SHADOW_DIR`.
+
 ### Environment variables
 
 | Variable | Default | Description |
@@ -392,6 +406,7 @@ A cloud call attempted with no key, or with a key the provider rejects, is repor
 | `TRACE_MODEL_CACHE_DIR` | `~/.trace/models/` | Where `fastembed` keeps its downloaded model files (fastembed's `FASTEMBED_CACHE_PATH` is honoured when this is unset) |
 | `TRACE_SESSIONS_DIR` | `~/.trace/sessions/` | Directory for session JSON files |
 | `TRACE_KNOWLEDGE_DIR` | `~/.trace/knowledge/` | Directory for trace-learn knowledge stores |
+| `TRACE_SHADOW_DIR` | `~/.trace/shadow/` | Provenance-marks shadow period: its state file, shadow stores, logs, and the person's recorded words |
 | `TRACE_EGRESS_LOG` | `~/.trace/egress.jsonl` | Cloud-egress ledger: one JSONL line per cloud call trace-learn makes (the fact of the call — provider, endpoint, model, purpose, item count — never the content) |
 | `TRACE_LOG_LEVEL` | `INFO` | Logging verbosity |
 | `OPENAI_API_KEY` | — | OpenAI API key for LLM matching, extraction, and cloud embeddings. **Put it in this project's `.env`** — see above; `~/.trace/.env` is a fallback, not the home for it |

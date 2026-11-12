@@ -46,6 +46,9 @@ of quietly returning keyword-ranked results.
     actor who authored the proposal *content* (whose words populate
     `description`), not the speaker of the resolving directive.
     Question→AI-proposal→accept means `proposed_by=ai`, `resolved_by=human`.
+  - When you record a person's resolution, pass their words as
+    conversation_snippet on trace_resolve_decision: what they typed, or for a
+    question dialog the option they picked or the answer they typed.
   - **Measured decisions (v0.5.1, spec §3.6.1)**: when a decision rests on a
     number you actually computed — a benchmark, an evaluation run, a
     statistical test whose output is in front of you — record it as

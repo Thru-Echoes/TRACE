@@ -415,6 +415,11 @@ still reissue an id, with nothing on disk showing the counter was lost. Consumer
 build from whatever branch is checked out in the shared working tree, so this is
 governed by the standing "keep `main` checked out" rule rather than by code.
 
+**Shadow store.** The provenance-marks shadow store
+(`extensions/learn/shadow/extract.py :: ShadowStore`) subclasses the store model with its own
+persisted `slrn_` counter (`shadow_next_id`, only ever raised) and never reads the live counter
+for writing, so a shadow learning can neither consume nor reuse a live id.
+
 **Exhaustive site-set:**
 - Minting — `src/trace_mcp/extensions/learn/models.py` (`KnowledgeStore.next_id`,
   `next_learning_id`, `_raise_counter_above_existing_ids`).
