@@ -1087,6 +1087,11 @@ def main() -> None:
 
         raise SystemExit(jev_main(sys.argv[2:]))
 
+    if len(sys.argv) > 1 and sys.argv[1] == "shadow":
+        from trace_mcp.extensions.learn.shadow.cli import main as shadow_main
+
+        raise SystemExit(shadow_main(sys.argv[2:]))
+
     if len(sys.argv) > 1 and sys.argv[1] == "doctor":
         # Imported lazily like the other subcommands: the conformance layer
         # pulls in the adapter assets, which the running server must never

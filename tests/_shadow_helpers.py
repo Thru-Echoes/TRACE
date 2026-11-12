@@ -114,10 +114,12 @@ async def make_session(
     project: str = "collab-a",
     *,
     resolution_quote: str | None = "yes, go with three retries",
+    contribution_snippet: str | None = None,
 ) -> Session:
     """Create and end a session: evt_001 AI annotation; evt_002 proposed; evt_003 and evt_004 accepted by alice.
 
-    evt_003 is resolved with ``resolution_quote`` as the person's words; evt_004 with none.
+    evt_003 is resolved with ``resolution_quote`` as the person's words; evt_004 with none. With
+    ``contribution_snippet``, a contribution quoting it is logged last (evt_005).
     """
     active: dict[str, Session] = {}
     session = await session_tools.create_session(storage, active, project=project)
@@ -140,6 +142,15 @@ async def make_session(
     await decision_tools.resolve_decision(
         storage, session, event_id="evt_004", disposition="accepted", resolved_by_type="human", resolved_by_id="alice"
     )
+    if contribution_snippet is not None:
+        await logging_tools.log_contribution(
+            storage,
+            session,
+            description="Capped the upload retries.",
+            direction="human",
+            execution="ai",
+            conversation_snippet=contribution_snippet,
+        )
     await session_tools.end_session(storage, active, session_id=session.id)
     return await storage.get_session(session.id)
 
