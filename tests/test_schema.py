@@ -538,12 +538,24 @@ def _iso(value: str | None) -> str | None:
     return None if value is None else datetime.fromisoformat(value.replace("Z", "+00:00")).isoformat()
 
 
+# Decision fields added after the golden document was written. A null value is
+# what the serializer emits for a field the document never had, so it counts as
+# absent; a non-null value still shows up as a difference.
+_LATER_NULLABLE_DECISION_FIELDS = ("resolved_at", "resolution_snippet")
+
+
 def _normalize(doc: dict) -> dict:
-    """Timestamp spelling is the only thing the serializer is allowed to change."""
+    """Timestamp spelling is the only thing the serializer is allowed to change,
+    besides emitting null for decision fields added after the document was written."""
     doc["created"] = _iso(doc["created"])
     doc["ended"] = _iso(doc["ended"])
     for event in doc["events"]:
         event["timestamp"] = _iso(event["timestamp"])
+        decision = event.get("decision")
+        if decision:
+            for key in _LATER_NULLABLE_DECISION_FIELDS:
+                if key in decision and decision[key] is None:
+                    del decision[key]
     return doc
 
 

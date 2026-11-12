@@ -99,17 +99,29 @@ def _import(fixture: Path, rows: list[dict[str, Any]] | None = None, **overrides
     )
 
 
+# Decision fields TRACE added after the producer's goldens were frozen. The
+# producer carries no resolution time or quote, so the importer leaves them null;
+# a null here is dropped, and a non-null value still shows up as a difference.
+_LATER_NULLABLE_DECISION_FIELDS = ("resolved_at", "resolution_snippet")
+
+
 def _normalize(doc: dict[str, Any]) -> dict[str, Any]:
     """Blank exactly the two fields that legitimately differ from the producer's.
 
     Both are asserted separately. Blanking two named fields rather than ignoring
-    anything that differs is what keeps the parity comparison honest.
+    anything that differs is what keeps the parity comparison honest. Decision
+    fields added after the goldens were frozen are dropped only when null.
     """
     out = json.loads(json.dumps(doc))
     out["trace_version"] = None
     out["metadata"]["custom"]["importer"] = None
     for event in out["events"]:
         event["timestamp"] = _canonical_timestamp(event["timestamp"])
+        decision = event.get("decision")
+        if decision:
+            for key in _LATER_NULLABLE_DECISION_FIELDS:
+                if key in decision and decision[key] is None:
+                    del decision[key]
     for key in ("created", "ended"):
         if out.get(key):
             out[key] = _canonical_timestamp(out[key])
