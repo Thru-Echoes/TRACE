@@ -14,13 +14,22 @@ importer built from another system's data — is provenance, not a learning
 source, and yields nothing. A **machine-measured decision** — one carrying a
 typed confidence block with a producer contract key — is skipped wherever it
 appears, so a human annotation logged beside one still extracts.
+
+The LLM path builds its prompt with ``build_extraction_prompt`` and calls the
+model through ``_call_extraction_model``, the one attested egress site for
+extraction. The provenance-marks shadow arm (``shadow/extract.py``) uses the
+same two functions with its own purpose, so the arms cannot drift apart.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import time
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, Literal
+
+from pydantic import BaseModel, Field
 
 from trace_mcp.extensions.learn.egress import attest_egress
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, LearningCategory
@@ -307,14 +316,157 @@ def _format_events_for_llm(session: Session) -> str:
     return "\n".join(lines)
 
 
-def _format_existing_learnings(store: KnowledgeStore) -> str:
-    """Format existing learnings so the LLM can avoid duplicates."""
-    if not store.learnings:
+def _format_learnings(learnings: Sequence[Learning]) -> str:
+    """Format learnings as the prompt's existing-learnings block, so the LLM can avoid duplicates."""
+    if not learnings:
         return "(none)"
     lines: list[str] = []
-    for lrn in store.learnings:
+    for lrn in learnings:
         lines.append(f'- [{lrn.id}] ({lrn.category}) "{lrn.content}"')
     return "\n".join(lines)
+
+
+def _format_existing_learnings(store: KnowledgeStore) -> str:
+    """Format every learning in the store as the existing-learnings block."""
+    return _format_learnings(store.learnings)
+
+
+EXTRACTION_SYSTEM_PROMPT = (
+    "You are a knowledge extraction system for AI-assisted workflow audits. "
+    "You identify actionable learnings from session event logs: corrections "
+    "(human caught an AI mistake), gotchas (surprising findings), decisions "
+    "(important rejected/revised choices), prompt_pattern (prompt strategies "
+    "that were especially effective or ineffective — e.g., accuracy improvements "
+    "from prompt changes, failed prompting approaches, effective few-shot "
+    "patterns), and general learnings. When session events reveal a decision "
+    "chain about prompt refinement (revisions mentioning prompts, accuracy "
+    "changes, or strategy shifts), extract a prompt_pattern learning noting "
+    "what worked, what didn't, and why. "
+    "Be selective — only extract insights that would help in future sessions. "
+    "Do NOT duplicate existing learnings."
+)
+
+PROPOSAL_WORDING_INSTRUCTION = (
+    'A decision whose disposition is "proposed" has not been accepted by anyone. '
+    "If a learning's source_event is such a decision, word the learning as a proposal "
+    '(for example "It was proposed that ..."), never as a rule or an instruction.'
+)
+
+
+class ExtractionUsage(BaseModel):
+    """What one extraction cost, as reported by the provider and timed locally."""
+
+    path: Literal["llm", "rule-based"] = Field(..., description="Which extractor produced the result.")
+    prompt_tokens: int | None = Field(default=None, description="Provider-reported prompt tokens.")
+    completion_tokens: int | None = Field(default=None, description="Provider-reported completion tokens.")
+    seconds: float | None = Field(default=None, description="Wall-clock seconds of the model request.")
+    existing_chars: int | None = Field(default=None, description="Length of the existing-learnings block sent.")
+
+
+def build_extraction_prompt(session: Session, existing_text: str, *, proposal_wording: bool = False) -> str:
+    """Return the user message of an extraction request.
+
+    Args:
+        session: the session whose events are sent.
+        existing_text: the existing-learnings block (``_format_learnings``).
+        proposal_wording: append ``PROPOSAL_WORDING_INSTRUCTION`` (the shadow arm only).
+    """
+    events_text = _format_events_for_llm(session)
+    prompt = (
+        f"Session ID: {session.id}\n"
+        f"Project: {session.metadata.project}\n\n"
+        f"Events:\n{events_text}\n\n"
+        f"Existing learnings (DO NOT duplicate):\n{existing_text}\n\n"
+        "Extract NEW learnings from these events. For each learning:\n"
+        '- "content": actionable, specific insight (1-3 sentences)\n'
+        '- "category": one of learning, correction, gotcha, decision, observation, prompt_pattern\n'
+        '- "tags": 2-5 relevant tags for future retrieval\n'
+        '- "source_event": the event ID this learning primarily comes from\n'
+        '- "corrects_event_ids": list of event IDs being corrected (for corrections only)\n\n'
+        'Return a JSON object with key "learnings" containing an array of objects.\n'
+        'If no new learnings exist, return {"learnings": []}.'
+    )
+    if proposal_wording:
+        prompt += "\n\n" + PROPOSAL_WORDING_INSTRUCTION
+    return prompt
+
+
+def _report_usage(usage_sink: Callable[[ExtractionUsage], None] | None, usage: ExtractionUsage) -> None:
+    """Hand ``usage`` to the sink, if any. A failing sink is logged and never changes the extraction result."""
+    if usage_sink is None:
+        return
+    try:
+        usage_sink(usage)
+    except Exception:
+        logger.warning("extraction usage sink failed; the extraction result is unaffected", exc_info=True)
+
+
+def _int_or_none(value: object) -> int | None:
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+async def _call_extraction_model(
+    config: LearnConfig,
+    prompt: str,
+    *,
+    session: Session,
+    purpose: str,
+    content_class: str,
+    existing_chars: int,
+) -> tuple[list[dict], ExtractionUsage]:
+    """Attest, then send one extraction request, and return the learnings it proposes with its usage.
+
+    The one egress site for extraction (INV-5). Both the live extractor
+    (``purpose="extraction"``) and the shadow arm (``"shadow-extraction"``) call
+    it, each attested under its own purpose. The request sends only ``model``,
+    ``messages`` and ``response_format``.
+
+    Side effects: appends one row to the egress ledger; makes one network call.
+
+    Raises:
+        Exception: attestation, the request, or parsing the response failed. No
+            fallback happens here; callers decide.
+    """
+    # Egress-as-provenance: record the fact of the cloud call before making it.
+    # An attestation failure propagates like any request failure, and no
+    # content leaves the machine. This site knows the session, so the
+    # canonical key is passed explicitly (registry-aware: an aliased legacy
+    # label resolves to its real key).
+    from trace_mcp.project_identity import session_project_key
+
+    attest_egress(
+        provider="openai",
+        endpoint="chat.completions",
+        model=config.llm_extraction_model,
+        purpose=purpose,
+        content_class=content_class,
+        item_count=len(session.events),
+        project=session.metadata.project,
+        session_id=session.id,
+        project_key=session_project_key(session.metadata) or None,
+    )
+    client = AsyncOpenAI(api_key=config.openai_api_key)
+    began = time.perf_counter()
+    response = await client.chat.completions.create(
+        model=config.llm_extraction_model,
+        messages=[
+            {"role": "system", "content": EXTRACTION_SYSTEM_PROMPT},
+            {"role": "user", "content": prompt},
+        ],
+        response_format={"type": "json_object"},
+    )
+    seconds = time.perf_counter() - began
+    usage = getattr(response, "usage", None)
+    raw = response.choices[0].message.content or '{"learnings": []}'
+    parsed = json.loads(raw)
+    extracted: list[dict] = parsed.get("learnings", [])
+    return extracted, ExtractionUsage(
+        path="llm",
+        prompt_tokens=_int_or_none(getattr(usage, "prompt_tokens", None)),
+        completion_tokens=_int_or_none(getattr(usage, "completion_tokens", None)),
+        seconds=seconds,
+        existing_chars=existing_chars,
+    )
 
 
 async def extract_from_session_llm(
@@ -323,12 +475,16 @@ async def extract_from_session_llm(
     config: LearnConfig,
     *,
     dedup_threshold: float | None = None,
+    usage_sink: Callable[[ExtractionUsage], None] | None = None,
 ) -> list[str]:
     """Extract learnings from a session using an LLM.
 
     The model reads all session events and identifies valuable learnings,
     synthesising cross-event patterns and generating quality tags.
     Falls back to rule-based extraction on any error (unless strict mode).
+
+    ``usage_sink``, when given, receives the call's ``ExtractionUsage`` on
+    success, or ``ExtractionUsage(path="rule-based")`` on a fallback.
     """
     from trace_mcp.extensions.learn.config import (
         ApiKeyRejectedError,
@@ -348,6 +504,7 @@ async def extract_from_session_llm(
                 "Install with: pip install 'trace-mcp[llm]'. "
                 "Or set TRACE_STRICT_LLM=false to allow rule-based fallback."
             )
+        _report_usage(usage_sink, ExtractionUsage(path="rule-based"))
         return extract_from_session(store, session, dedup_threshold=dedup_threshold)
 
     events_text = _format_events_for_llm(session)
@@ -355,72 +512,17 @@ async def extract_from_session_llm(
         return []
 
     existing_text = _format_existing_learnings(store)
-
-    prompt = (
-        f"Session ID: {session.id}\n"
-        f"Project: {session.metadata.project}\n\n"
-        f"Events:\n{events_text}\n\n"
-        f"Existing learnings (DO NOT duplicate):\n{existing_text}\n\n"
-        "Extract NEW learnings from these events. For each learning:\n"
-        '- "content": actionable, specific insight (1-3 sentences)\n'
-        '- "category": one of learning, correction, gotcha, decision, observation, prompt_pattern\n'
-        '- "tags": 2-5 relevant tags for future retrieval\n'
-        '- "source_event": the event ID this learning primarily comes from\n'
-        '- "corrects_event_ids": list of event IDs being corrected (for corrections only)\n\n'
-        'Return a JSON object with key "learnings" containing an array of objects.\n'
-        'If no new learnings exist, return {"learnings": []}.'
-    )
+    prompt = build_extraction_prompt(session, existing_text)
 
     try:
-        # Egress-as-provenance: record the fact of the cloud call before making
-        # it. Attestation failure is handled by this try's strict/permissive
-        # logic like any LLM failure — and no content leaves the machine.
-        # This site knows the session, so the canonical key is passed explicitly
-        # (registry-aware: an aliased legacy label resolves to its real key).
-        # The matching/embedding sites can't do this and rely on the
-        # egress_project context set at the tool boundary instead.
-        from trace_mcp.project_identity import session_project_key
-
-        attest_egress(
-            provider="openai",
-            endpoint="chat.completions",
-            model=config.llm_extraction_model,
+        extracted, usage = await _call_extraction_model(
+            config,
+            prompt,
+            session=session,
             purpose="extraction",
             content_class="session-events+existing-learnings",
-            item_count=len(session.events),
-            project=session.metadata.project,
-            session_id=session.id,
-            project_key=session_project_key(session.metadata) or None,
+            existing_chars=len(existing_text),
         )
-        client = AsyncOpenAI(api_key=config.openai_api_key)
-        response = await client.chat.completions.create(
-            model=config.llm_extraction_model,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a knowledge extraction system for AI-assisted workflow audits. "
-                        "You identify actionable learnings from session event logs: corrections "
-                        "(human caught an AI mistake), gotchas (surprising findings), decisions "
-                        "(important rejected/revised choices), prompt_pattern (prompt strategies "
-                        "that were especially effective or ineffective — e.g., accuracy improvements "
-                        "from prompt changes, failed prompting approaches, effective few-shot "
-                        "patterns), and general learnings. When session events reveal a decision "
-                        "chain about prompt refinement (revisions mentioning prompts, accuracy "
-                        "changes, or strategy shifts), extract a prompt_pattern learning noting "
-                        "what worked, what didn't, and why. "
-                        "Be selective — only extract insights that would help in future sessions. "
-                        "Do NOT duplicate existing learnings."
-                    ),
-                },
-                {"role": "user", "content": prompt},
-            ],
-            response_format={"type": "json_object"},
-        )
-
-        raw = response.choices[0].message.content or '{"learnings": []}'
-        parsed = json.loads(raw)
-        extracted: list[dict] = parsed.get("learnings", [])
 
         new_ids: list[str] = []
         for item in extracted:
@@ -442,6 +544,7 @@ async def extract_from_session_llm(
             if lrn is not None:
                 new_ids.append(lrn.id)
 
+        _report_usage(usage_sink, usage)
         return new_ids
 
     except Exception as exc:
@@ -475,6 +578,7 @@ async def extract_from_session_llm(
             config.llm_extraction_model,
             exc_info=True,
         )
+        _report_usage(usage_sink, ExtractionUsage(path="rule-based"))
         return extract_from_session(store, session, dedup_threshold=dedup_threshold)
 
 
@@ -485,8 +589,14 @@ async def extract_from_session_auto(
     store: KnowledgeStore,
     session: Session,
     config: LearnConfig | None = None,
+    *,
+    usage_sink: Callable[[ExtractionUsage], None] | None = None,
 ) -> list[str]:
-    """Extract learnings using LLM if available, else rule-based."""
+    """Extract learnings using LLM if available, else rule-based.
+
+    ``usage_sink`` is passed to the LLM path, and receives
+    ``ExtractionUsage(path="rule-based")`` when the rule-based branch is taken directly.
+    """
     if config is None:
         from trace_mcp.extensions.learn.config import load_config
 
@@ -495,5 +605,8 @@ async def extract_from_session_auto(
     dedup_threshold = config.dedup_threshold if config.dedup_enabled else None
 
     if config.llm_enabled and config.openai_api_key and _HAS_OPENAI:
-        return await extract_from_session_llm(store, session, config, dedup_threshold=dedup_threshold)
+        return await extract_from_session_llm(
+            store, session, config, dedup_threshold=dedup_threshold, usage_sink=usage_sink
+        )
+    _report_usage(usage_sink, ExtractionUsage(path="rule-based"))
     return extract_from_session(store, session, dedup_threshold=dedup_threshold)

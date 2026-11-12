@@ -149,7 +149,7 @@ def test_inv4_project_filter_uses_canonical_key() -> None:
 # registered AND attests.
 
 INV5_EGRESS_CALL_SITES = {
-    ("extensions/learn/extraction.py", "extract_from_session_llm"),
+    ("extensions/learn/extraction.py", "_call_extraction_model"),
     ("extensions/learn/matching.py", "_llm_score"),
     ("extensions/learn/embeddings.py", "embed_texts"),
 }

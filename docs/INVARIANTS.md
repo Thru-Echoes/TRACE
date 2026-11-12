@@ -129,7 +129,9 @@ back to the local path). An unattested call site is unrecorded egress, the
 exact failure mode the ledger exists to prevent.
 
 **Sites:** `src/trace_mcp/extensions/learn/extraction.py`
-(`extract_from_session_llm`); `src/trace_mcp/extensions/learn/matching.py`
+(`_call_extraction_model` — one function serving two purposes, `extraction` for
+the live extractor and `shadow-extraction` for the provenance-marks shadow arm,
+each attested under its own purpose); `src/trace_mcp/extensions/learn/matching.py`
 (`_llm_score`); `src/trace_mcp/extensions/learn/embeddings.py`
 (`OpenAIEmbeddingProvider.embed_texts`). Writer:
 `src/trace_mcp/extensions/learn/egress.py`.
