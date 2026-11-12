@@ -273,6 +273,8 @@ def _event(
             "proposed_by": agent.model_dump(),
             "disposition": disposition,
             "resolved_by": None if disposition == "proposed" else GATE_ACTOR.model_dump(),
+            # The gate resolves a decision on the line that records it, so that line's time is the resolution time.
+            "resolved_at": None if disposition == "proposed" else line.timestamp,
             "revision_note": revision_note,
             "revises_event_id": revises,
             "suggestion_type": "proactive",
@@ -383,6 +385,7 @@ def import_decision_log(
                     **original.decision.model_dump(),
                     "disposition": disposition,
                     "resolved_by": GATE_ACTOR.model_dump(),
+                    "resolved_at": line.timestamp,
                     "revision_note": f"Resolved by replication {event_id}.",
                 }
             )

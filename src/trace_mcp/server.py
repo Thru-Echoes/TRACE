@@ -788,11 +788,14 @@ async def trace_resolve_decision(
     resolved_by_id: str,
     revision_note: str | None = None,
     session_id: str | None = None,
+    conversation_snippet: str | None = None,
 ) -> str:
     """Resolve a previously proposed decision.
 
     Mark it as accepted, revised, or rejected. Always include a revision_note
     when revising or rejecting — explain why.
+
+    When a person resolved it, pass their words in conversation_snippet: what they typed, or for a question dialog the option they picked or the answer they typed.
 
     session_id is optional — if omitted, uses the current session or
     auto-creates one.
@@ -814,6 +817,7 @@ async def trace_resolve_decision(
             resolved_by_type=resolved_by_type,
             resolved_by_id=resolved_by_id,
             revision_note=revision_note,
+            conversation_snippet=conversation_snippet,
         )
         return f"{prefix}{result}" if prefix else result
     except Exception as e:

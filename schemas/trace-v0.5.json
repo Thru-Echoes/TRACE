@@ -246,7 +246,7 @@
     },
     "DecisionData": {
       "additionalProperties": true,
-      "description": "Records a decision with full attribution and resolution status.",
+      "description": "Records a decision with full attribution and resolution status.\n\n``resolved_at`` is set by the recorder at resolution, never by the caller.\n``resolution_snippet`` is the resolver's quotation of the person's words\nthat resolved the decision. Both are null while the decision is proposed,\nand both are absent on records resolved before wire version 0.5.2.",
       "properties": {
         "description": {
           "title": "Description",
@@ -288,6 +288,31 @@
             }
           ],
           "default": null
+        },
+        "resolved_at": {
+          "anyOf": [
+            {
+              "format": "date-time",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolved At"
+        },
+        "resolution_snippet": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Resolution Snippet"
         },
         "revision_note": {
           "anyOf": [
@@ -942,7 +967,7 @@
     }
   },
   "additionalProperties": true,
-  "description": "JSON Schema for a session document conforming to the Decision Provenance for AI-Assisted Workflows specification v0.5.1. See: https://trace-protocol.org/v0.3 (namespace URI kept at v0.3# per ADR 002 D6 \u2014 additive extensions are valid within the same namespace).",
+  "description": "JSON Schema for a session document conforming to the Decision Provenance for AI-Assisted Workflows specification v0.5.2. See: https://trace-protocol.org/v0.3 (namespace URI kept at v0.3# per ADR 002 D6 \u2014 additive extensions are valid within the same namespace).",
   "properties": {
     "context": {
       "default": "https://trace-protocol.org/v0.3",
@@ -950,7 +975,7 @@
       "type": "string"
     },
     "trace_version": {
-      "default": "0.5.1",
+      "default": "0.5.2",
       "description": "Wire/schema format version this record conforms to. Decoupled from the package version (trace_mcp.__version__): wire-compatible releases keep this at the schema version. See SCHEMA_VERSION.",
       "title": "Trace Version",
       "type": "string"
@@ -1014,7 +1039,7 @@
     "id",
     "metadata"
   ],
-  "title": "Decision Provenance Session Document v0.5.1",
+  "title": "Decision Provenance Session Document v0.5.2",
   "type": "object",
   "$id": "https://trace-protocol.org/schemas/trace-v0.5.json"
 }

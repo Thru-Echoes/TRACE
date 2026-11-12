@@ -25,6 +25,13 @@ from trace_mcp.tools.session_tools import append_event
 # disposition that bricks the session file on the next load.
 VALID_RESOLUTIONS = tuple(v for v in get_args(DecisionDisposition) if v != "proposed")
 
+# Appended to the response (never stored) when a human resolution arrives
+# without the person's words. The resolution is still recorded: a recorder
+# must not refuse a resolution for lacking a quote (specification §3.6).
+UNQUOTED_RESOLUTION_NOTE = (
+    "Note: no conversation_snippet was given, so this resolution is recorded without the person's words."
+)
+
 
 async def propose_decision(
     storage: TraceStorage,
@@ -98,8 +105,16 @@ async def resolve_decision(
     resolved_by_type: str,
     resolved_by_id: str,
     revision_note: str | None = None,
+    conversation_snippet: str | None = None,
 ) -> str:
     """Resolve a previously proposed decision.
+
+    The recorder stamps ``resolved_at`` at resolution; the caller cannot set
+    it. *conversation_snippet* is the resolver's quotation of the person's
+    words, stored stripped as ``resolution_snippet`` (blank or omitted ->
+    ``None``). A human resolution without a quote is still recorded, and the
+    returned text carries ``UNQUOTED_RESOLUTION_NOTE``; the note is never
+    stored.
 
     Integrity guarantees:
     - *disposition* must be one of ``VALID_RESOLUTIONS`` — rejected up front,
@@ -150,6 +165,9 @@ async def resolve_decision(
                 "resolve that one instead."
             )
 
+        resolved_at = datetime.now(UTC)
+        quote = (conversation_snippet or "").strip() or None
+
         # --- Guard rails (computed from the authoritative disk state) ---
         guard_warnings: list[str] = []
 
@@ -189,7 +207,7 @@ async def resolve_decision(
         # check above — without this split, gating this wholesale would silently
         # drop the spec-correct ai→ai warning.
         if is_self_resolution and not suppress:
-            elapsed = (datetime.now(UTC) - target.timestamp).total_seconds()
+            elapsed = (resolved_at - target.timestamp).total_seconds()
             if elapsed < 5.0 and (resolved_by_type == "ai" or write_session.is_multi_actor()):
                 guard_warnings.append(
                     f"Decision proposed and self-resolved in {elapsed:.1f}s. "
@@ -221,6 +239,8 @@ async def resolve_decision(
                 **target.decision.model_dump(),
                 "disposition": disposition,
                 "resolved_by": resolver.model_dump(),
+                "resolved_at": resolved_at,
+                "resolution_snippet": quote,
                 "revision_note": revision_note,
                 "warnings": [*target.decision.warnings, *guard_warnings],
             }
@@ -232,4 +252,6 @@ async def resolve_decision(
     result = f"Decision {event_id} resolved: {disposition}"
     if guard_warnings:
         result += "\n" + "\n".join(f"  \u26a0\ufe0f {w}" for w in guard_warnings)
+    if resolved_by_type == "human" and quote is None:
+        result += "\n  " + UNQUOTED_RESOLUTION_NOTE
     return result

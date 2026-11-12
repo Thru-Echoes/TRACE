@@ -899,6 +899,8 @@ class TestSpecDataModelCoverage:
             "proposed_by",
             "disposition",
             "resolved_by",
+            "resolved_at",
+            "resolution_snippet",
             "revision_note",
             "revises_event_id",
             "suggestion_type",

@@ -99,17 +99,35 @@ def _import(fixture: Path, rows: list[dict[str, Any]] | None = None, **overrides
     )
 
 
+# Decision fields TRACE added after the producer's goldens were frozen.
+# resolved_at is this build's own (taken from the resolving line's time) and is
+# blanked here and asserted in TestResolutionTime. resolution_snippet has no
+# source in the log, so only a null is dropped; a non-null value still differs.
+_THIS_BUILDS_DECISION_FIELDS = ("resolved_at",)
+_LATER_NULLABLE_DECISION_FIELDS = ("resolution_snippet",)
+
+
 def _normalize(doc: dict[str, Any]) -> dict[str, Any]:
     """Blank exactly the two fields that legitimately differ from the producer's.
 
     Both are asserted separately. Blanking two named fields rather than ignoring
-    anything that differs is what keeps the parity comparison honest.
+    anything that differs is what keeps the parity comparison honest. Of the
+    decision fields added after the goldens were frozen, ``resolved_at`` is
+    blanked (asserted separately) and ``resolution_snippet`` is dropped only
+    when null.
     """
     out = json.loads(json.dumps(doc))
     out["trace_version"] = None
     out["metadata"]["custom"]["importer"] = None
     for event in out["events"]:
         event["timestamp"] = _canonical_timestamp(event["timestamp"])
+        decision = event.get("decision")
+        if decision:
+            for key in _THIS_BUILDS_DECISION_FIELDS:
+                decision.pop(key, None)
+            for key in _LATER_NULLABLE_DECISION_FIELDS:
+                if key in decision and decision[key] is None:
+                    del decision[key]
     for key in ("created", "ended"):
         if out.get(key):
             out[key] = _canonical_timestamp(out[key])
@@ -232,6 +250,38 @@ class TestProfileLogCarriesTheGatedKeys:
         assert first.resolved_by is not None and first.resolved_by.id == "rsi-exam-gate/decide.py"
         assert second.revises_event_id == "evt_001"
         assert second.revision_note == "Replication did not clear the minimum effect."
+
+
+class TestResolutionTime:
+    """The source line that resolves a decision carries its time; the import keeps it."""
+
+    @pytest.mark.parametrize("fixture", [LEGACY, PROFILE])
+    def test_a_decision_resolved_on_its_own_line_is_resolved_at_that_line(self, fixture: Path) -> None:
+        session = _import(fixture)
+        replicated = {e.decision.revises_event_id for e in session.events if e.decision and e.decision.revises_event_id}
+        own_line = [e for e in session.events if e.decision and e.id not in replicated]
+        resolved = [e for e in own_line if e.decision and e.decision.disposition != "proposed"]
+
+        assert resolved
+        for event in resolved:
+            assert event.decision is not None
+            assert event.decision.resolved_at == event.timestamp
+            assert event.decision.resolution_snippet is None
+
+    def test_a_replication_resolves_the_provisional_at_the_replication_line(self) -> None:
+        session = _import(PROFILE)
+        first, second = session.events[0], session.events[1]
+
+        assert first.decision is not None and first.decision.disposition != "proposed"
+        assert first.decision.resolved_at == second.timestamp
+        assert first.decision.resolved_at > first.timestamp
+        assert first.decision.resolution_snippet is None
+
+    @pytest.mark.parametrize("fixture", [LEGACY, PROFILE])
+    def test_a_decision_left_open_has_no_resolution_time(self, fixture: Path) -> None:
+        for event in _import(fixture).events:
+            if event.decision and event.decision.disposition == "proposed":
+                assert event.decision.resolved_at is None
 
 
 class TestNormativeFields:

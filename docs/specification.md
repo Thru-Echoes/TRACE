@@ -1,9 +1,9 @@
 # Decision Provenance for AI-Assisted Workflows
 
-## Specification v0.5.1
+## Specification v0.5.2
 
-**Status**: Stable. Every revision through v0.5.0 is additive and backward-compatible with v0.3.x / v0.4.x; v0.5.1 is additive except that it narrows the previously open name `decision.confidence` (Appendix B). The package version may run ahead of this spec/wire version for hardening releases that change no schema fields.
-**Last Updated**: 2026-09-03
+**Status**: Stable. Every revision through v0.5.0 is additive and backward-compatible with v0.3.x / v0.4.x; v0.5.1 is additive except that it narrows the previously open name `decision.confidence`; v0.5.2 is additive (Appendix B). The package version may run ahead of this spec/wire version for hardening releases that change no schema fields.
+**Last Updated**: 2026-11-11
 **JSON Schema**: [`trace-v0.5.json`](../schemas/trace-v0.5.json)
 **W3C PROV Namespace**: `https://trace-protocol.org/ns/v0.3#`
 
@@ -79,7 +79,7 @@ A session document is the top-level unit of this specification. Each document de
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `context` | string | SHOULD | URI identifying the specification version. Default: `"https://trace-protocol.org/v0.3"`. |
-| `trace_version` | string | SHOULD | Semantic version of the specification. Default: `"0.5.1"`. |
+| `trace_version` | string | SHOULD | Semantic version of the specification. Default: `"0.5.2"`. |
 | `id` | string | MUST | Unique identifier for this session. |
 | `created` | datetime | MUST | UTC ISO 8601 timestamp of session start. |
 | `ended` | datetime | MAY | UTC ISO 8601 timestamp of session end. Null while active. |
@@ -262,6 +262,8 @@ Records a methodological choice with full attribution and a defined lifecycle. T
 | `proposed_by` | Actor | MUST | The actor who proposed this decision. |
 | `disposition` | enum | MUST | One of: `"proposed"`, `"accepted"`, `"revised"`, `"rejected"`. Default: `"proposed"`. |
 | `resolved_by` | Actor | Conditional | The actor who resolved this decision. MUST be present when disposition is not `"proposed"`. |
+| `resolved_at` | datetime | MAY | When the decision was resolved (UTC, ISO 8601). Set by the recorder at resolution, never supplied by the caller. MUST be null while `disposition` is `"proposed"`. Absent on decisions resolved before v0.5.2 and on imported decisions whose source carries no resolution time; a consumer MUST treat absence as unknown, not as the proposal time. |
+| `resolution_snippet` | string | SHOULD | For a decision resolved by a human: the person's words that resolved it, quoted from the conversation (about 200 characters), or an explicit absence marker (§3.4.1). Supplied by the caller as `conversation_snippet` on `trace_resolve_decision`. MUST be null while `disposition` is `"proposed"`. Absent on decisions resolved before v0.5.2. It is the resolver's quotation, not a verification: a consumer that needs to know whether the words were said MUST check them against an independent record. A recorder MUST NOT refuse a resolution for lacking it. |
 | `revision_note` | string | Conditional | Explanation of why the decision was revised or rejected. SHOULD be present when disposition is `"revised"` or `"rejected"`. |
 | `revises_event_id` | string | MAY | ID of a previous decision event that this one revises, forming a decision chain. |
 | `suggestion_type` | enum | MAY | One of: `"proactive"` (AI volunteered), `"requested"` (human asked), `"collaborative"` (emerged from discussion). |
@@ -281,7 +283,7 @@ proposed ──────────┼─ revised ───→ (resolved, ma
 
 1. A decision is created with disposition `"proposed"` and a `proposed_by` actor.
 2. The decision remains in `"proposed"` state until explicitly resolved.
-3. Resolution sets the `disposition` to `"accepted"`, `"revised"`, or `"rejected"`, and records the `resolved_by` actor.
+3. Resolution sets the `disposition` to `"accepted"`, `"revised"`, or `"rejected"`, and records the `resolved_by` actor, in `resolved_at` the time of resolution, and in `resolution_snippet` the person's words when the caller supplies them.
 4. A revised decision SHOULD spawn a new decision event with `revises_event_id` pointing to the original.
 
 **Attribution rule**: The actor who proposes a decision MUST NOT be the same instance that resolves it, when the workflow involves multiple actors. This ensures the provenance record reflects genuine deliberation rather than self-approval. In single-actor workflows (e.g., a human working alone with an AI assistant), the human typically resolves decisions proposed by the AI, and vice versa.
@@ -445,6 +447,8 @@ Each event MUST populate exactly one type-specific data field, and it MUST match
 
 - When `disposition` is `"proposed"`, `resolved_by` MUST be null.
 - When `disposition` is `"accepted"`, `"revised"`, or `"rejected"`, `resolved_by` MUST be a valid Actor.
+- When `disposition` is `"proposed"`, `resolved_at` MUST be null.
+- When `disposition` is `"proposed"`, `resolution_snippet` MUST be null.
 - When `disposition` is `"revised"` or `"rejected"`, `revision_note` SHOULD be present.
 
 ### 4.3 Timestamps
@@ -733,7 +737,7 @@ rather than reconstructing an attribution it cannot know.
 ```json
 {
   "context": "https://trace-protocol.org/v0.3",
-  "trace_version": "0.5.1",
+  "trace_version": "0.5.2",
   "id": "trace_20260205_a1b2c3",
   "created": "2026-02-05T14:30:00Z",
   "ended": "2026-02-05T15:45:00Z",
@@ -763,6 +767,8 @@ rather than reconstructing an attribution it cannot know.
         "proposed_by": {"type": "ai", "id": "claude-opus-4.7"},
         "disposition": "revised",
         "resolved_by": {"type": "human", "id": "researcher-jane"},
+        "resolved_at": "2026-02-05T14:34:40Z",
+        "resolution_snippet": "Let's lower it to 0.80",
         "revision_note": "Human revised to 0.80 for higher recall — see evt_002",
         "suggestion_type": "proactive",
         "tags": ["methodology", "threshold"]
@@ -783,6 +789,7 @@ rather than reconstructing an attribution it cannot know.
         "proposed_by": {"type": "human", "id": "researcher-jane"},
         "disposition": "accepted",
         "resolved_by": {"type": "ai", "id": "claude-opus-4.7"},
+        "resolved_at": "2026-02-05T14:35:20Z",
         "revision_note": "Human directed lower threshold; AI applied. Originally proposed by AI at 0.85 (evt_001).",
         "revises_event_id": "evt_001",
         "tags": ["methodology", "threshold"]
@@ -848,6 +855,8 @@ rather than reconstructing an attribution it cannot know.
         "proposed_by": {"type": "ai", "id": "claude-opus-4.7"},
         "disposition": "accepted",
         "resolved_by": {"type": "human", "id": "researcher-jane"},
+        "resolved_at": "2026-02-05T15:36:10Z",
+        "resolution_snippet": "yes, do those three",
         "suggestion_type": "requested",
         "tags": ["methodology", "recall"]
       },
@@ -881,3 +890,4 @@ Contrast with evt_001 (`suggestion_type="proactive"` — AI volunteered) and evt
 | 0.4.1 | 2026-05-14 | **Additive, fully backwards compatible with v0.3.x and v0.4.0.** Added: **Proposer Identity Rule** (§3.6) — `proposed_by` identifies the author of proposal content, not the speaker of the resolving directive; `discovery` annotation category (§3.7) — non-trivial findings from autonomous work; §3.7.1 **External References in `corrects_event_ids`** with URI-form scheme (`external:`, `jsonl:`, `subagent:`, `tool-result:`); `host` and `parent_event_id` fields on `tool_call` (§3.5) to cover MCP, external non-MCP, and host-internal tools; normative MUST clause on `conversation_snippet` for contributions and corrections with absence-marker convention (§3.4.1); real-time logging guidance + autonomous-execution-window detection (§8.1); question→AI-proposal→accept recognition rows (§8.2). Changed: PROV-LD correction mapping split — event-ID targets emit `prov:wasInvalidatedBy`, URI-form targets emit qualified `prov:wasInfluencedBy` with `prov:atLocation` (§6); dispatch chains emit `prov:wasInformedBy`. Schema additions are optional with defaults that preserve v0.3.0 / v0.4.0 semantics. |
 | 0.5.0 | 2026-07-22 | **Additive, fully backwards compatible with v0.3.x and v0.4.x.** Added: **canonical project identity** — §3.2.2 defines the canonical key algorithm (spec-defined and independent of any implementation's filename sanitization), key immutability, the many-labels-to-one-key alias relation, the resolution order for documents lacking a key, and the reserved `auto`/`shared` keys; optional `metadata.project_key` (§3.2), authoritative when present, with `project` unchanged and still unconstrained as the display label; §4.5 validation rules forbidding consumers from splitting one project across equal-key labels or merging distinct keys, with the documented-divergence pattern covering pre-v0.5 sessions; §6 PROV additions `trace:projectKey` and an optional reified project entity carrying `trace:aliasLabel`, both new terms within the **frozen** `ns/v0.3#` namespace so existing exports are neither invalidated nor regenerated; §7.2 documents the published project registry and its independently versioned `trace-projects-v1.json` interchange schema; §8 records that label repair MUST be alias-table-first, never a rewrite of capture records. Schema file renamed to `trace-v0.5.json` with the `$id` cascade; the `Session.context` spec URL and the PROV namespace URI remain at v0.3. |
 | 0.5.1 | 2026-09-03 | **Schema addition with a narrowing of one previously open name.** Added the optional `confidence` field on decisions (§3.6, §3.6.1): the producer-recorded measurement that motivated the decision (statistic, the raw metric's direction, estimate, interval with coverage, method, sample size, digest-bound evidence), with any producer rule state preserved uninterpreted under a `contract` key; validation rules in §4.6; PROV projection in §6. When the field is present, six of its fields are required. Documents that do not use `decision.confidence` load unchanged; a v0.5.0 document that used that name with a different shape no longer loads. Schema file name unchanged (`trace-v0.5.json`, regenerated). |
+| 0.5.2 | 2026-11-11 | **Additive, fully backwards compatible with v0.5.1.** Added two optional fields on decisions (§3.6): `resolved_at`, the time of resolution, set by the recorder and never by the caller; and `resolution_snippet`, the resolver's quotation of the person's words, supplied as `conversation_snippet` on `trace_resolve_decision`. Both MUST be null while a decision is proposed (§4.2). Decisions resolved earlier lack both and are not backfilled; absence means unknown. Schema file name unchanged (`trace-v0.5.json`, regenerated). |
