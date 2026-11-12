@@ -9,6 +9,13 @@
 #   - Else: track turns and nudge only after N turns (default 3) and at
 #     most once every COOLDOWN_SEC (default 300s) to avoid spam.
 #
+# Shadow period (ADR 008): while `trace-mcp shadow start` has the period
+# running and this project is not excluded, the submitted prompt is appended to
+# ~/.trace/shadow/<key>/words/<host-session-id>.jsonl (mode 0600, never sent
+# anywhere). Host notices that no person typed (a prompt beginning with
+# `<task-notification` or `<system-reminder`) are not recorded. Capture prints
+# nothing and never changes the nudge. With no STATE.json, stdin is not read.
+#
 # State file: ~/.trace/runtime/<canonical-project-key>.state.json — the key is
 # filesystem-safe by construction, so no separate sanitizer is needed (one used
 # to live here and folded characters differently from the canonical key, which
@@ -20,7 +27,14 @@ RUNTIME_DIR="${TRACE_RUNTIME_DIR:-$HOME/.trace/runtime}"
 MIN_TURNS="${TRACE_PROMPT_MIN_TURNS:-3}"
 COOLDOWN_SEC="${TRACE_PROMPT_COOLDOWN_SEC:-300}"
 
-OUTPUT=$(python3 - "$PROJECT_DIR" "$SESSIONS_DIR" "$RUNTIME_DIR" "$MIN_TURNS" "$COOLDOWN_SEC" <<'PYEOF' 2>/dev/null
+SHADOW_DIR="${TRACE_SHADOW_DIR:-$HOME/.trace/shadow}"
+HOOK_INPUT_FILE=""
+if [ -f "$SHADOW_DIR/STATE.json" ] && [ ! -t 0 ]; then
+    HOOK_INPUT_FILE=$(mktemp 2>/dev/null) && cat > "$HOOK_INPUT_FILE"
+fi
+trap '[ -n "$HOOK_INPUT_FILE" ] && rm -f "$HOOK_INPUT_FILE"' EXIT
+
+OUTPUT=$(python3 - "$PROJECT_DIR" "$SESSIONS_DIR" "$RUNTIME_DIR" "$MIN_TURNS" "$COOLDOWN_SEC" "$SHADOW_DIR" "$HOOK_INPUT_FILE" <<'PYEOF' 2>/dev/null
 # --- trace-project-detect v0.5 begin ---
 # SHARED BLOCK — byte-identical in all four trace-mcp hook scripts, guarded by
 # tests/test_hook_assets_consistency.py. Edit every copy together or the hooks
@@ -114,6 +128,7 @@ def session_key(data: dict) -> str:
 # --- trace-project-detect v0.5 end ---
 
 import json
+import os
 import sys
 from datetime import datetime, timezone
 
@@ -122,6 +137,67 @@ sessions_dir = Path(sys.argv[2])
 runtime_dir = Path(sys.argv[3])
 min_turns = int(sys.argv[4])
 cooldown_sec = int(sys.argv[5])
+shadow_dir = Path(sys.argv[6]) if len(sys.argv) > 6 else Path()
+hook_input_file = sys.argv[7] if len(sys.argv) > 7 else ""
+
+_NOTICE_PREFIXES = ("<task-notification", "<system-reminder")
+
+
+def _make_private_dirs(path):
+    """Create path and any missing parents with mode 0700."""
+    missing = []
+    while not path.exists():
+        missing.append(path)
+        path = path.parent
+    for d in reversed(missing):
+        d.mkdir(mode=0o700)
+
+
+def _words_file(key, payload):
+    """Return (words file, host session id) for this hook input, or None when capture is off."""
+    if not key or not isinstance(payload, dict):
+        return None
+    state = json.loads((shadow_dir / "STATE.json").read_text())
+    if not isinstance(state, dict) or state.get("started_at") is None or state.get("stopped_at") is not None:
+        return None
+    excluded = state.get("excluded")
+    if isinstance(excluded, list) and key in excluded:
+        return None
+    sid = payload.get("session_id")
+    sid = sid if isinstance(sid, str) and sid else "unknown"
+    safe = re.sub(r"[^A-Za-z0-9_-]", "_", sid)
+    return shadow_dir / key / "words" / (safe + ".jsonl"), sid
+
+
+def capture_words(key):
+    """Append the submitted prompt to the shadow words file. Prints nothing."""
+    if not hook_input_file:
+        return
+    with open(hook_input_file, encoding="utf-8", errors="replace") as fh:
+        payload = json.load(fh)
+    target = _words_file(key, payload)
+    if target is None:
+        return
+    path, sid = target
+    prompt = payload.get("prompt")
+    if not isinstance(prompt, str) or not prompt:
+        return
+    if prompt.lstrip().startswith(_NOTICE_PREFIXES):
+        return
+    transcript = payload.get("transcript_path")
+    line = {
+        "ts": datetime.now(timezone.utc).isoformat(),
+        "host_session_id": sid,
+        "kind": "prompt",
+        "text": prompt,
+        "transcript": transcript if isinstance(transcript, str) and transcript else None,
+    }
+    _make_private_dirs(path.parent)
+    fd = os.open(str(path), os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+    try:
+        os.write(fd, (json.dumps(line, ensure_ascii=False) + "\n").encode("utf-8"))
+    finally:
+        os.close(fd)
 
 
 def has_active(key: str) -> bool:
@@ -161,6 +237,11 @@ def save_state(key: str, state: dict) -> None:
 
 key = detect_project(project_dir)
 
+try:
+    capture_words(key)
+except Exception:
+    pass
+
 if key and has_active(key):
     save_state(key, {"turn_count": 0, "last_nudged": None})
     sys.exit(0)
@@ -195,5 +276,5 @@ if [[ "$OUTPUT" == NUDGE\|* ]]; then
     if [ -z "$NAME" ]; then
         NAME="this project"
     fi
-    echo "⚠️ TRACE: you've been working in '$NAME' for several turns without an active session. Call trace_start_session now so this work is part of the audit record. [trace-hooks v0.5]"
+    echo "⚠️ TRACE: you've been working in '$NAME' for several turns without an active session. Call trace_start_session now so this work is part of the audit record. [trace-hooks v0.6]"
 fi

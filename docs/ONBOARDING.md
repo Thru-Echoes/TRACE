@@ -132,15 +132,16 @@ This is a distinction about **how much a project enforces the protocol**, and it
 is a real choice, not an oversight.
 
 A project always needs `.mcp.json` — that makes the 23 tools available. On top
-of that, `trace-mcp-init` can install four **hook scripts** into
+of that, `trace-mcp-init` can install five **hook scripts** into
 `.claude/hooks/` plus their registrations in `.claude/settings.json`:
 
 | Hook | Fires on | Does |
 |---|---|---|
-| `session-reminder.sh` | session start | reminds you to open a TRACE session if none is active |
-| `prompt-reminder.sh` | each prompt | nudges after several turns with no session (rate-limited) |
+| `session-reminder.sh` | session start | reminds you to open a TRACE session if none is active; from day 30 of a shadow period, reminds you to report and stop it |
+| `prompt-reminder.sh` | each prompt | nudges after several turns with no session (rate-limited); while a shadow period runs, saves the typed prompt locally (ADR 008) |
 | `pretool-guard.sh` | before an edit or write | warns — or blocks, in `strict` mode — when no session is active |
 | `decision-audit.sh` | after `trace_end_session` | echoes the attribution audit into the conversation |
+| `dialog-words.sh` | after a question dialog is answered | while a provenance-marks shadow period runs, saves the answers locally (ADR 008); otherwise does nothing |
 
 - **A hooked project** actively pushes you to record. The assistant is reminded,
   edits without a session are flagged, and the end-of-session attribution audit

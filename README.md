@@ -250,7 +250,7 @@ trace-mcp fleet-check ~/code --json     # per-project reports + totals
 ```
 fleet-check: 1/24 project(s) clean
   FAIL /path/to/project  (3 finding(s))
-         hooks.stamp: installed hook version differs from this build's [trace-hooks v0.5] ...
+         hooks.stamp: installed hook version differs from this build's [trace-hooks v0.6] ...
 fleet-check: failing checks, most widespread first
     23 project(s)  pin.trace_project_file
     14 project(s)  hooks.decision_audit_matcher

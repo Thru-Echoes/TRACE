@@ -1,6 +1,6 @@
 """Anti-divergence guard for the bundled Claude Code hook scripts.
 
-All four hooks embed one shared canonical-identity block. Divergence between
+All the hooks embed one shared canonical-identity block. Divergence between
 copies is not hypothetical: a pin-line regex that did not tolerate markdown
 bold once made one hook read a repository's CLAUDE.md project name while
 another fell through to the git basename, minting two labels — and therefore
@@ -31,12 +31,13 @@ HOOK_NAMES = [
     "prompt-reminder.sh",
     "pretool-guard.sh",
     "decision-audit.sh",
+    "dialog-words.sh",
 ]
 
 BLOCK_BEGIN = "# --- trace-project-detect v0.5 begin ---"
 BLOCK_END = "# --- trace-project-detect v0.5 end ---"
 
-VERSION_STAMP = "[trace-hooks v0.5]"
+VERSION_STAMP = "[trace-hooks v0.6]"
 
 
 def _hook_text(name: str) -> str:
@@ -53,14 +54,14 @@ def _extract_block(text: str, name: str) -> str:
     return text[start : end + len(BLOCK_END)]
 
 
-def test_all_four_hooks_exist() -> None:
+def test_all_hooks_exist() -> None:
     """Positive control: the guard is blind if the assets move or get renamed."""
     for name in HOOK_NAMES:
         assert (_HOOKS_DIR / name).is_file(), f"missing hook asset {name}"
 
 
-def test_detection_block_byte_identical_across_four_hooks() -> None:
-    """The shared block must be one text, not four that merely resemble each other."""
+def test_detection_block_byte_identical_across_hooks() -> None:
+    """The shared block must be one text, not several that merely resemble each other."""
     blocks = {name: _extract_block(_hook_text(name), name) for name in HOOK_NAMES}
     reference_name = HOOK_NAMES[0]
     reference = blocks[reference_name]

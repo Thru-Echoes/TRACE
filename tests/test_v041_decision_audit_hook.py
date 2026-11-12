@@ -482,4 +482,4 @@ class TestProjectScoping:
         _write_session(tmp_path, "trace_20260722_ours00", _decision_session("mine", unresolved=True))
 
         result = _run_hook(tmp_path, project="mine")
-        assert "[trace-hooks v0.5]" in result.stdout
+        assert "[trace-hooks v0.6]" in result.stdout
