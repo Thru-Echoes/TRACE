@@ -171,6 +171,13 @@ def export_prov_jsonld(session: Session) -> str:
             a["trace:description"] = _lit(d.description)
             a["trace:disposition"] = d.disposition
             a["prov:wasAssociatedWith"] = {"@id": actor_id}
+            # Wire 0.5.2: the decision activity ends when it is resolved; the
+            # person's words that resolved it travel with it. Absent on proposed
+            # decisions and on records resolved before the fields existed.
+            if _dt(d.resolved_at):
+                a["prov:endedAtTime"] = _dt(d.resolved_at)
+            if d.resolution_snippet:
+                a["trace:resolutionSnippet"] = _lit(d.resolution_snippet)
             if d.rationale:
                 a["trace:rationale"] = _lit(d.rationale)
             if d.warnings:

@@ -43,7 +43,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   time; the caller cannot. A human resolution given no quote is still recorded, and the
   tool's response says so. The decision-log importer sets `resolved_at` from the time of the
   line that resolves each decision. Decisions resolved earlier lack both fields and are not
-  backfilled.
+  backfilled. Both fields reach the PROV export (`prov:endedAtTime`, `trace:resolutionSnippet`)
+  and the Markdown export, `trace_search` matches the resolution words, and the attribution
+  audit at session end lists human resolutions recorded without the person's words.
 - **`trace-mcp jev review` assesses a whole session when a person runs it.** It has a
   `--dry-run` mode and a bound on events sent, it runs only for the current directory's
   project, and it does not resend an event already assessed. Nothing runs it automatically.

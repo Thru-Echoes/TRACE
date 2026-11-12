@@ -144,7 +144,10 @@ def export_markdown(session: Session) -> str:
             if d.disposition == "proposed":
                 lines.append(f"- **Status**: {emoji} Proposed (unresolved)")
             elif d.resolved_by:
-                lines.append(f"- **Status**: {emoji} {d.disposition.capitalize()} by {d.resolved_by.id}")
+                when = f" at {_fmt_time(d.resolved_at)}" if d.resolved_at else ""
+                lines.append(f"- **Status**: {emoji} {d.disposition.capitalize()} by {d.resolved_by.id}{when}")
+                if d.resolution_snippet:
+                    lines.append(f'- **Resolved on the words**: "{d.resolution_snippet}"')
             if d.revision_note:
                 lines.append(f'- **Revision**: "{d.revision_note}"')
             if d.warnings:

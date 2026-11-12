@@ -275,3 +275,120 @@ async def test_the_tool_passes_the_quote_through(isolated_server: JsonFileStorag
     assert "Error" not in result, result
     decision = await _reloaded_decision(isolated_server, session_id, match.group(0))
     assert decision.resolution_snippet == "yes, do that"
+
+
+# ── the new fields reach the exports, the search, and the attribution audit ──
+
+
+async def _resolved_session(storage: JsonFileStorage, active: dict[str, Session], quote: str | None) -> Session:
+    session, event_id = await _session_with_proposal(storage, active)
+    await decision_tools.resolve_decision(
+        storage,
+        session,
+        event_id=event_id,
+        disposition="accepted",
+        resolved_by_type="human",
+        resolved_by_id="alice",
+        conversation_snippet=quote,
+    )
+    return await storage.get_session(session.id)
+
+
+def _prov_decision(doc: dict) -> dict:
+    return next(n for n in doc["@graph"] if n.get("trace:kind") == "Decision")
+
+
+async def test_prov_export_carries_the_resolution_time_and_quote(storage, active) -> None:
+    from trace_mcp.exporters.prov_jsonld import export_prov_jsonld
+
+    session = await _resolved_session(storage, active, "yes, go with approach X")
+    decision = session.events[0].decision
+    assert decision is not None and decision.resolved_at is not None
+    node = _prov_decision(json.loads(export_prov_jsonld(session)))
+    assert node["prov:endedAtTime"] == {"@value": decision.resolved_at.isoformat(), "@type": "xsd:dateTime"}
+    assert node["trace:resolutionSnippet"] == "yes, go with approach X"
+
+
+async def test_prov_export_of_a_proposed_decision_has_neither(storage, active) -> None:
+    from trace_mcp.exporters.prov_jsonld import export_prov_jsonld
+
+    session, _ = await _session_with_proposal(storage, active)
+    node = _prov_decision(json.loads(export_prov_jsonld(await storage.get_session(session.id))))
+    assert "prov:endedAtTime" not in node and "trace:resolutionSnippet" not in node
+
+
+async def test_markdown_export_shows_when_and_on_whose_words(storage, active) -> None:
+    from trace_mcp.exporters.markdown_export import export_markdown
+
+    session = await _resolved_session(storage, active, "yes, go with approach X")
+    decision = session.events[0].decision
+    assert decision is not None and decision.resolved_at is not None
+    text = export_markdown(session)
+    assert f"Accepted by alice at {decision.resolved_at.strftime('%H:%M')}" in text
+    assert '- **Resolved on the words**: "yes, go with approach X"' in text
+
+
+async def test_markdown_export_of_an_unquoted_resolution(storage, active) -> None:
+    from trace_mcp.exporters.markdown_export import export_markdown
+
+    text = export_markdown(await _resolved_session(storage, active, None))
+    assert "Resolved on the words" not in text
+    assert "Accepted by alice at " in text
+
+
+async def test_search_finds_the_resolution_quote(storage, active) -> None:
+    from trace_mcp.tools.query_tools import search_events
+
+    session = await _resolved_session(storage, active, "ship it on Thursday")
+    assert [e["id"] for e in search_events(session, query="thursday")] == [session.events[0].id]
+
+
+async def test_the_audit_counts_human_resolutions_recorded_without_the_persons_words(storage, active) -> None:
+    session, first = await _session_with_proposal(storage, active)
+    second = await decision_tools.propose_decision(
+        storage, session, description="Use approach Y", proposed_by_type="ai", proposed_by_id="claude"
+    )
+    third = await decision_tools.propose_decision(
+        storage, session, description="Use approach Z", proposed_by_type="ai", proposed_by_id="claude"
+    )
+    for event_id, by, quote in ((first, "human", None), (second, "human", "yes, Y"), (third, "ai", None)):
+        await decision_tools.resolve_decision(
+            storage,
+            session,
+            event_id=event_id,
+            disposition="accepted",
+            resolved_by_type=by,
+            resolved_by_id="alice" if by == "human" else "claude",
+            conversation_snippet=quote,
+        )
+    audit = session_tools._build_attribution_audit(await storage.get_session(session.id))
+    assert audit.unquoted_resolution_count == 1
+    assert audit.unquoted_resolution_ids == [first]
+    assert any("without the person's words" in w for w in audit.warnings)
+    assert f"Human resolutions without the person's words: 1 ({first})" in audit.render()
+
+
+def test_the_audit_does_not_flag_resolutions_recorded_before_the_quote_existed() -> None:
+    from trace_mcp.schema import TraceEvent
+
+    session = Session.model_validate(
+        {
+            "id": "trace_20260101_aaaaaa",
+            "metadata": {"project": "collab-a"},
+            "events": [
+                TraceEvent(
+                    id="evt_001",
+                    session_id="trace_20260101_aaaaaa",
+                    type="decision",
+                    actor=Actor(type="ai", id="claude"),
+                    decision=DecisionData(
+                        description="old",
+                        proposed_by=Actor(type="ai", id="claude"),
+                        disposition="accepted",
+                        resolved_by=Actor(type="human", id="alice"),
+                    ),
+                ).model_dump(mode="json")
+            ],
+        }
+    )
+    assert session_tools._build_attribution_audit(session).unquoted_resolution_count == 0
