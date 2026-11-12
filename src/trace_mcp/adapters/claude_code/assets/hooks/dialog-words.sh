@@ -8,7 +8,9 @@
 # (mode 0600, never sent anywhere): one `dialog_answer` line per answer (a picked
 # option arrives as its label, a typed answer verbatim) and one `dialog_note`
 # line per note the person typed beside an answer. A picked option's preview is
-# the session's text, not the person's, and is not recorded.
+# the session's text, not the person's, and is not recorded; neither is the
+# placeholder "(notes only)" the host puts in the answer when the person typed a
+# note and picked no option (the note itself is recorded).
 #
 # Prints nothing and always exits 0. With no STATE.json, stdin is not read.
 
@@ -123,6 +125,9 @@ project_dir = Path(sys.argv[1])
 shadow_dir = Path(sys.argv[2])
 hook_input_file = sys.argv[3]
 
+# The host's own answer text when only a note was typed: not the person's words.
+_NOTES_ONLY = "(notes only)"
+
 
 def _make_private_dirs(path):
     """Create path and any missing parents with mode 0700."""
@@ -171,7 +176,7 @@ def capture_dialog(key):
     }
     lines = []
     for question, answer in response["answers"].items():
-        if isinstance(answer, str) and answer:
+        if isinstance(answer, str) and answer and answer != _NOTES_ONLY:
             lines.append(dict(common, kind="dialog_answer", question=question, text=answer))
     annotations = response.get("annotations")
     if isinstance(annotations, dict):

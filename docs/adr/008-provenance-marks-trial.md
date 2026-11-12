@@ -196,7 +196,11 @@ the TRACE session id.
 **What the hooks were confirmed to receive.** On Claude Code 2.1.322 a probe
 hook recorded the question dialog's `PostToolUse` input: `tool_response.answers`
 maps each question to its answer, a picked option as its label and a typed
-answer verbatim. The host's hooks reference documents the `prompt` field of
+answer verbatim. A second live probe, before the hooks shipped, confirmed every
+input kind listed below and found one more shape: when the person types a note
+and picks no option, the host sets the answer to the placeholder `"(notes only)"`
+and puts the note in `annotations[question]["notes"]`. The placeholder is not the
+person's words and is not recorded; the note is. The host's hooks reference documents the `prompt` field of
 `UserPromptSubmit` and the non-typed inputs that also trigger it, and past
 transcripts show the prompt hook running after background-task notices. In
 those transcripts, 68 answered dialogs carried 119 answers (14 of them typed)

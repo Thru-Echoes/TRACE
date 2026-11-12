@@ -91,3 +91,12 @@ def test_missing_or_garbage_files_give_none(tmp_path: Path) -> None:
 )
 def test_is_plain_prompt(text: str, expected: bool) -> None:
     assert is_plain_prompt(text) is expected
+
+
+def test_the_note_only_placeholder_is_not_a_dialog_answer(tmp_path: Path) -> None:
+    line = {
+        **_user([{"type": "tool_result", "tool_use_id": "t3", "content": "answered"}]),
+        "toolUseResult": {"answers": {"Q1": "(notes only)", "Q2": "Use the local cache"}, "annotations": {}},
+    }
+    inputs = read_host_inputs(_write(tmp_path / "t.jsonl", [line]), since=SINCE, until=UNTIL)
+    assert inputs is not None and inputs.dialog_answers == 1

@@ -855,6 +855,23 @@ class TestDialogWordsCapture:
         assert [f.name for f in files] == ["______evil.jsonl"]
         assert files[0].resolve().parent == env.words.resolve()
 
+    def test_a_note_only_answer_records_the_note_not_the_host_placeholder(self, tmp_path: Path) -> None:
+        """With no option picked, the host fills the answer with "(notes only)"; that text is not the person's."""
+        env = _ShadowEnv(tmp_path)
+        env.state()
+        question = "Which cache should the probe pretend to use?"
+        stdin = _dialog(
+            tool_response_changes={
+                "answers": {question: "(notes only)", "Second question?": "Placeholder one"},
+                "annotations": {question: {"notes": "good to go check"}},
+            }
+        )
+        self._assert_silent(env.run(DIALOG_WORDS, stdin))
+        assert [(x["kind"], x["question"], x["text"]) for x in env.lines()] == [
+            ("dialog_answer", "Second question?", "Placeholder one"),
+            ("dialog_note", question, "good to go check"),
+        ]
+
     def test_prompt_and_dialog_share_one_file(self, tmp_path: Path) -> None:
         env = _ShadowEnv(tmp_path)
         env.state()

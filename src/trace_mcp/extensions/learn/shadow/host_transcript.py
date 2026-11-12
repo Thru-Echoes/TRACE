@@ -21,6 +21,8 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 _CONTINUATION_PREFIX = "This session is being continued"
+# The host's own answer text when only a note was typed; not counted, matching the dialog hook.
+_NOTES_ONLY = "(notes only)"
 
 
 class HostInputs(BaseModel):
@@ -99,7 +101,9 @@ def read_host_inputs(path: Path, *, since: datetime, until: datetime) -> HostInp
                     inputs.prompts += 1
             result = entry.get("toolUseResult")
             if isinstance(result, dict) and isinstance(result.get("answers"), dict):
-                inputs.dialog_answers += sum(1 for v in result["answers"].values() if isinstance(v, str) and v)
+                inputs.dialog_answers += sum(
+                    1 for v in result["answers"].values() if isinstance(v, str) and v and v != _NOTES_ONLY
+                )
         except Exception:
             continue
     return inputs if parsed_any else None
