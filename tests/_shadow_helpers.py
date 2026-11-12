@@ -4,6 +4,7 @@ Exports:
     ScriptedClient — a stand-in for the OpenAI client that replays scripted replies.
     learn_env — isolate every data path, configure cloud extraction with a fake key,
         register the learn extension, and return the session storage.
+    last_server — the MCP server the most recent learn_env registered on.
     make_session — create and end a session with one annotation and three decisions.
     reply — build the model's JSON reply.
     FakeProvider — a deterministic embedding provider.
@@ -64,8 +65,13 @@ class ScriptedClient:
         return next(m["content"] for m in self.requests[index]["messages"] if m["role"] == "user")
 
 
-def learn_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, local_only: bool = False) -> JsonFileStorage:
+def learn_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, local_only: bool = False, llm: bool = True
+) -> JsonFileStorage:
     """Point every TRACE data path under ``tmp_path``, enable cloud extraction with a fake key, register learn.
+
+    ``llm=False`` turns cloud extraction off, which also keeps recall on the
+    local BM25 ranker (an LLM ranker would try a real request).
 
     Side effects: sets environment variables and the working directory for the
     test (undone by ``monkeypatch``); registers the learn extension's hooks.
@@ -76,7 +82,7 @@ def learn_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, local_only: bo
     monkeypatch.setenv("TRACE_EGRESS_LOG", str(tmp_path / "egress.jsonl"))
     monkeypatch.setenv("TRACE_REGISTRY_PATH", str(tmp_path / "projects.json"))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
-    monkeypatch.setenv("TRACE_LLM_ENABLED", "true")
+    monkeypatch.setenv("TRACE_LLM_ENABLED", "true" if llm else "false")
     monkeypatch.setenv("TRACE_STRICT_LLM", "false")
     monkeypatch.setenv("TRACE_EMBEDDING_BACKEND", "none")
     for var in ("TRACE_PROJECT", "TRACE_EMBEDDING_MODEL", "TRACE_DEDUP_THRESHOLD", "TRACE_LOCK_TIMEOUT"):
@@ -89,8 +95,18 @@ def learn_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, *, local_only: bo
     monkeypatch.setattr(learn_config, "_TRACE_ENV_PATH", tmp_path / "no-such-dir" / ".env")
     pident._reset_registry_cache()
     storage = JsonFileStorage(directory=str(tmp_path / "sessions"))
-    register(MCPServer("shadow-test"), storage)
+    server = MCPServer("shadow-test")
+    register(server, storage)
+    _servers.append(server)
     return storage
+
+
+_servers: list[MCPServer] = []
+
+
+def last_server() -> MCPServer:
+    """The MCP server the most recent ``learn_env`` registered the learn tools on."""
+    return _servers[-1]
 
 
 async def make_session(

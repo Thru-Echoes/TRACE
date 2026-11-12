@@ -24,6 +24,7 @@ from trace_mcp.extensions.learn.embeddings import get_embedding_provider
 from trace_mcp.extensions.learn.matching import DecayParams
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, LearningCategory
 from trace_mcp.extensions.learn.shadow import extract as shadow_extract
+from trace_mcp.extensions.learn.shadow import recall as shadow_recall
 from trace_mcp.extensions.learn.shadow import state as shadow_state
 
 if TYPE_CHECKING:
@@ -406,10 +407,15 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
             )
             if any(r["matched"] for r in outcome.results) or embedded:
                 _persist_recall_bookkeeping(ks, project)
-            return RecallResult(
+            result = RecallResult(
                 results=outcome.results,
                 notice=recall_notice(outcome.summary, original_query=context),
             )
+        # Shadow period (ADR 008 D6): after the lock, never changing the result.
+        await shadow_recall.record_recall(
+            project=project, results=list(result), storage=storage, limit=limit, context=context
+        )
+        return result
 
     async def _extract_hook(project: str, session_id: str) -> list[str]:
         # INV-6: refuse to extract a session into a DIFFERENT project's store
@@ -563,7 +569,12 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                     notices.append(bookkeeping_notice)
                 if notices:
                     payload["warnings"] = notices
-                return json.dumps(payload)
+                response = json.dumps(payload)
+            # Shadow period (ADR 008 D6): after the lock, never changing the response.
+            await shadow_recall.record_recall(
+                project=project, results=results, storage=storage, limit=limit, context=context or ""
+            )
+            return response
         except pident.RegistryUnavailableError as exc:
             return _registry_unavailable_error(project, exc)
         except Exception as exc:
