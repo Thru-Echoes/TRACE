@@ -501,3 +501,37 @@ async def test_an_imported_record_is_skipped(tmp_path: Path, monkeypatch: pytest
     # The live arm sends nothing for an imported record (its event block is empty), and neither arm records.
     assert client.requests == []
     assert not (get_project_dir(PROJECT) / "extraction.jsonl").exists()
+
+
+async def test_every_shadow_embedding_call_is_attributed_to_the_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cloud embedding backend attests each call; the row must carry the project key, not None."""
+    from trace_mcp.extensions.learn import egress
+
+    storage = learn_env(tmp_path, monkeypatch)
+    _use(monkeypatch, ScriptedClient([reply(("A new shadow learning.", "evt_002"))]))
+    session = await make_session(storage)
+    seen: list[str | None] = []
+
+    class _Recording(FakeProvider):
+        async def embed_query(self, text: str) -> list[float]:
+            seen.append(egress._current_project_key.get())
+            return await super().embed_query(text)
+
+        async def embed_texts(self, texts: list[str]) -> list[list[float]]:
+            seen.append(egress._current_project_key.get())
+            return await super().embed_texts(texts)
+
+    await run_shadow_step(
+        project=PROJECT,
+        session=session,
+        config=LearnConfig(openai_api_key="test-key", llm_enabled=True),
+        provider=_Recording(),
+        live_store=_vector_store(),
+        live_new_ids=[],
+        live_usage=None,
+    )
+
+    assert _errors() == []
+    assert seen and set(seen) == {PROJECT}

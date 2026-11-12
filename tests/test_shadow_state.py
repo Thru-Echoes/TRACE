@@ -194,3 +194,8 @@ def test_append_record_creates_every_missing_directory_private(shadow_root: Path
 def test_starting_creates_a_private_root(shadow_root: Path) -> None:
     start_trial(now=T0)
     assert shadow_root.stat().st_mode & 0o777 == 0o700
+
+
+def test_an_empty_key_is_never_active(shadow_root: Path) -> None:
+    start_trial(now=T0)
+    assert is_active("") is False

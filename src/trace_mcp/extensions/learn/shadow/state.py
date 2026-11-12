@@ -94,7 +94,9 @@ def load_state() -> ShadowState:
 
 
 def is_active(project_key: str) -> bool:
-    """True when the period is running and ``project_key`` is not excluded. Never raises."""
+    """True when the period is running and ``project_key`` is a non-empty key not excluded. Never raises."""
+    if not project_key:
+        return False
     try:
         state = load_state()
         return state.is_running() and project_key not in state.excluded

@@ -336,18 +336,17 @@ async def _run(
     elif use_model:
         mode = "llm"
         prompt = build_extraction_prompt(session, existing_text, proposal_wording=True)
-        with egress_project(key or None):
-            items, shadow_usage = await _call_extraction_model(
-                config,
-                prompt,
-                session=session,
-                purpose="shadow-extraction",
-                content_class="session-events+nearest-learnings",
-                existing_chars=len(existing_text),
-            )
-            items = [item for item in items if isinstance(item, dict)]
-            if provider is not None and items:
-                vectors = await provider.embed_texts([str(item.get("content", "")) for item in items])
+        items, shadow_usage = await _call_extraction_model(
+            config,
+            prompt,
+            session=session,
+            purpose="shadow-extraction",
+            content_class="session-events+nearest-learnings",
+            existing_chars=len(existing_text),
+        )
+        items = [item for item in items if isinstance(item, dict)]
+        if provider is not None and items:
+            vectors = await provider.embed_texts([str(item.get("content", "")) for item in items])
     else:
         mode = "rule-based"
         shadow_usage = ExtractionUsage(path="rule-based")
@@ -440,18 +439,21 @@ async def run_shadow_step(
     key = ""
     try:
         key = _project_key(project)
-        await asyncio.wait_for(
-            _run(
-                key=key,
-                project=project,
-                session=session,
-                config=config,
-                provider=provider,
-                live_store=live_store,
-                live_new_ids=live_new_ids,
-                live_usage=live_usage,
-            ),
-            SHADOW_STEP_TIMEOUT_SECONDS,
-        )
+        # Every egress the step attests (the selection's query embedding, the
+        # model call, the results' embeddings) is attributed to this project.
+        with egress_project(key or None):
+            await asyncio.wait_for(
+                _run(
+                    key=key,
+                    project=project,
+                    session=session,
+                    config=config,
+                    provider=provider,
+                    live_store=live_store,
+                    live_new_ids=live_new_ids,
+                    live_usage=live_usage,
+                ),
+                SHADOW_STEP_TIMEOUT_SECONDS,
+            )
     except Exception as exc:
         record_error(key or "unknown", "extraction", exc)
