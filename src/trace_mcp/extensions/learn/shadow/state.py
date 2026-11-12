@@ -109,6 +109,7 @@ def _write_state(state: ShadowState) -> None:
     same directory, syncs it, renames it over ``STATE.json``, syncs the directory.
     """
     root = get_shadow_root()
+    _make_private_dirs(root)
     ensure_durable_dir(root)
     fd, tmp = tempfile.mkstemp(dir=root, prefix=".STATE.", suffix=".tmp")
     try:
@@ -172,14 +173,24 @@ def set_excluded(project_key: str, excluded: bool) -> ShadowState:
     return new
 
 
+def _make_private_dirs(directory: Path) -> None:
+    """Create ``directory`` and every missing parent with mode 0700 (``mkdir(parents=True)`` would not)."""
+    missing: list[Path] = []
+    while not directory.exists():
+        missing.append(directory)
+        directory = directory.parent
+    for d in reversed(missing):
+        d.mkdir(mode=0o700, exist_ok=True)
+
+
 def append_record(path: Path, record: BaseModel) -> None:
     """Append ``record`` as one JSON line to ``path``.
 
-    Side effects: creates missing parent directories (mode 0700) and the file
-    (mode 0600); writes the line in a single ``os.write`` on an ``O_APPEND``
-    descriptor, so concurrent writers cannot interleave within a line.
+    Side effects: creates every missing parent directory (mode 0700) and the
+    file (mode 0600); writes the line in a single ``os.write`` on an
+    ``O_APPEND`` descriptor, so concurrent writers cannot interleave within a line.
     """
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    _make_private_dirs(path.parent)
     line = (record.model_dump_json() + "\n").encode("utf-8")
     fd = os.open(path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
     try:

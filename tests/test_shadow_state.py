@@ -182,3 +182,15 @@ def test_load_words_skips_times_without_a_timezone(shadow_root: Path) -> None:
     naive = {"ts": "2026-11-01T10:00:00", "host_session_id": "h", "text": "no zone"}
     _write_words(words_dir / "host-a.jsonl", [naive, _entry(1, "zoned")])
     assert [w.text for w in load_words("acme")] == ["zoned"]
+
+
+def test_append_record_creates_every_missing_directory_private(shadow_root: Path) -> None:
+    path = get_project_dir("acme") / "words" / "host-1.jsonl"
+    append_record(path, _Line(n=1))
+    for directory in (shadow_root, shadow_root / "acme", shadow_root / "acme" / "words"):
+        assert directory.stat().st_mode & 0o777 == 0o700, directory
+
+
+def test_starting_creates_a_private_root(shadow_root: Path) -> None:
+    start_trial(now=T0)
+    assert shadow_root.stat().st_mode & 0o777 == 0o700
