@@ -250,6 +250,10 @@ async def test_a_replacement_standing_in_for_a_matched_learning_reaches_the_deci
     )
     line = next(x for x in banner.splitlines() if "the limit moved to three" in x)
     assert "weak match" not in line
+    # Shown twice, each time in a matched learning's place: both exposures are saved.
+    saved = {lrn.id: lrn for lrn in store.load_store(PROJECT).learnings}
+    assert saved[new.id].recall_count == 2 and saved[new.id].last_surfaced is not None
+    assert saved[old.id].recall_count == 0
 
 
 async def test_the_best_ranked_eligible_learning_from_the_replacement_is_chosen() -> None:

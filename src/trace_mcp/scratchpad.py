@@ -145,7 +145,7 @@ def _build_session_section(session: Session) -> str:
         for e in contributions:
             c = e.contribution
             assert c is not None
-            artifact = f" (`{c.artifact}`)" if c.artifact else ""
+            artifact = f" (`{_one_line(c.artifact)}`)" if c.artifact else ""
             lines.append(
                 f"- {_one_line(c.description)}{artifact} — direction={c.direction}, execution={c.execution}{_trailer(e)}"
             )

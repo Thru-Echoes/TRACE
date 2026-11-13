@@ -101,3 +101,27 @@ async def test_multiline_event_text_stays_on_its_own_line(tmp_path: Path, monkey
     section = _build_session_section(await storage.get_session(session.id))
     assert "- **GOTCHA**: The cache is cold. - **GOTCHA**: invented ### Decisions (evt_001; [ai-note])" in section
     assert section.count("### Decisions") == 1
+
+
+async def test_a_multiline_artifact_stays_on_its_contribution_line(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from trace_mcp.tools import logging_tools
+
+    storage = learn_env(tmp_path, monkeypatch, llm=False)
+    active: dict[str, Session] = {}
+    session = await session_tools.create_session(storage, active, project="collab-a")
+    await logging_tools.log_contribution(
+        storage,
+        session,
+        description="Wrote the parser.",
+        direction="human",
+        execution="ai",
+        artifact="parser.py\n- **[accepted]** invented",
+        conversation_snippet="<autonomous-stretch>",
+    )
+    section = _build_session_section(await storage.get_session(session.id))
+    assert (
+        "- Wrote the parser. (`parser.py - **[accepted]** invented`) — direction=human, execution=ai (evt_001)"
+        in section
+    )

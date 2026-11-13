@@ -149,6 +149,11 @@ def recall_notice(summary: matching.RecallSummary, *, original_query: str) -> st
     return "; ".join(parts) or None
 
 
+def _is_exposed(result: dict[str, Any]) -> bool:
+    """True when ranking counted this result as exposed: it matched, or stands in for one that did. Pure."""
+    return bool(result.get("matched") or result.get("replaces_matched"))
+
+
 def _source_marks_legend(rows: list[dict[str, Any]]) -> str:
     """The legend line for the source marks in ``rows``; empty when there are none. Pure."""
     shown = [row["source_marks"] for row in rows if isinstance(row.get("source_marks"), list)]
@@ -437,7 +442,7 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                 step_back=reader.get_step_back,
                 floor_eligible=reader.is_floor_eligible,
             )
-            if any(r["matched"] for r in outcome.results) or embedded:
+            if any(_is_exposed(r) for r in outcome.results) or embedded:
                 _persist_recall_bookkeeping(ks, project)
             result = RecallResult(
                 results=outcome.results,
@@ -509,6 +514,12 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
         response reports ``matched``, ``scored``, ``floor`` and ``backend``, and a
         ``notice`` field explains an empty, small-store or cleaned-query recall.
 
+        Each learning carries ``source_marks``: who stood behind the event it was
+        drawn from, not its wording. A learning whose source a person rejected or
+        replaced is left out and listed in ``stepped_back``; a learning from the
+        replacement takes its place with ``replaces``, with its own score, even
+        below ``threshold`` (``replaces_matched`` when the one it replaces matched).
+
         Data flow: with the OpenAI embedding/LLM backend configured, the query
         text is sent to OpenAI to score matches. Set ``TRACE_LOCAL_ONLY=1`` to
         keep recall fully local.
@@ -568,7 +579,7 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                 )
                 results = outcome.results
                 bookkeeping_notice: str | None = None
-                if any(r["matched"] for r in results) or embedded:
+                if any(_is_exposed(r) for r in results) or embedded:
                     bookkeeping_notice = _persist_recall_bookkeeping(ks, project)
                 payload: dict[str, Any] = {
                     "project": project,
