@@ -51,6 +51,7 @@ from trace_mcp.provenance_marks import (
     get_quote_position,
     get_quote_word_share,
     get_resolution_timing,
+    is_human_resolution,
 )
 from trace_mcp.schema import Session, TraceEvent
 from trace_mcp.storage.json_file import JsonFileStorage
@@ -268,17 +269,6 @@ def _share_band(share: float) -> str:
     return "<0.5"
 
 
-def _is_human_resolution(event: TraceEvent) -> bool:
-    d = event.decision
-    return (
-        event.type == "decision"
-        and d is not None
-        and d.disposition != "proposed"
-        and d.resolved_by is not None
-        and d.resolved_by.type == "human"
-    )
-
-
 # ── one project ───────────────────────────────────────────────────────────
 
 
@@ -465,7 +455,7 @@ def _session_part(
                         live_text=snippet,
                     )
                 )
-            if _is_human_resolution(event) and event.decision is not None:
+            if is_human_resolution(event) and event.decision is not None:
                 decision = event.decision
                 _bump(report.resolution, marks.resolution)
                 _bump(report.resolution_by_quote.setdefault(marks.resolution, {}), marks.quote)

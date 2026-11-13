@@ -426,6 +426,53 @@ def test_timing_never_reaches_a_tag():
     assert a.tags() == b.tags()
 
 
+# --------------------------------------------------------------------------- timestamps with no timezone
+
+
+def _naive(ts: datetime) -> datetime:
+    return ts.replace(tzinfo=None)
+
+
+def test_a_timestamp_with_no_timezone_is_read_as_utc():
+    """A record written without an offset must not crash a comparison with words recorded in UTC."""
+    event = _decision(
+        "accepted",
+        resolver="human",
+        ts=_naive(T1),
+        resolved_at=_naive(T2),
+        snippet="keep the retry limit at three",
+        resolution_snippet="yes, go with three retries",
+    )
+    words = _words((T0, "please keep the retry limit at three"), (T2 - SECOND, "yes, go with three retries"))
+    marks = get_event_marks(event, words, session_created=_naive(T0 + SECOND))
+    assert marks.tags() == ["[accepted]", "[quote-verified]", "[resolution-verified]"]
+    assert get_resolution_timing(event, words) == "person_spoke_between"
+    assert get_base_mark(event, as_of=T1 + SECOND) == ("proposed", True)
+    assert get_event_marks(event, words, session_created=T1, as_of=_naive(T1 + SECOND)).base == "proposed"
+
+
+def test_words_recorded_with_no_timezone_are_read_as_utc():
+    words = [WordsEntry(ts=_naive(T0), host_session_id="host-1", text="please keep the retry limit at three")]
+    event = _decision("proposed", snippet="keep the retry limit at three")
+    assert get_quote_status("keep the retry limit at three", words, not_after=T1, session_created=T1) == "verified"
+    assert get_quote_position("keep the retry limit at three", words, not_after=T1) == "turn"
+    assert get_quote_word_share("keep the retry limit at four", words, not_after=T1) > 0.5
+    assert get_event_marks(event, words, session_created=T1).quote == "verified"
+
+
+def test_is_human_resolution_is_public_and_shared():
+    """One definition of "resolved by a person" serves the marks and the report."""
+    from trace_mcp import provenance_marks
+    from trace_mcp.extensions.learn.shadow import report
+
+    assert provenance_marks.is_human_resolution(_human_decision(T2, None)) is True
+    assert provenance_marks.is_human_resolution(_decision("accepted", resolver="ai")) is False
+    assert provenance_marks.is_human_resolution(_decision("proposed")) is False
+    assert provenance_marks.is_human_resolution(_annotation("human")) is False
+    assert not hasattr(report, "_is_human_resolution"), "the report must use the shared helper, not a copy"
+    assert report.is_human_resolution is provenance_marks.is_human_resolution
+
+
 # --------------------------------------------------------------------------- boundary guard
 
 

@@ -19,7 +19,7 @@ Exports:
     WordsEntry, EventMarks
     normalize_quote, get_snippet_fragments, get_base_mark, get_turn_entries,
     get_quote_status, get_quote_position, get_quote_word_share,
-    get_resolution_quote, get_resolution_timing, get_event_marks
+    get_resolution_quote, get_resolution_timing, get_event_marks, is_human_resolution
 
 Side effects: none. Every function is pure.
 """
@@ -29,7 +29,7 @@ from __future__ import annotations
 import re
 import unicodedata
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -105,6 +105,11 @@ class EventMarks(BaseModel):
         return out
 
 
+def _utc(ts: datetime) -> datetime:
+    """Read a timestamp that carries no timezone as UTC, which is what every writer records."""
+    return ts if ts.tzinfo is not None else ts.replace(tzinfo=UTC)
+
+
 def normalize_quote(text: str) -> str:
     """Return ``text`` in Unicode NFC, case-folded, with whitespace runs collapsed and the ends stripped."""
     return _WHITESPACE_RE.sub(" ", unicodedata.normalize("NFC", text).casefold()).strip()
@@ -127,7 +132,7 @@ def get_base_mark(event: TraceEvent, *, as_of: datetime | None = None) -> tuple[
         decision = event.decision
         if decision.disposition == "proposed":
             return "proposed", True
-        if as_of is not None and decision.resolved_at is not None and as_of < decision.resolved_at:
+        if as_of is not None and decision.resolved_at is not None and _utc(as_of) < _utc(decision.resolved_at):
             return "proposed", True
         resolver = decision.resolved_by
         if resolver is None or resolver.type != "human":
@@ -143,7 +148,8 @@ def get_base_mark(event: TraceEvent, *, as_of: datetime | None = None) -> tuple[
 
 
 def _candidates(words: Sequence[WordsEntry], not_after: datetime) -> list[WordsEntry]:
-    return sorted((w for w in words if w.ts <= not_after), key=lambda w: w.ts)
+    limit = _utc(not_after)
+    return sorted((w for w in words if _utc(w.ts) <= limit), key=lambda w: _utc(w.ts))
 
 
 def get_turn_entries(words: Sequence[WordsEntry], *, not_after: datetime) -> list[WordsEntry]:
@@ -189,7 +195,8 @@ def get_quote_status(
         return "absent"
     if _is_explicit_absence(snippet):
         return "absence_marker"
-    if not any(w.ts <= session_created for w in words):
+    created = _utc(session_created)
+    if not any(_utc(w.ts) <= created for w in words):
         return "unchecked"
     fragments = get_snippet_fragments(snippet)
     if fragments:
@@ -228,7 +235,8 @@ def get_quote_word_share(snippet: str, words: Sequence[WordsEntry], *, not_after
     return min(shares) if shares else 0.0
 
 
-def _is_human_resolution(event: TraceEvent) -> bool:
+def is_human_resolution(event: TraceEvent) -> bool:
+    """Say whether the event is a decision the record shows as resolved by a human actor."""
     decision = event.decision
     return (
         event.type == "decision"
@@ -247,7 +255,7 @@ def get_resolution_quote(
     ``not_applicable`` for anything but a human-resolved decision; ``unknown``
     when the decision was resolved before the record held a resolution time.
     """
-    if not _is_human_resolution(event) or event.decision is None:
+    if not is_human_resolution(event) or event.decision is None:
         return "not_applicable"
     decision = event.decision
     if decision.resolved_at is None:
@@ -263,12 +271,14 @@ def get_resolution_timing(event: TraceEvent, words: Sequence[WordsEntry]) -> Res
     A count for the report only, never a tag: most real approvals are proposed
     and resolved in the same turn (ADR 008 D1).
     """
-    if not _is_human_resolution(event) or event.decision is None:
+    if not is_human_resolution(event) or event.decision is None:
         return "not_applicable"
-    resolved_at = event.decision.resolved_at
-    if resolved_at is None or not any(w.ts <= resolved_at for w in words):
+    if event.decision.resolved_at is None:
         return "unknown"
-    if any(event.timestamp < w.ts <= resolved_at for w in words):
+    resolved_at, proposed_at = _utc(event.decision.resolved_at), _utc(event.timestamp)
+    if not any(_utc(w.ts) <= resolved_at for w in words):
+        return "unknown"
+    if any(proposed_at < _utc(w.ts) <= resolved_at for w in words):
         return "person_spoke_between"
     return "same_turn"
 
