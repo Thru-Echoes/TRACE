@@ -684,6 +684,36 @@ same way. The Windows guard (`msvcrt.locking`) has not been run on Windows.
 
 **Status.** ENFORCED.
 
+## INV-18 — Text TRACE delivers to a later session carries its marks  · ENFORCED
+
+**Invariant.** Every path by which TRACE shows a later session a learning or an event's text
+shows that text's provenance marks, or returns the record itself, which holds every field a
+mark is computed from. A recalled learning's marks describe its source event and are shown
+after its text, with the learning's id and the source event's id (ADR 008 D10).
+
+**Why this is an integrity invariant.** A session reads what TRACE delivers as project
+knowledge. Text that arrives without saying who stood behind it reads as settled, whoever
+wrote it; an AI's paraphrase of a proposal no person resolved then passes for a rule.
+
+**Exhaustive site-set.** The MCP tools and the scratchpad file. Tools that show marks:
+`trace_start_session` (the recalled-learnings banner), `trace_propose_decision` (the
+related-learnings block), `trace_learn_recall`, `trace_learn_list`, `trace_export`
+(Markdown and PROV; the JSON export is the record) and `trace_end_session` (writes the
+scratchpad). Tools that return the record itself: `trace_get_session`, `trace_get_events`,
+`trace_get_decisions`, `trace_get_decision_chain`, `trace_search`,
+`trace_jev_assess_candidate`. Every other tool returns no learning or event text written by
+someone else.
+
+**Known limitations.** Files a host writes from TRACE output (a compaction summary, a
+context file written by a host skill, memory files) are outside TRACE and not covered.
+
+**Tests.** `tests/test_delivery_paths_marks.py :: test_every_tool_is_classified` fails when
+a registered tool is not classified; `:: test_each_marked_path_shows_the_source_mark` and
+`:: test_the_session_banner_and_the_decision_block_are_built_by_the_marked_formatters`
+check each marked path.
+
+**Status.** ENFORCED.
+
 ---
 
 *To add an invariant: give it the next `INV-N`, state it, enumerate the
