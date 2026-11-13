@@ -2,9 +2,11 @@
 
 The golden file records the exact messages the extractor sends for a fixed
 session and store, so a restructuring of the prompt builder or the model call
-cannot change what the model is asked without this test saying so. The request
-ends with the instruction to word a learning from an unresolved proposal as a
-proposal. The client is the one substitution: nothing leaves the machine.
+cannot change what the model is asked without this test saying so. The events
+say who proposed and resolved each decision and who wrote each note, and the
+request ends with the instruction to keep a learning within its source's scope
+and the one to word a learning from an unresolved proposal as a proposal. The
+client is the one substitution: nothing leaves the machine.
 """
 
 from __future__ import annotations

@@ -285,6 +285,7 @@ def _format_events_for_llm(session: Session) -> str:
             continue
         parts = [f"[{evt.id}] type={evt.type}"]
         if evt.annotation:
+            parts.append(f"actor={evt.actor.type}")
             parts.append(f"category={evt.annotation.category}")
             parts.append(f'content="{evt.annotation.content}"')
             if evt.annotation.corrects_event_ids:
@@ -294,6 +295,9 @@ def _format_events_for_llm(session: Session) -> str:
         elif evt.decision:
             parts.append(f'description="{evt.decision.description}"')
             parts.append(f"disposition={evt.decision.disposition}")
+            parts.append(f"proposed_by={evt.decision.proposed_by.type}")
+            if evt.decision.resolved_by is not None:
+                parts.append(f"resolved_by={evt.decision.resolved_by.type}")
             if evt.decision.rationale:
                 parts.append(f'rationale="{evt.decision.rationale}"')
             if evt.decision.revision_note:
@@ -333,7 +337,7 @@ def _format_existing_learnings(store: KnowledgeStore) -> str:
 
 EXTRACTION_SYSTEM_PROMPT = (
     "You are a knowledge extraction system for AI-assisted workflow audits. "
-    "You identify actionable learnings from session event logs: corrections "
+    "You identify learnings from session event logs: corrections "
     "(human caught an AI mistake), gotchas (surprising findings), decisions "
     "(important rejected/revised choices), prompt_pattern (prompt strategies "
     "that were especially effective or ineffective — e.g., accuracy improvements "
@@ -344,6 +348,16 @@ EXTRACTION_SYSTEM_PROMPT = (
     "what worked, what didn't, and why. "
     "Be selective — only extract insights that would help in future sessions. "
     "Do NOT duplicate existing learnings."
+)
+
+SOURCE_SCOPE_INSTRUCTION = (
+    "Keep each learning within the scope of its source event: say what happened and where "
+    "(in this session and project, what was found, decided, corrected or built), and do not widen it "
+    "into a rule for other work. Word a learning as a general rule or instruction only when its source "
+    'is a decision with disposition "accepted" and resolved_by=human that states that rule itself. '
+    "A rule, instruction or judgement from any other source (an AI's note, a decision an AI resolved "
+    "or nobody resolved) is reported as that source's claim, for example \"An AI note in this session "
+    'held that ...", never as a rule. Facts that were found or measured are stated plainly.'
 )
 
 PROPOSAL_WORDING_INSTRUCTION = (
@@ -366,8 +380,11 @@ class ExtractionUsage(BaseModel):
 def build_extraction_prompt(session: Session, existing_text: str) -> str:
     """Return the user message of an extraction request.
 
-    It ends with ``PROPOSAL_WORDING_INSTRUCTION``: a learning drawn from a
-    decision nobody has resolved is worded as a proposal, not as a rule.
+    It ends with ``SOURCE_SCOPE_INSTRUCTION`` (a learning stays within the scope
+    of its source and is worded as a rule only when a person accepted a decision
+    stating that rule) and ``PROPOSAL_WORDING_INSTRUCTION`` (a learning drawn
+    from a decision nobody has resolved is worded as a proposal). The events
+    say who proposed and resolved each decision and who wrote each note.
 
     Args:
         session: the session whose events are sent.
@@ -380,7 +397,7 @@ def build_extraction_prompt(session: Session, existing_text: str) -> str:
         f"Events:\n{events_text}\n\n"
         f"Existing learnings (DO NOT duplicate):\n{existing_text}\n\n"
         "Extract NEW learnings from these events. For each learning:\n"
-        '- "content": actionable, specific insight (1-3 sentences)\n'
+        '- "content": a specific account of what was learned (1-3 sentences)\n'
         '- "category": one of learning, correction, gotcha, decision, observation, prompt_pattern\n'
         '- "tags": 2-5 relevant tags for future retrieval\n'
         '- "source_event": the event ID this learning primarily comes from\n'
@@ -388,7 +405,7 @@ def build_extraction_prompt(session: Session, existing_text: str) -> str:
         'Return a JSON object with key "learnings" containing an array of objects.\n'
         'If no new learnings exist, return {"learnings": []}.'
     )
-    return prompt + "\n\n" + PROPOSAL_WORDING_INSTRUCTION
+    return prompt + "\n\n" + SOURCE_SCOPE_INSTRUCTION + "\n\n" + PROPOSAL_WORDING_INSTRUCTION
 
 
 def get_known_source_event(session: Session, value: object) -> str | None:
