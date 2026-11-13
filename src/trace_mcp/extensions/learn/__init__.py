@@ -16,7 +16,12 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 
 from trace_mcp import extension_status
 from trace_mcp import project_identity as pident
-from trace_mcp.extension_hooks import RecallResult, register_extract_hook, register_recall_hook
+from trace_mcp.extension_hooks import (
+    RecallResult,
+    register_extract_hook,
+    register_recall_hook,
+    register_words_hook,
+)
 from trace_mcp.extensions.learn import extraction, learning_marks, matching, store
 from trace_mcp.extensions.learn.config import effective_learn_config, load_config
 from trace_mcp.extensions.learn.egress import egress_project
@@ -24,6 +29,8 @@ from trace_mcp.extensions.learn.embeddings import get_embedding_provider
 from trace_mcp.extensions.learn.matching import DecayParams
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, LearningCategory
 from trace_mcp.extensions.learn.shadow import recall as shadow_recall
+from trace_mcp.extensions.learn.shadow import state as shadow_state
+from trace_mcp.extensions.learn.shadow.words import load_words
 from trace_mcp.provenance_marks import get_mark_legend
 
 if TYPE_CHECKING:
@@ -444,6 +451,8 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
 
     register_recall_hook(_recall_hook)
     register_extract_hook(_extract_hook)
+    # Exports check quotes against the person's recorded words, when any were captured (ADR 008 D3).
+    register_words_hook(lambda project: load_words(shadow_state.get_project_key(project)))
 
     @mcp.tool()
     async def trace_learn_recall(

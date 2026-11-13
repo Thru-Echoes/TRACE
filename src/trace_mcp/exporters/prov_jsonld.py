@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Sequence
 from typing import Any
 
 from trace_mcp import project_identity as pident
+from trace_mcp.provenance_marks import WordsEntry, get_event_marks
 from trace_mcp.schema import Session
 from trace_mcp.schema.prov_mapping import PROV_CONTEXT
 from trace_mcp.tools.session_tools import is_uri_form_reference
@@ -79,8 +81,13 @@ def _lit(value: Any) -> Any:
     return json.dumps(value, default=str, sort_keys=True)
 
 
-def export_prov_jsonld(session: Session) -> str:
-    """Export a TRACE session as standards-conformant W3C PROV JSON-LD."""
+def export_prov_jsonld(session: Session, *, words: Sequence[WordsEntry] = ()) -> str:
+    """Export a TRACE session as standards-conformant W3C PROV JSON-LD.
+
+    Each event's provenance marks, computed from the record, are a
+    ``trace:provenanceMark`` literal on its node; with ``words`` (the person's
+    recorded words) the quote checks are included.
+    """
     nodes: dict[str, dict[str, Any]] = {}
 
     def node(node_id: str, node_type: str | None = None) -> dict[str, Any]:
@@ -130,6 +137,7 @@ def export_prov_jsonld(session: Session) -> str:
         actor_id = f"trace:{evt.actor.id}"
         ag = node(actor_id, "prov:Agent")
         ag.setdefault("trace:actorType", evt.actor.type)
+        mark_node = f"trace:{evt.id}_annotation" if evt.type == "annotation" else aid
 
         if evt.type == "tool_call" and evt.tool_call:
             tc = evt.tool_call
@@ -270,6 +278,10 @@ def export_prov_jsonld(session: Session) -> str:
                 a["trace:oldValue"] = _lit(sc.old_value)
             if sc.new_value is not None:
                 a["trace:newValue"] = _lit(sc.new_value)
+
+        tags = get_event_marks(evt, words, session_created=session.created).tags()
+        if tags and mark_node in nodes:
+            nodes[mark_node]["trace:provenanceMark"] = tags
 
     doc = {"@context": PROV_CONTEXT, "@graph": list(nodes.values())}
     return json.dumps(doc, indent=2, default=str)

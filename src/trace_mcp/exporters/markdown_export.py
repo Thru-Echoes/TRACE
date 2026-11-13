@@ -5,8 +5,10 @@ Generates a human-readable Markdown document from a TRACE session.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import UTC, datetime
 
+from trace_mcp.provenance_marks import WordsEntry, get_event_marks, get_mark_legend
 from trace_mcp.schema import DecisionConfidence, Session
 
 _DISPOSITION_EMOJI = {
@@ -84,10 +86,17 @@ def _fmt_duration(start: datetime | None, end: datetime | None) -> str:
     return f" ({minutes}m)"
 
 
-def export_markdown(session: Session) -> str:
-    """Export a TRACE session as a human-readable Markdown document."""
+def export_markdown(session: Session, *, words: Sequence[WordsEntry] = ()) -> str:
+    """Export a TRACE session as a human-readable Markdown document.
+
+    Each decision and AI note shows its provenance marks, computed from the
+    record; with ``words`` (the person's recorded words) the quote checks are
+    shown too. The sections are views of the events by kind, and the list at
+    the end names every event once, so no event is left out.
+    """
     lines: list[str] = []
     md = session.metadata
+    marks = {id(e): get_event_marks(e, words, session_created=session.created).tags() for e in session.events}
 
     # Header
     lines.append(f"# TRACE Session: {session.id}")
@@ -116,6 +125,10 @@ def export_markdown(session: Session) -> str:
         lines.append(f"**Tags**: {', '.join(md.tags)}")
     lines.append(f"**Status**: {session.status}")
     lines.append("")
+    legend = get_mark_legend([tag for tags in marks.values() for tag in tags])
+    if legend:
+        lines.append(f"Marks are computed from this record. {legend}")
+        lines.append("")
 
     # Summary
     if session.summary:
@@ -148,6 +161,8 @@ def export_markdown(session: Session) -> str:
                 lines.append(f"- **Status**: {emoji} {d.disposition.capitalize()} by {d.resolved_by.id}{when}")
                 if d.resolution_snippet:
                     lines.append(f'- **Resolved on the words**: "{d.resolution_snippet}"')
+            if marks[id(evt)]:
+                lines.append(f"- **Marks**: {' '.join(marks[id(evt)])}")
             if d.revision_note:
                 lines.append(f'- **Revision**: "{d.revision_note}"')
             if d.warnings:
@@ -201,7 +216,22 @@ def export_markdown(session: Session) -> str:
                 lines.append(f"*Corrects*: {', '.join(a.corrects_event_ids)}")
             if a.related_event_ids:
                 lines.append(f"*Related to*: {', '.join(a.related_event_ids)}")
+            if marks[id(evt)]:
+                lines.append(f"*Marks*: {' '.join(marks[id(evt)])}")
             lines.append("")
+
+    # Every event, once, in the order recorded
+    if session.events:
+        lines.append("## All events")
+        lines.append("")
+        lines.append("| Event | Time | Type | Actor | Marks |")
+        lines.append("|-------|------|------|-------|-------|")
+        for evt in session.events:
+            lines.append(
+                f"| {evt.id} | {_fmt_time(evt.timestamp)} | {evt.type} | {evt.actor.id} ({evt.actor.type}) | "
+                f"{' '.join(marks[id(evt)])} |"
+            )
+        lines.append("")
 
     # Statistics
     type_counts: dict[str, int] = {}

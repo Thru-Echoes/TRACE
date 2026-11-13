@@ -14,7 +14,7 @@ an invented quote.
 This module is core and imports nothing from ``trace_mcp.extensions`` (ADR 003).
 
 Exports:
-    MIN_FRAGMENT_CHARS, SOURCE_UNKNOWN_TAG, MARK_MEANINGS, NO_MARK_MEANING, MARK_LEGEND
+    MIN_FRAGMENT_CHARS, SOURCE_UNKNOWN_TAG, MARK_MEANINGS, QUOTE_TAG_MEANINGS, NO_MARK_MEANING, MARK_LEGEND
     BaseMark, QuoteStatus, ResolutionQuote, ResolutionTiming, WordsKind, QuotePosition
     WordsEntry, EventMarks
     normalize_quote, get_snippet_fragments, get_base_mark, get_turn_entries,
@@ -49,6 +49,15 @@ MARK_MEANINGS: dict[str, str] = {
     "[ai-resolved]": "resolved by an AI, not a person",
     "[ai-note]": "an AI's own note",
     SOURCE_UNKNOWN_TAG: "the source event could not be found",
+}
+# What the quote-check tags mean. A person reads these in exports and the report; a session is
+# not shown them at recall.
+QUOTE_TAG_MEANINGS: dict[str, str] = {
+    "[quote-verified]": "the quoted words were found in the person's recorded words",
+    "[quote-not-found]": "the quoted words were not found in the person's recorded words (a miss is not proof of invention)",
+    "[resolution-verified]": "the words recorded as resolving it were found in the person's recorded words",
+    "[resolution-not-found]": "the words recorded as resolving it were not found in the person's recorded words",
+    "[resolution-unquoted]": "a person resolved it and no words were recorded",
 }
 NO_MARK_MEANING = "No mark: a record that is neither a decision nor an AI's note."
 MARK_LEGEND = "Marks: " + "; ".join(f"{tag} {meaning}" for tag, meaning in MARK_MEANINGS.items()) + "."
@@ -116,11 +125,12 @@ class EventMarks(BaseModel):
 def get_mark_legend(tags: Iterable[str], *, any_unmarked: bool = False) -> str:
     """Return one line giving the meaning of the tags present, in table order; empty when there is nothing to say.
 
-    Only tags in ``MARK_MEANINGS`` are explained. ``any_unmarked`` adds what an
-    item shown with no mark is.
+    Tags in ``MARK_MEANINGS`` and ``QUOTE_TAG_MEANINGS`` are explained.
+    ``any_unmarked`` adds what an item shown with no mark is.
     """
     present = set(tags)
-    parts = [f"{tag} {meaning}" for tag, meaning in MARK_MEANINGS.items() if tag in present]
+    meanings = {**MARK_MEANINGS, **QUOTE_TAG_MEANINGS}
+    parts = [f"{tag} {meaning}" for tag, meaning in meanings.items() if tag in present]
     pieces = (["Marks: " + "; ".join(parts) + "."] if parts else []) + ([NO_MARK_MEANING] if any_unmarked else [])
     return " ".join(pieces)
 

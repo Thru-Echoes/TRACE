@@ -154,3 +154,26 @@ def test_mark_legend_lists_only_the_marks_present_in_table_order() -> None:
     )
     assert get_mark_legend([], any_unmarked=True) == "No mark: a record that is neither a decision nor an AI's note."
     assert get_mark_legend([]) == ""
+
+
+async def test_exports_check_quotes_against_the_words_the_hooks_recorded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The learn extension hands the person's recorded words to the export path."""
+    from datetime import timedelta
+
+    from trace_mcp.extensions.learn.shadow.state import append_record
+    from trace_mcp.provenance_marks import WordsEntry
+    from trace_mcp.tools.export_tools import export_session
+
+    storage = learn_env(tmp_path, monkeypatch, llm=False)
+    now = datetime.now(UTC)
+    for seconds, text in ((3, "please keep the retry limit at three"), (2, "yes, go with three retries")):
+        append_record(
+            get_project_dir(PROJECT) / "words" / "host-1.jsonl",
+            WordsEntry(ts=now - timedelta(seconds=seconds), host_session_id="host-1", text=text),
+        )
+    session = await make_session(storage)
+    text = export_session(session, format="markdown")
+    assert "- **Marks**: [accepted] [resolution-verified]" in text
+    assert "- **Marks**: [accepted] [resolution-unquoted]" in text

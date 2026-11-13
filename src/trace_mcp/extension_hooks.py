@@ -12,10 +12,10 @@ from __future__ import annotations
 
 import logging
 import os
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
-from trace_mcp.provenance_marks import get_mark_legend
+from trace_mcp.provenance_marks import WordsEntry, get_mark_legend
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +52,14 @@ ExtractFn = Callable[
     Awaitable[list[str]],
 ]
 
+# project label -> the person's recorded words for that project, oldest first
+WordsFn = Callable[[str], Sequence[WordsEntry]]
+
 # ── Registry ──────────────────────────────────────────────────────────────
 
 _recall_hook: RecallFn | None = None
 _extract_hook: ExtractFn | None = None
+_words_hook: WordsFn | None = None
 
 
 def register_recall_hook(fn: RecallFn) -> None:
@@ -72,11 +76,34 @@ def register_extract_hook(fn: ExtractFn) -> None:
     logger.debug("Extract hook registered")
 
 
+def register_words_hook(fn: WordsFn) -> None:
+    """Called by an extension that keeps the person's recorded words, so exports can check quotes against them."""
+    global _words_hook
+    _words_hook = fn
+    logger.debug("Words hook registered")
+
+
 def clear_hooks() -> None:
     """Reset all hooks. Used in tests."""
-    global _recall_hook, _extract_hook
+    global _recall_hook, _extract_hook, _words_hook
     _recall_hook = None
     _extract_hook = None
+    _words_hook = None
+
+
+def get_words_if_available(project: str) -> list[WordsEntry]:
+    """Return the person's recorded words for a project, or none. Never raises.
+
+    Empty when no extension keeps them or the hook fails: an export then shows
+    only the marks the record alone supports.
+    """
+    if _words_hook is None:
+        return []
+    try:
+        return list(_words_hook(project))
+    except Exception:
+        logger.warning("Words hook failed — exporting without quote checks", exc_info=True)
+        return []
 
 
 # ── Hook invocation (used by core tools) ──────────────────────────────────
