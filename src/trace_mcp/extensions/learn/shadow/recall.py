@@ -53,8 +53,10 @@ class RecallRecord(BaseModel):
     limit: int = Field(..., description="The recall's result limit.")
     context_chars: int = Field(..., description="Length of the recall's context text.")
     items: list[RecallItem] = Field(default_factory=list, description="The recalled items, in order.")
-    chars_without: int = Field(..., description="Rendered length of the items without marks.")
-    chars_with: int = Field(..., description="Rendered length with marks and the legend line.")
+    chars_without: int = Field(
+        ..., description="Rendered length of the items as bare text, each line with its newline."
+    )
+    chars_with: int = Field(..., description="Rendered length as shown: ids, source marks and the legend line.")
 
 
 def get_rendered_chars(results: Sequence[dict[str, Any]], tags: Sequence[Sequence[str]]) -> tuple[int, int]:

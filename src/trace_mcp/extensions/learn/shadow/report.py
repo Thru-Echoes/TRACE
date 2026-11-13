@@ -631,7 +631,7 @@ def _project_block(p: ProjectReport) -> list[str]:
     items = sum(p.recall_items_by_mark.values())
     lines.append(
         f"  recall: calls {p.recall_calls}, items by mark {_dist(p.recall_items_by_mark, items)}, "
-        f"rendered characters as shown/without marks {p.recall_chars_with}/{p.recall_chars_without}"
+        f"rendered characters as shown (with ids and source marks)/as bare text {p.recall_chars_with}/{p.recall_chars_without}"
     )
     events = sum(p.quote.values())
     verified = p.quote.get("verified", 0)

@@ -132,7 +132,7 @@ async def test_recall_leaves_out_what_a_person_rejected_or_replaced_and_returns_
     assert result.notice is not None
     assert "lrn_001 (a person rejected its source)" in result.notice
     assert f"lrn_002 (a person replaced its source with {sid}#evt_003, shown as lrn_003)" in result.notice
-    assert f"lrn_005 (a person replaced its source with {sid}#evt_007, which has no learning)" in result.notice
+    assert f"lrn_005 (a person replaced its source with {sid}#evt_007)" in result.notice
     assert "kept in the store" in result.notice
 
 
@@ -190,3 +190,36 @@ async def test_the_evergreen_floor_holds_only_for_a_learning_whose_source_a_pers
     assert decay["lrn_003"] == 0.8  # a person accepted its source: the floor holds
     assert decay["lrn_004"] == pytest.approx(0.25, abs=0.01)  # an AI's note: no floor, however often recalled
     assert decay["lrn_007"] == pytest.approx(0.25, abs=0.01)  # no source: no floor
+
+
+async def test_a_replacement_the_backend_did_not_score_is_not_shown_and_recall_still_answers() -> None:
+    """On the explicit-threshold path only scored learnings have a score to show."""
+    from trace_mcp.extensions.learn import matching
+    from trace_mcp.extensions.learn.models import Learning
+
+    old = Learning(id="lrn_1", content="retries capped at five", source_session="trace_a", source_event="evt_1")
+    new = Learning(id="lrn_2", content="unrelated wording", source_session="trace_a", source_event="evt_2")
+
+    class OnlyFirst:
+        """A pre-filtering backend that scores only the first learning."""
+
+        default_threshold = 0.1
+
+        async def score_batch(self, learnings, context, context_tags=None):  # noqa: ANN001, ANN201
+            return [(0, 0.9)]
+
+    async def replaced(lrn: Learning) -> matching.StepBack | None:
+        return matching.StepBack("replaced", "trace_a#evt_2") if lrn.id == "lrn_1" else None
+
+    outcome = await matching.recall_ranked(
+        [old, new],
+        "retries",
+        threshold=0.1,
+        limit=5,
+        backend=OnlyFirst(),
+        step_back=replaced,  # type: ignore[arg-type]
+    )
+    assert outcome.results == []
+    assert outcome.summary.stepped_back == (
+        matching.SteppedBack(id="lrn_1", reason="replaced", replaced_by="trace_a#evt_2", replacement=None),
+    )

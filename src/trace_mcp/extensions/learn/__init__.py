@@ -160,8 +160,8 @@ def _source_marks_legend(rows: list[dict[str, Any]]) -> str:
 def _stepped_back_text(sb: matching.SteppedBack) -> str:
     if sb.reason == "rejected":
         return f"{sb.id} (a person rejected its source)"
-    shown = f"shown as {sb.replacement}" if sb.replacement else "which has no learning"
-    return f"{sb.id} (a person replaced its source with {sb.replaced_by}, {shown})"
+    shown = f", shown as {sb.replacement}" if sb.replacement else ""
+    return f"{sb.id} (a person replaced its source with {sb.replaced_by}{shown})"
 
 
 def register(mcp: MCPServer, storage: TraceStorage) -> None:

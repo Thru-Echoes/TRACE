@@ -990,6 +990,10 @@ class _Selector:
         self._left_out: set[int] = set()
         self.stepped_back: list[SteppedBack] = []
         self.replaces: dict[int, str] = {}
+        # The indices that have a score to show; None means every learning. On the explicit-
+        # threshold path a pre-filtering backend scores only some, and a replacement outside
+        # them cannot be shown.
+        self.pool: set[int] | None = None
         self._by_source = {
             (lrn.source_session, lrn.source_event): i
             for i, lrn in reversed(list(enumerate(learnings)))
@@ -1016,7 +1020,12 @@ class _Selector:
                 continue
             self._left_out.add(i)
             replacement = self._replacement(why)
-            if replacement is not None and replacement not in self._left_out and await self._why(replacement) is None:
+            if (
+                replacement is not None
+                and (self.pool is None or replacement in self.pool)
+                and replacement not in self._left_out
+                and await self._why(replacement) is None
+            ):
                 if replacement not in self._chosen:
                     self._chosen.add(replacement)
                     out.append(replacement)
@@ -1135,6 +1144,7 @@ async def recall_ranked(
         floor = f"score>={threshold:g}"
         kept = [i for i in scored_idx if matched[i]]  # backend order ...
         kept.sort(key=lambda i: score[i], reverse=True)  # ... kept for equal scores (stable sort)
+        selector.pool = set(scored_idx)
         surfaced = await selector.take(kept, limit)
         scored_count = len(pairs)
     else:
