@@ -227,10 +227,11 @@ def get_learning_lines(results: list[dict[str, Any]], *, relevance: bool) -> lis
     for r in results:
         lrn = r.get("learning", {})
         cat = lrn.get("category", "learning")
-        content = lrn.get("content", "")
+        # One line per learning: a line break in the text cannot start a peer entry or heading.
+        content = " ".join(str(lrn.get("content", "")).split())
         trailer = [note] if (note := get_source_note(r)) else []
         if relevance:
-            weak = "" if r.get("matched", True) else ", weak match"
+            weak = "" if r.get("matched", True) or r.get("replaces_matched") else ", weak match"
             trailer.append(f"relevance: {r.get('score', 0):.0%}{weak}")
         lines.append(f"  - [{cat}] {content}" + (f" ({'; '.join(trailer)})" if trailer else ""))
     return lines
@@ -262,9 +263,10 @@ def format_decision_warnings(results: list[dict[str, Any]]) -> str:
     """Format recalled learnings as context for a decision proposal.
 
     Weak candidates (``matched`` is False) are left out: the block should
-    carry only learnings that actually matched.
+    carry only learnings that actually matched, and replacements standing in
+    for one that did (``replaces_matched``).
     """
-    results = [r for r in results if r.get("matched", True)]
+    results = [r for r in results if r.get("matched", True) or r.get("replaces_matched")]
     if not results:
         return ""
     return "\n".join(

@@ -89,6 +89,11 @@ def _mark(event: TraceEvent) -> str:
     return f"[{mark}]" if mark else ""
 
 
+def _one_line(text: str) -> str:
+    """``text`` on one line, so a line break in it cannot start a peer entry or heading. Pure."""
+    return " ".join(text.split())
+
+
 def _trailer(event: TraceEvent, *extra: str) -> str:
     """`` (evt_003; [ai-note])``: the event id, any extra parts, then the event's mark. Pure."""
     return " (" + "; ".join(part for part in (event.id, *extra, _mark(event)) if part) + ")"
@@ -141,7 +146,9 @@ def _build_session_section(session: Session) -> str:
             c = e.contribution
             assert c is not None
             artifact = f" (`{c.artifact}`)" if c.artifact else ""
-            lines.append(f"- {c.description}{artifact} — direction={c.direction}, execution={c.execution}{_trailer(e)}")
+            lines.append(
+                f"- {_one_line(c.description)}{artifact} — direction={c.direction}, execution={c.execution}{_trailer(e)}"
+            )
 
     # ── Decisions ────────────────────────────────────────────────────
     decisions = [e for e in session.events if e.type == "decision" and e.decision]
@@ -153,10 +160,13 @@ def _build_session_section(session: Session) -> str:
             d = e.decision
             assert d is not None
             stype = f", suggestion={d.suggestion_type}" if d.suggestion_type else ""
-            note = f" — {d.revision_note}" if d.revision_note else ""
+            note = f" — {_one_line(d.revision_note)}" if d.revision_note else ""
+            # The mark says who resolved it; where it does not say what was decided, the disposition does.
+            said = _mark(e) == "[ai-resolved]" or d.disposition == "revised"
+            disposition = f"disposition={d.disposition}; " if said else ""
             lines.append(
-                f"- **{_mark(e)}** {d.description} "
-                f"({e.id}; proposed_by={d.proposed_by.type}{stype}){note}{_confidence_suffix(d)}"
+                f"- **{_mark(e)}** {_one_line(d.description)} "
+                f"({e.id}; {disposition}proposed_by={d.proposed_by.type}{stype}){note}{_confidence_suffix(d)}"
             )
 
     # ── Open items (unresolved decisions) ────────────────────────────
@@ -168,7 +178,7 @@ def _build_session_section(session: Session) -> str:
         for e in unresolved:
             d = e.decision
             assert d is not None
-            lines.append(f"- [ ] {d.description} (`{e.id}`){_confidence_suffix(d)}")
+            lines.append(f"- [ ] {_one_line(d.description)} (`{e.id}`){_confidence_suffix(d)}")
 
     # ── Gotchas & Corrections ────────────────────────────────────────
     gotchas = [
@@ -185,7 +195,7 @@ def _build_session_section(session: Session) -> str:
             assert a is not None
             prefix = "CORRECTION" if a.category == "correction" else "GOTCHA"
             linked = f"corrects: {', '.join(a.corrects_event_ids)}" if a.corrects_event_ids else ""
-            lines.append(f"- **{prefix}**: {a.content}{_trailer(e, linked)}")
+            lines.append(f"- **{prefix}**: {_one_line(a.content)}{_trailer(e, linked)}")
 
     # ── Learnings ────────────────────────────────────────────────────
     learnings = [
@@ -198,7 +208,7 @@ def _build_session_section(session: Session) -> str:
         for e in learnings:
             a = e.annotation
             assert a is not None
-            lines.append(f"- {a.content}{_trailer(e)}")
+            lines.append(f"- {_one_line(a.content)}{_trailer(e)}")
 
     # ── TODOs ────────────────────────────────────────────────────────
     todos = [e for e in session.events if e.type == "annotation" and e.annotation and e.annotation.category == "todo"]
@@ -209,7 +219,7 @@ def _build_session_section(session: Session) -> str:
         for e in todos:
             a = e.annotation
             assert a is not None
-            lines.append(f"- [ ] {a.content}{_trailer(e)}")
+            lines.append(f"- [ ] {_one_line(a.content)}{_trailer(e)}")
 
     # ── Event Stats ──────────────────────────────────────────────────
     counts: dict[str, int] = {}

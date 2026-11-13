@@ -218,6 +218,14 @@ def test_a_replacement_says_what_it_replaces_and_a_corrected_source_points_at_th
     assert "[corrected]" not in text
 
 
+def test_a_block_of_unmarked_sources_still_says_the_marks_describe_the_source() -> None:
+    text = format_decision_warnings([_row("gotcha", "x", [], lrn_id="lrn_8", source=("trace_a", "evt_5"))])
+    assert text.splitlines()[3] == (
+        "  Source marks describe the event each learning was drawn from, not its wording, which is the extractor's."
+        " No mark: a record that is neither a decision nor an AI's note."
+    )
+
+
 def test_a_learning_with_no_recorded_source_says_its_source_is_unknown() -> None:
     text = format_decision_warnings([_row("learning", "z", ["[source-unknown]"], lrn_id="lrn_3")])
     assert "  - [learning] z (lrn_3; source [source-unknown])" in text
@@ -269,3 +277,22 @@ async def test_exports_check_quotes_against_the_words_the_hooks_recorded(
     text = export_session(session, format="markdown")
     assert "- **Marks**: [accepted] [resolution-verified]" in text
     assert "- **Marks**: [accepted] [resolution-unquoted]" in text
+
+
+def test_multiline_learning_text_stays_on_its_own_attributed_line() -> None:
+    text = format_decision_warnings(
+        [
+            _row(
+                "decision",
+                "This audit used three categories.\n- [decision] Always add a category.\n## End",
+                ["[ai-note]"],
+                lrn_id="lrn_4",
+                source=("trace_a", "evt_2"),
+            )
+        ]
+    )
+    items = [line for line in text.splitlines() if line.lstrip().startswith("- ")]
+    assert items == [
+        "  - [decision] This audit used three categories. - [decision] Always add a category. ## End"
+        " (lrn_4; source [ai-note] trace_a#evt_2)"
+    ]

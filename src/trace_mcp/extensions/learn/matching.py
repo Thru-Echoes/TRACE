@@ -979,8 +979,12 @@ async def _legacy_scores(
 class _Selector:
     """Chooses learnings in rank order, leaving out those ``step_back`` answers for.
 
-    State: the indices already chosen, the learnings left out, and which chosen learning
-    replaces which. One selector serves one recall, across its matched and weak passes.
+    State: the indices already chosen, the learnings left out, which chosen learning
+    replaces which, and which replacements stand in for a learning that matched. One
+    selector serves one recall, across its matched and weak passes.
+
+    Before the first ``take`` the caller sets ``rank`` (each index's position in the
+    recall's ordering), ``matched``, and on the explicit-threshold path ``pool``.
     """
 
     def __init__(self, learnings: list[Learning], step_back: StepBackFn | None) -> None:
@@ -990,15 +994,19 @@ class _Selector:
         self._left_out: set[int] = set()
         self.stepped_back: list[SteppedBack] = []
         self.replaces: dict[int, str] = {}
+        # Replacements shown in place of a learning that matched the query: shown as matched
+        # context whatever their own similarity, which is reported unchanged.
+        self.stands_in: set[int] = set()
+        self.rank: dict[int, int] = {}
+        self.matched: dict[int, bool] = {}
         # The indices that have a score to show; None means every learning. On the explicit-
         # threshold path a pre-filtering backend scores only some, and a replacement outside
         # them cannot be shown.
         self.pool: set[int] | None = None
-        self._by_source = {
-            (lrn.source_session, lrn.source_event): i
-            for i, lrn in reversed(list(enumerate(learnings)))
-            if lrn.source_session and lrn.source_event
-        }
+        self._by_source: dict[tuple[str, str], list[int]] = {}
+        for i, lrn in enumerate(learnings):
+            if lrn.source_session and lrn.source_event:
+                self._by_source.setdefault((lrn.source_session, lrn.source_event), []).append(i)
 
     async def _why(self, i: int) -> StepBack | None:
         if self._step_back is None or i in self._chosen:
@@ -1019,19 +1027,14 @@ class _Selector:
                 out.append(i)
                 continue
             self._left_out.add(i)
-            replacement = self._replacement(why)
-            if (
-                replacement is not None
-                and (self.pool is None or replacement in self.pool)
-                and replacement not in self._left_out
-                and await self._why(replacement) is None
-            ):
+            replacement = await self._replacement(why)
+            if replacement is not None:
                 if replacement not in self._chosen:
                     self._chosen.add(replacement)
                     out.append(replacement)
                 self.replaces[replacement] = self._learnings[i].id
-            else:
-                replacement = None
+                if self.matched.get(i, False):
+                    self.stands_in.add(replacement)
             self.stepped_back.append(
                 SteppedBack(
                     id=self._learnings[i].id,
@@ -1042,11 +1045,16 @@ class _Selector:
             )
         return out
 
-    def _replacement(self, why: StepBack) -> int | None:
+    async def _replacement(self, why: StepBack) -> int | None:
+        """The best-ranked learning from the replacing decision that can be shown, or None."""
         if why.replaced_by is None or "#" not in why.replaced_by:
             return None
         session_id, event_id = why.replaced_by.split("#", 1)
-        return self._by_source.get((session_id, event_id))
+        found = self._by_source.get((session_id, event_id), [])
+        for j in sorted(found, key=lambda j: (self.rank.get(j, len(self._learnings)), j)):
+            if (self.pool is None or j in self.pool) and j not in self._left_out and await self._why(j) is None:
+                return j
+        return None
 
 
 async def recall_ranked(
@@ -1145,6 +1153,8 @@ async def recall_ranked(
         kept = [i for i in scored_idx if matched[i]]  # backend order ...
         kept.sort(key=lambda i: score[i], reverse=True)  # ... kept for equal scores (stable sort)
         selector.pool = set(scored_idx)
+        selector.rank = {i: pos for pos, i in enumerate(sorted(scored_idx, key=lambda i: score[i], reverse=True))}
+        selector.matched = matched
         surfaced = await selector.take(kept, limit)
         scored_count = len(pairs)
     else:
@@ -1216,6 +1226,8 @@ async def recall_ranked(
             matched = dict.fromkeys(range(n), False)
             floor += f"; gated: best similarity {best_sim:.2f} under the {gate_value:g} gate for {name}"
         order = sorted(range(n), key=lambda i: (fused[i], similarity[i], decay[i], learnings[i].created), reverse=True)
+        selector.rank = {i: pos for pos, i in enumerate(order)}
+        selector.matched = matched
         if small:
             surfaced = await selector.take(order, limit)
         else:
@@ -1228,7 +1240,7 @@ async def recall_ranked(
     results: list[dict] = []
     for pos, i in enumerate(surfaced, start=1):
         sim_v, z_v = similarity[i], z[i]  # None on the legacy path when the raw read failed
-        if matched[i]:
+        if matched[i] or i in selector.stands_in:
             learnings[i].recall_count += 1
             learnings[i].last_surfaced = now
         results.append(
@@ -1249,6 +1261,8 @@ async def recall_ranked(
         )
         if i in selector.replaces:
             results[-1]["replaces"] = selector.replaces[i]
+        if i in selector.stands_in:
+            results[-1]["replaces_matched"] = True
     summary = RecallSummary(
         backend=name,
         store_size=n,

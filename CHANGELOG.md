@@ -43,7 +43,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   decision a person rejected, or replaced by accepting a decision that revises it in the same
   session, is left out of recall, stays in the store and in `trace_learn_list`, and gains no
   exposure; the recall notice and `trace_learn_recall`'s `stepped_back` name it. A stored
-  learning from the replacement is returned in its place with `replaces`. A correction of the
+  learning from the replacement is returned in its place with `replaces`, and is shown as
+  matched context (`replaces_matched`) when the learning it replaces matched. A correction of the
   source is shown as a pointer, `source corrected, see ...`, in `source_corrected_by`.
 - **The evergreen floor holds only for a learning whose source a person accepted.** Being
   recalled three or more times no longer keeps an AI's note or an unresolved proposal from

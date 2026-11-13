@@ -223,3 +223,62 @@ async def test_a_replacement_the_backend_did_not_score_is_not_shown_and_recall_s
     assert outcome.summary.stepped_back == (
         matching.SteppedBack(id="lrn_1", reason="replaced", replaced_by="trace_a#evt_2", replacement=None),
     )
+
+
+async def test_a_replacement_standing_in_for_a_matched_learning_reaches_the_decision_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The replacement's own text need not match: it is shown because what it replaces matched."""
+    storage = learn_env(tmp_path, monkeypatch, llm=False)
+    session = await _history(storage)
+    ks = store.load_store(PROJECT)
+    old = store.add_learning(
+        ks, content="upload retries are capped at five", source_session=session.id, source_event="evt_002"
+    )
+    new = store.add_learning(ks, content="the limit moved to three", source_session=session.id, source_event="evt_003")
+    for content in (*FILLER, "the changelog has sections", "the lockfile is committed", "ci runs on push"):
+        store.add_learning(ks, content=content)
+    store.save_store(ks)
+    monkeypatch.delenv("TRACE_DECISION_RECALL", raising=False)
+
+    block = await extension_hooks.recall_for_decision(PROJECT, QUERY, None)
+    assert f"  - [learning] the limit moved to three ({new.id}, replaces {old.id}; source [accepted]" in block
+    assert "upload retries are capped at five" not in block
+
+    banner = extension_hooks.format_recalled_learnings(
+        list(await extension_hooks.recall_if_available(PROJECT, QUERY, None, 5))
+    )
+    line = next(x for x in banner.splitlines() if "the limit moved to three" in x)
+    assert "weak match" not in line
+
+
+async def test_the_best_ranked_eligible_learning_from_the_replacement_is_chosen() -> None:
+    """Several learnings may come from the replacement; one the backend did not score is passed over."""
+    from trace_mcp.extensions.learn import matching
+    from trace_mcp.extensions.learn.models import Learning
+
+    learnings = [
+        Learning(id="lrn_1", content="capped at five", source_session="trace_a", source_event="evt_1"),
+        Learning(id="lrn_2", content="first account of three", source_session="trace_a", source_event="evt_2"),
+        Learning(id="lrn_3", content="second account of three", source_session="trace_a", source_event="evt_2"),
+    ]
+
+    class SomeScored:
+        default_threshold = 0.1
+
+        async def score_batch(self, learnings, context, context_tags=None):  # noqa: ANN001, ANN201
+            return [(0, 0.9), (2, 0.05)]
+
+    async def replaced(lrn: Learning) -> matching.StepBack | None:
+        return matching.StepBack("replaced", "trace_a#evt_2") if lrn.id == "lrn_1" else None
+
+    outcome = await matching.recall_ranked(
+        learnings,
+        "retries",
+        threshold=0.1,
+        limit=5,
+        backend=SomeScored(),
+        step_back=replaced,  # type: ignore[arg-type]
+    )
+    assert [(r["learning"]["id"], r.get("replaces")) for r in outcome.results] == [("lrn_3", "lrn_1")]
+    assert outcome.summary.stepped_back[0].replacement == "lrn_3"

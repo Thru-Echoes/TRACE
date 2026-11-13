@@ -138,7 +138,11 @@ def get_mark_legend(tags: Iterable[str], *, any_unmarked: bool = False, lead: st
     present = set(tags)
     meanings = {**MARK_MEANINGS, **QUOTE_TAG_MEANINGS}
     parts = [f"{tag} {meaning}" for tag, meaning in meanings.items() if tag in present]
-    pieces = ([f"{lead} " + "; ".join(parts) + "."] if parts else []) + ([NO_MARK_MEANING] if any_unmarked else [])
+    if parts:
+        head = [f"{lead} " + "; ".join(parts) + "."]
+    else:  # a lead that says what the marks describe still says it when every item is unmarked
+        head = [lead.rstrip(":") + "."] if any_unmarked and lead != "Marks:" else []
+    pieces = head + ([NO_MARK_MEANING] if any_unmarked else [])
     return " ".join(pieces)
 
 

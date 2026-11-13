@@ -500,8 +500,14 @@ decision a person rejected, or replaced by accepting a decision that revises
 it, is left out of recall. Replacements are found in the source session by
 `revises_event_id`, following the chain to its last revision a person
 accepted; a revision an AI resolved, or a person rejected, replaces nothing.
-When a stored learning comes from the replacement, it is returned in the old
-one's place with `replaces` naming the old id. A learning left out stays in the
+When a stored learning comes from the replacement, the best-ranked one that can
+be shown is returned in the old one's place with `replaces` naming the old id.
+If the old one matched the query, the replacement is shown as matched context
+(`replaces_matched`), in the decision block too, whatever its own similarity,
+which is reported unchanged; on the explicit-threshold path it is returned even
+below the threshold, with its own score. A replacement the ranker did not score
+has no score to show and is not returned; the notice then names the replacing
+decision. A learning left out stays in the
 store and in `trace_learn_list`, gains no exposure, and is named in the
 recall's notice and in `trace_learn_recall`'s `stepped_back`. Measured on one
 project's store of 404 learnings: 4 have a source a person rejected and 5 a
@@ -523,7 +529,10 @@ still measured from the last time a learning surfaced.
 
 **The scratchpad is a delivery path too.** Each line drawn from an event names
 the event and shows its mark, a decision's bracket is its mark (`[accepted]`
-only when a person accepted it), the summary is headed "AI-written", and the
+only when a person accepted it; an AI's resolution also gives its disposition,
+so an AI-rejected decision is not read as adopted), each entry stays on one
+line so a line break in recorded text cannot start a peer entry or heading (the
+same holds for recalled learnings), the summary is headed "AI-written", and the
 header names the session it was generated from, when, and the sha256 of the
 section. It is not snapshotted: it is regenerated from the session record,
 which is kept. INV-18 lists every delivery path and fails on an unclassified
