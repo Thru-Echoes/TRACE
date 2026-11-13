@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import cast
 
 import pytest
 from _mcp_helpers import call_tool_json
@@ -216,8 +217,8 @@ async def test_a_replacement_the_backend_did_not_score_is_not_shown_and_recall_s
         "retries",
         threshold=0.1,
         limit=5,
-        backend=OnlyFirst(),
-        step_back=replaced,  # type: ignore[arg-type]
+        backend=cast(matching.MatchingBackend, OnlyFirst()),
+        step_back=replaced,
     )
     assert outcome.results == []
     assert outcome.summary.stepped_back == (
@@ -281,8 +282,8 @@ async def test_the_best_ranked_eligible_learning_from_the_replacement_is_chosen(
         "retries",
         threshold=0.1,
         limit=5,
-        backend=SomeScored(),
-        step_back=replaced,  # type: ignore[arg-type]
+        backend=cast(matching.MatchingBackend, SomeScored()),
+        step_back=replaced,
     )
     assert [(r["learning"]["id"], r.get("replaces")) for r in outcome.results] == [("lrn_3", "lrn_1")]
     assert outcome.summary.stepped_back[0].replacement == "lrn_3"
