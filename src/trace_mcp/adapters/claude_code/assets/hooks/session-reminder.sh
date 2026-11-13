@@ -6,9 +6,59 @@
 # canonical-identity block below: a session matches when its canonical project
 # key equals this directory's, so a display-label variant can neither split one
 # project in two nor merge two into one.
+#
+# Shadow period (ADR 008): from day 30 of a running period it also prints one
+# reminder line, at most once per UTC day across the machine, telling the
+# session to have the user run the report and stop the period. It keeps its
+# own bookkeeping in ~/.trace/shadow/reminder.json and never writes STATE.json.
 
 PROJECT_DIR="${CLAUDE_PROJECT_DIR:-$PWD}"
 SESSIONS_DIR="${TRACE_SESSIONS_DIR:-$HOME/.trace/sessions}"
+
+SHADOW_DIR="${TRACE_SHADOW_DIR:-$HOME/.trace/shadow}"
+if [ -f "$SHADOW_DIR/STATE.json" ]; then
+    python3 - "$SHADOW_DIR" <<'PYEOF' 2>/dev/null
+import json
+import os
+import sys
+import tempfile
+from datetime import datetime, timezone
+from pathlib import Path
+
+try:
+    shadow_dir = Path(sys.argv[1])
+    state = json.loads((shadow_dir / "STATE.json").read_text())
+    started = state.get("started_at") if isinstance(state, dict) else None
+    if isinstance(started, str) and state.get("stopped_at") is None:
+        if started.endswith("Z"):
+            started = started[:-1] + "+00:00"
+        start = datetime.fromisoformat(started)
+        if start.tzinfo is None:
+            raise ValueError("started_at has no timezone")
+        now = datetime.now(timezone.utc)
+        days = (now - start).days
+        today = now.date().isoformat()
+        reminder = shadow_dir / "reminder.json"
+        try:
+            last = json.loads(reminder.read_text()).get("last")
+        except Exception:
+            last = None
+        if days >= 30 and last != today:
+            since = start.astimezone(timezone.utc).date().isoformat()
+            print(
+                f"TRACE has been saving the person's typed words for quote checks since {since} (day {days}). "
+                'Tell the user: run "trace-mcp shadow report" to review it; "trace-mcp shadow stop" ends the capture. '
+                "It does not stop by itself. [trace-hooks v0.6]"
+            )
+            sys.stdout.flush()
+            fd, tmp = tempfile.mkstemp(dir=str(shadow_dir), prefix=".reminder.", suffix=".tmp")
+            with os.fdopen(fd, "w") as fh:
+                fh.write(json.dumps({"last": today}))
+            os.replace(tmp, str(reminder))
+except Exception:
+    pass
+PYEOF
+fi
 
 if [ ! -d "$SESSIONS_DIR" ]; then
     exit 0
@@ -142,5 +192,5 @@ if [ -z "$REPORT" ] || [ "$STATE" = "none" ]; then
     if [ -z "$NAME" ]; then
         NAME="this project"
     fi
-    echo "⚠️ TRACE MCP is available but no active session exists for project '$NAME'. Start one with trace_start_session before logging events. If you forget, events will auto-create a session, but explicit sessions have better descriptions and tags. [trace-hooks v0.5]"
+    echo "⚠️ TRACE MCP is available but no active session exists for project '$NAME'. Start one with trace_start_session before logging events. If you forget, events will auto-create a session, but explicit sessions have better descriptions and tags. [trace-hooks v0.6]"
 fi

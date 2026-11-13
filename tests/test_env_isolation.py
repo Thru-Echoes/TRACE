@@ -70,6 +70,16 @@ class TestSuiteEnvIsolation:
         resolved = egress_log_path().resolve()
         assert resolved == isolated, f"egress ledger resolves to {resolved}, expected {isolated}"
 
+    def test_shadow_dir_points_at_tmp(self) -> None:
+        """The provenance-marks trial writes its state, words and logs under
+        TRACE_SHADOW_DIR; unisolated, a test that starts the trial would start
+        it on the developer's real machine."""
+        isolated = _assert_isolated("TRACE_SHADOW_DIR")
+        from trace_mcp.extensions.learn.shadow.state import get_shadow_root
+
+        resolved = get_shadow_root().resolve()
+        assert resolved == isolated, f"shadow root resolves to {resolved}, expected {isolated}"
+
     def test_default_knowledge_store_writes_land_in_tmp(self) -> None:
         """A store saved WITHOUT an explicit directory (the leak pattern that
         polluted the real ~/.trace/knowledge) must land in the isolated dir.

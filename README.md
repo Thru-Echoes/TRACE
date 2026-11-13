@@ -190,7 +190,7 @@ trace-mcp-init --client claude-code     # explicit
 trace-mcp-init --dry-run                # preview, no writes
 ```
 
-The Claude Code adapter installs four hooks:
+The Claude Code adapter installs five hooks:
 
 | Hook | Event | Purpose |
 |------|-------|---------|
@@ -198,6 +198,7 @@ The Claude Code adapter installs four hooks:
 | `prompt-reminder.sh` | `UserPromptSubmit` | Periodic nudge after several prompts without a session. Per-project rate-limited. |
 | `pretool-guard.sh` | `PreToolUse` (`Edit\|Write`) | Warns (or blocks) edits when no TRACE session is active. |
 | `decision-audit.sh` | `PostToolUse` (`mcp__trace__trace_end_session`) | Echoes the session-end attribution audit into the conversation. The matcher is the FULL namespaced tool name — a host matches tool names exactly, so a bare `trace_end_session` never fires. |
+| `dialog-words.sh` | `PostToolUse` (`AskUserQuestion`) | While a provenance-marks capture period runs, saves the person's question-dialog answers locally (never sent anywhere); otherwise does nothing. `prompt-reminder.sh` saves typed prompts the same way, and `session-reminder.sh` reminds you to read the report from day 30. |
 
 Project detection uses, in order: the `.claude/trace.project` pin file written by `trace-mcp-init`, a `TRACE project name: "..."` line in `CLAUDE.md` (bold form accepted), the git repository basename, then the current working directory basename. Add the explicit marker if your repo name differs from the project name you want logged.
 
@@ -250,7 +251,7 @@ trace-mcp fleet-check ~/code --json     # per-project reports + totals
 ```
 fleet-check: 1/24 project(s) clean
   FAIL /path/to/project  (3 finding(s))
-         hooks.stamp: installed hook version differs from this build's [trace-hooks v0.5] ...
+         hooks.stamp: installed hook version differs from this build's [trace-hooks v0.6] ...
 fleet-check: failing checks, most widespread first
     23 project(s)  pin.trace_project_file
     14 project(s)  hooks.decision_audit_matcher
@@ -375,6 +376,37 @@ A cloud call attempted with no key, or with a key the provider rejects, is repor
 - **Key borrowed from `~/.trace/.env`** → a session-start notice, since a project silently using the machine-wide credential is the thing per-project keys exist to prevent.
 - **Configured backend cannot be built** → the extension still registers, with keyword matching and a notice on every recall. It never disappears silently: an extension that fails to register looks identical to one that was never installed.
 
+### Provenance marks
+
+Every recalled learning is shown with the mark of the event it came from, and the Markdown and
+PROV exports show each event's marks (see
+[ADR 008](https://github.com/Thru-Echoes/TRACE/blob/main/docs/adr/008-provenance-marks-trial.md)).
+Marks are computed from the session record each time and never stored:
+
+| Mark | Meaning |
+|------|---------|
+| `[accepted]` | a person accepted the decision |
+| `[proposed]` | an AI proposal no person has resolved (a suggestion, not a rule) |
+| `[rejected]` | a person rejected it |
+| `[ai-resolved]` | resolved by an AI, not a person |
+| `[ai-note]` | an AI's own note |
+| `[source-unknown]` | a learning whose source event cannot be found |
+
+A recalled learning is context for the session that reads it, not an instruction. Set
+`TRACE_DECISION_RECALL=0` in a project's server environment to turn off the block of related
+learnings on decision proposals for that project.
+
+`trace-mcp shadow` holds the rest: `start` begins a capture period for every project, `stop`
+ends it (nothing ends it automatically), `status` shows its state and per-project counts, and
+`exclude`/`include KEY` leave one project out or bring it back. While a period runs, the hooks
+save the person's typed prompts and dialog answers on this machine, so a session's quote of the
+person can be checked against what the person typed, and each recall is recorded by mark; none
+of it is sent to a provider. `report [--from D] [--to D] [--project KEY] [--json] [--csv PATH]`
+prints the counts and can write a review sheet. `replay --project KEY [--limit N]` extracts past
+sessions twice, with the whole store and with the 50 nearest stored learnings, to measure what
+the smaller prompt changes; it makes two model calls per replayed session and writes to no
+knowledge store. Everything lives under `TRACE_SHADOW_DIR`.
+
 ### Environment variables
 
 | Variable | Default | Description |
@@ -392,6 +424,8 @@ A cloud call attempted with no key, or with a key the provider rejects, is repor
 | `TRACE_MODEL_CACHE_DIR` | `~/.trace/models/` | Where `fastembed` keeps its downloaded model files (fastembed's `FASTEMBED_CACHE_PATH` is honoured when this is unset) |
 | `TRACE_SESSIONS_DIR` | `~/.trace/sessions/` | Directory for session JSON files |
 | `TRACE_KNOWLEDGE_DIR` | `~/.trace/knowledge/` | Directory for trace-learn knowledge stores |
+| `TRACE_SHADOW_DIR` | `~/.trace/shadow/` | Provenance marks: the capture period's state file, the person's recorded words, and the recall, replay and error logs |
+| `TRACE_DECISION_RECALL` | on | Set to `0` to turn off the related-learnings block on decision proposals for this server |
 | `TRACE_EGRESS_LOG` | `~/.trace/egress.jsonl` | Cloud-egress ledger: one JSONL line per cloud call trace-learn makes (the fact of the call — provider, endpoint, model, purpose, item count — never the content) |
 | `TRACE_LOG_LEVEL` | `INFO` | Logging verbosity |
 | `OPENAI_API_KEY` | — | OpenAI API key for LLM matching, extraction, and cloud embeddings. **Put it in this project's `.env`** — see above; `~/.trace/.env` is a fallback, not the home for it |

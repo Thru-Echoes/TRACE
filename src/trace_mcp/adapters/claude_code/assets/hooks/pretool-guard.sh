@@ -160,7 +160,7 @@ if [ "$STATE" = "active" ]; then
     exit 0
 fi
 
-MESSAGE="⚠️ TRACE: editing files in '$NAME' but no active session exists. Call trace_start_session so this edit is recorded in the audit trail. [trace-hooks v0.5]"
+MESSAGE="⚠️ TRACE: editing files in '$NAME' but no active session exists. Call trace_start_session so this edit is recorded in the audit trail. [trace-hooks v0.6]"
 
 if [ "$MODE" = "strict" ]; then
     echo "$MESSAGE" >&2

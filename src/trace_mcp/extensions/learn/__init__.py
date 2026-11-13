@@ -16,13 +16,22 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 
 from trace_mcp import extension_status
 from trace_mcp import project_identity as pident
-from trace_mcp.extension_hooks import RecallResult, register_extract_hook, register_recall_hook
-from trace_mcp.extensions.learn import extraction, matching, store
+from trace_mcp.extension_hooks import (
+    RecallResult,
+    register_extract_hook,
+    register_recall_hook,
+    register_words_hook,
+)
+from trace_mcp.extensions.learn import extraction, learning_marks, matching, store
 from trace_mcp.extensions.learn.config import effective_learn_config, load_config
 from trace_mcp.extensions.learn.egress import egress_project
 from trace_mcp.extensions.learn.embeddings import get_embedding_provider
 from trace_mcp.extensions.learn.matching import DecayParams
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, LearningCategory
+from trace_mcp.extensions.learn.shadow import recall as shadow_recall
+from trace_mcp.extensions.learn.shadow import state as shadow_state
+from trace_mcp.extensions.learn.shadow.words import load_words
+from trace_mcp.provenance_marks import get_mark_legend
 
 if TYPE_CHECKING:
     from trace_mcp.extensions.learn.config import LearnConfig
@@ -404,10 +413,17 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
             )
             if any(r["matched"] for r in outcome.results) or embedded:
                 _persist_recall_bookkeeping(ks, project)
-            return RecallResult(
+            result = RecallResult(
                 results=outcome.results,
                 notice=recall_notice(outcome.summary, original_query=context),
             )
+        # After the lock: each learning's marks, read from its source event (ADR 008 D1).
+        marks = await learning_marks.get_results_marks(result.results, project=project, storage=storage)
+        learning_marks.set_display_marks(result.results, marks)
+        await shadow_recall.record_recall(
+            project=project, results=list(result), storage=storage, limit=limit, context=context, tags=marks
+        )
+        return result
 
     async def _extract_hook(project: str, session_id: str) -> list[str]:
         # INV-6: refuse to extract a session into a DIFFERENT project's store
@@ -435,6 +451,8 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
 
     register_recall_hook(_recall_hook)
     register_extract_hook(_extract_hook)
+    # Exports check quotes against the person's recorded words, when any were captured (ADR 008 D3).
+    register_words_hook(lambda project: load_words(shadow_state.get_project_key(project)))
 
     @mcp.tool()
     async def trace_learn_recall(
@@ -544,7 +562,17 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                     notices.append(bookkeeping_notice)
                 if notices:
                     payload["warnings"] = notices
-                return json.dumps(payload)
+            # After the lock: each learning's marks, read from its source event (ADR 008 D1).
+            marks = await learning_marks.get_results_marks(results, project=project, storage=storage)
+            learning_marks.set_display_marks(results, marks)
+            shown = [r["marks"] for r in results]
+            legend = get_mark_legend([t for row in shown for t in row], any_unmarked=any(not row for row in shown))
+            if legend:
+                payload["marks_legend"] = legend
+            await shadow_recall.record_recall(
+                project=project, results=results, storage=storage, limit=limit, context=context or "", tags=marks
+            )
+            return json.dumps(payload)
         except pident.RegistryUnavailableError as exc:
             return _registry_unavailable_error(project, exc)
         except Exception as exc:

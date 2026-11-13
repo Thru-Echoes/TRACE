@@ -768,11 +768,8 @@ async def trace_propose_decision(
         )
         result = f"{prefix}Decision proposed: {event_id}"
 
-        # Layer 3: Auto-recall related learnings for this decision
-        project = session.metadata.project
-        related = await hooks.recall_if_available(project, description, tags, limit=3)
-        if related:
-            result += hooks.format_decision_warnings(related)
+        # Layer 3: related learnings for this decision, as marked context (off with TRACE_DECISION_RECALL=0)
+        result += await hooks.recall_for_decision(session.metadata.project, description, tags)
 
         return result
     except Exception as e:
@@ -1086,6 +1083,11 @@ def main() -> None:
         from trace_mcp.extensions.jev.cli import main as jev_main
 
         raise SystemExit(jev_main(sys.argv[2:]))
+
+    if len(sys.argv) > 1 and sys.argv[1] == "shadow":
+        from trace_mcp.extensions.learn.shadow.cli import main as shadow_main
+
+        raise SystemExit(shadow_main(sys.argv[2:]))
 
     if len(sys.argv) > 1 and sys.argv[1] == "doctor":
         # Imported lazily like the other subcommands: the conformance layer

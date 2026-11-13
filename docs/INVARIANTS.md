@@ -129,7 +129,9 @@ back to the local path). An unattested call site is unrecorded egress, the
 exact failure mode the ledger exists to prevent.
 
 **Sites:** `src/trace_mcp/extensions/learn/extraction.py`
-(`extract_from_session_llm`); `src/trace_mcp/extensions/learn/matching.py`
+(`_call_extraction_model` — one function serving the extractor, `extraction`, and
+the two arms of the offline replay, `replay-extraction-whole` and
+`replay-extraction-nearest`, each attested under its own purpose); `src/trace_mcp/extensions/learn/matching.py`
 (`_llm_score`); `src/trace_mcp/extensions/learn/embeddings.py`
 (`OpenAIEmbeddingProvider.embed_texts`). Writer:
 `src/trace_mcp/extensions/learn/egress.py`.
@@ -413,6 +415,11 @@ still reissue an id, with nothing on disk showing the counter was lost. Consumer
 build from whatever branch is checked out in the shared working tree, so this is
 governed by the standing "keep `main` checked out" rule rather than by code.
 
+**Offline replay.** The provenance-marks replay
+(`extensions/learn/shadow/replay.py :: replay_session`) runs the extractor's add path on an
+in-memory copy of the store that is never saved, and labels what each arm would have added
+`whole-N` or `nearest-N` in its record, so a replay can neither consume nor reuse a learning id.
+
 **Exhaustive site-set:**
 - Minting — `src/trace_mcp/extensions/learn/models.py` (`KnowledgeStore.next_id`,
   `next_learning_id`, `_raise_counter_above_existing_ids`).
@@ -537,7 +544,8 @@ is whatever `os.fsync` provides on the host; on macOS that excludes a drive-cach
 
 **Exhaustive site-set:**
 - Durable publishers — `storage/json_file.py :: _write_file`, `:: _write_file_exclusive`;
-  `project_identity.py :: _atomic_write_registry`; `extensions/learn/store.py :: save_store`.
+  `project_identity.py :: _atomic_write_registry`; `extensions/learn/store.py :: save_store`;
+  `extensions/learn/shadow/state.py :: _write_state` (the provenance-marks capture-period state file).
 - Durable delete — `storage/json_file.py :: delete_session`.
 - Regenerable, exempt — `scratchpad.py :: _atomic_write`,
   `extensions/learn/store.py :: save_embeddings_cache`, and

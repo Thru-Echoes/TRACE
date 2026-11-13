@@ -117,6 +117,12 @@ class AttributionAudit(BaseModel):
     attribution_warning_ids: list[str] = Field(default_factory=list)
     orphan_discovery_event_ids: list[str] = Field(default_factory=list)
 
+    # Wire 0.5.2: human resolutions recorded with a resolution time but without
+    # the person's words (resolution_snippet). Records resolved before the field
+    # existed are not counted: they could not carry it.
+    unquoted_resolution_count: int = 0
+    unquoted_resolution_ids: list[str] = Field(default_factory=list)
+
     def render(self) -> str:
         """Render the audit as a human-readable string."""
         lines = ["\n--- Attribution Audit ---"]
@@ -172,6 +178,10 @@ class AttributionAudit(BaseModel):
                 f"Attribution warnings (v0.4.1 same-instance self-resolution): "
                 f"{self.attribution_warning_count} ({ids}) — per spec §3.6"
             )
+
+        if self.unquoted_resolution_count:
+            ids = ", ".join(self.unquoted_resolution_ids)
+            lines.append(f"Human resolutions without the person's words: {self.unquoted_resolution_count} ({ids})")
 
         if self.unlinked_correction_count:
             lines.append(f"Unlinked corrections: {self.unlinked_correction_count} (missing corrects_event_ids)")
@@ -231,6 +241,7 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
 
     unresolved_ids: list[str] = []
     self_resolved_ids: list[str] = []  # ai-only (backward compat)
+    unquoted_resolution_ids: list[str] = []
     unlinked_correction_count = 0
     audit_warnings: list[str] = []
 
@@ -325,6 +336,9 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
                 if d.proposed_by.type == d.resolved_by.type == "ai":
                     self_resolved_ids.append(e.id)
 
+                if d.resolved_by.type == "human" and d.resolved_at is not None and not d.resolution_snippet:
+                    unquoted_resolution_ids.append(e.id)
+
                 # v0.4.1 multi-actor refinement (see
                 # docs/adr/002-v041-protocol-additions.md): STRUCTURAL
                 # attribution-warning detector. Same-instance self-resolution
@@ -377,6 +391,11 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
             f"{len(attribution_warning_ids)} decision(s) with same-instance "
             "self-resolution (any actor type) — per spec §3.6 Proposer Identity "
             "Rule, proposer should differ from resolver in multi-actor workflows."
+        )
+    if unquoted_resolution_ids:
+        audit_warnings.append(
+            f"{len(unquoted_resolution_ids)} human resolution(s) recorded without the person's words — "
+            "pass them as conversation_snippet on trace_resolve_decision."
         )
     if unlinked_correction_count:
         audit_warnings.append(
@@ -432,6 +451,8 @@ def _build_attribution_audit(session: Session) -> AttributionAudit:
         orphan_discovery_event_ids=orphan_discovery_ids,
         attribution_warning_count=len(attribution_warning_ids),
         attribution_warning_ids=attribution_warning_ids,
+        unquoted_resolution_count=len(unquoted_resolution_ids),
+        unquoted_resolution_ids=unquoted_resolution_ids,
     )
 
 

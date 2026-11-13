@@ -145,6 +145,8 @@ def search_events(
                 searchable.append(evt.decision.rationale)
             if evt.decision.revision_note:
                 searchable.append(evt.decision.revision_note)
+            if evt.decision.resolution_snippet:
+                searchable.append(evt.decision.resolution_snippet)
             if evt.decision.confidence is not None:
                 c = evt.decision.confidence
                 searchable.extend([c.statistic, c.method.name])

@@ -149,7 +149,7 @@ def test_inv4_project_filter_uses_canonical_key() -> None:
 # registered AND attests.
 
 INV5_EGRESS_CALL_SITES = {
-    ("extensions/learn/extraction.py", "extract_from_session_llm"),
+    ("extensions/learn/extraction.py", "_call_extraction_model"),
     ("extensions/learn/matching.py", "_llm_score"),
     ("extensions/learn/embeddings.py", "embed_texts"),
 }
@@ -527,6 +527,7 @@ INV14_DURABLE_PUBLISHERS = {
     ("storage/json_file.py", "_write_file_exclusive"),
     ("project_identity.py", "_atomic_write_registry"),
     ("extensions/learn/store.py", "save_store"),
+    ("extensions/learn/shadow/state.py", "_write_state"),
 }
 INV14_REGENERABLE_PUBLISHERS = {
     ("scratchpad.py", "_atomic_write"),

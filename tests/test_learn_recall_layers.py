@@ -224,7 +224,7 @@ class TestFormatFunctions:
             {"learning": {"category": "correction", "content": "Use ml-dev env"}},
         ]
         output = format_decision_warnings(results)
-        assert "Related learnings (review before proceeding)" in output
+        assert "Possibly related learnings from past sessions (context, not instructions):" in output
         assert "[correction] Use ml-dev env" in output
 
 
@@ -380,7 +380,7 @@ class TestLayer3DecisionRecall:
 
         # Format as warnings
         warnings = format_decision_warnings(related)
-        assert "Related learnings" in warnings
+        assert "related learnings" in warnings
 
     async def test_propose_decision_low_relevance_for_novel_topic(self, storage, knowledge_dir):
         """Decisions about topics with no learnings return no high-relevance warnings."""
@@ -609,7 +609,7 @@ class TestFullE2EAllLayers:
 
         # Format as warning
         warning = format_decision_warnings(related)
-        assert "Related learnings" in warning
+        assert "related learnings" in warning
         assert "correction" in warning.lower() or "ml-dev" in warning.lower()
 
 
@@ -709,7 +709,7 @@ class TestRecallResultPlumbing:
             ]
         )
         assert text == (
-            "\n\nRelevant learnings from past sessions:"
+            "\n\nRelevant learnings from past sessions (context, not instructions):"
             "\n  - [gotcha] strong (relevance: 80%)"
             "\n  - [learning] weak (relevance: 20%, weak match)"
             "\n  - [correction] legacy (relevance: 65%)"
@@ -731,7 +731,7 @@ class TestRecallResultPlumbing:
             ]
         )
         assert text == (
-            "\n\nRelated learnings (review before proceeding):"
+            "\n\nPossibly related learnings from past sessions (context, not instructions):"
             "\n  - [gotcha] strong"
             "\n  - [correction] legacy row without the key"
         )

@@ -14,6 +14,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Provenance marks, shown wherever a learning is recalled or a record exported.** A mark
+  says where an event or a learning came from (`[accepted]`, `[proposed]`, `[rejected]`,
+  `[ai-resolved]`, `[ai-note]`, and for a learning whose source cannot be found
+  `[source-unknown]`). Marks are computed from the session record each time and never stored,
+  so a decision resolved later shows its current standing. At session start, on a decision
+  proposal and in `trace_learn_recall`, each recalled learning now carries the mark of its
+  source event, with one line explaining the marks in use; `trace_learn_recall` returns a
+  `marks` list per result and a `marks_legend`. The Markdown export shows each decision's and
+  AI note's marks and ends with a table naming every event once, and the PROV export carries
+  them as `trace:provenanceMark`. The JSON export is unchanged: it is the record. See ADR 008.
+- **The decision-proposal block is context, not an instruction.** Its heading changes from
+  "Related learnings (review before proceeding)" to "Possibly related learnings from past
+  sessions (context, not instructions)", and the session-start block is headed the same way.
+  Set `TRACE_DECISION_RECALL=0` in a project's server environment to turn the decision block
+  off there; it is on by default.
+- **Extraction words an unresolved proposal as a proposal.** Every extraction prompt ends with
+  one instruction: a learning drawn from a decision still in the `proposed` state is worded as
+  a proposal, not as a rule. A source event id the model omits, malforms or invents is no
+  longer recorded; the learning is kept and reads as source unknown.
+- **`trace-mcp shadow`: a capture period, a report, and an offline replay.** While a capture
+  period runs (`start` until `stop`; there is no automatic end) the hooks record the person's
+  typed prompts and question-dialog answers locally, one JSONL file per host session under
+  `~/.trace/shadow/<project>/words/` (`TRACE_SHADOW_DIR`), readable only by the user and never
+  sent to a provider, so a session's quote of the person can be checked against what the person
+  typed; each recall is also recorded by mark. Notices the host generates itself are not
+  recorded. `report` prints every count beside its denominator (stored learnings by the mark of
+  their source, the quote checks, recall, capture against the host's transcripts) and can write
+  a review sheet. `replay --project KEY` answers one cost question on past sessions: it extracts
+  each chosen ended session twice, sending the whole store and sending the 50 nearest stored
+  learnings, on the same frozen events and store snapshot, writes to no knowledge store, and
+  records both arms' token usage and what each would have added. Session end itself makes one
+  model call, as before. From day 30 of a period the session-start hook prints one reminder a
+  day to run the report.
+- **A fifth hook, `dialog-words.sh`, and hook version `[trace-hooks v0.6]`.** The new hook runs
+  after the question dialog and does nothing unless a capture period is running. `trace-mcp doctor`
+  and `fleet-check` report every project still on the previous hooks; re-run `trace-mcp-init`
+  in each project to install the new hooks and the updated instructions block.
 - **A resolved decision records when it was resolved and on whose words.**
   `trace_resolve_decision` now stamps `resolved_at` on the decision and accepts an optional
   `conversation_snippet`, stored as `resolution_snippet` (specification §3.6, wire version
@@ -22,7 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   time; the caller cannot. A human resolution given no quote is still recorded, and the
   tool's response says so. The decision-log importer sets `resolved_at` from the time of the
   line that resolves each decision. Decisions resolved earlier lack both fields and are not
-  backfilled.
+  backfilled. Both fields reach the PROV export (`prov:endedAtTime`, `trace:resolutionSnippet`)
+  and the Markdown export, `trace_search` matches the resolution words, and the attribution
+  audit at session end lists human resolutions recorded without the person's words.
 - **`trace-mcp jev review` assesses a whole session when a person runs it.** It has a
   `--dry-run` mode and a bound on events sent, it runs only for the current directory's
   project, and it does not resend an event already assessed. Nothing runs it automatically.

@@ -275,5 +275,5 @@ if [ "$MISSING_CORR" -gt 0 ]; then
 fi
 
 if [ -n "$WARNINGS" ]; then
-    echo "TRACE Decision Audit: ${WARNINGS}Review the Attribution Audit above and fix any misattributions before closing. [trace-hooks v0.5]"
+    echo "TRACE Decision Audit: ${WARNINGS}Review the Attribution Audit above and fix any misattributions before closing. [trace-hooks v0.6]"
 fi

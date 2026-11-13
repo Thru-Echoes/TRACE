@@ -73,6 +73,7 @@ class TestClaudeCodeInstall:
         assert paths["prompt-reminder.sh"] == "installed"
         assert paths["pretool-guard.sh"] == "installed"
         assert paths["decision-audit.sh"] == "installed"
+        assert paths["dialog-words.sh"] == "installed"
         assert paths["settings.json"] == "installed"
         assert paths["CLAUDE.md"] == "updated"  # pre-existing, now appended
         assert a.validate(tmp_path) == []
@@ -148,15 +149,67 @@ class TestClaudeCodeInstall:
         # Existing permissions preserved
         assert merged["permissions"] == {"allow": ["Bash(git *)"]}
 
-        # Existing PostToolUse entry preserved; TRACE entry appended
+        # Existing PostToolUse entry preserved; both TRACE entries appended
         post = merged["hooks"]["PostToolUse"]
-        assert len(post) == 2
+        assert len(post) == 3
         matchers = [entry["matcher"] for entry in post]
         assert "Edit|Write" in matchers
         assert f"mcp__{MCP_SERVER_KEY}__trace_end_session" in matchers
+        assert "AskUserQuestion" in matchers
 
         # SessionStart added
         assert "SessionStart" in merged["hooks"]
+
+    @staticmethod
+    def _dialog_registrations(settings: dict) -> list[dict]:
+        return [
+            entry
+            for entry in settings["hooks"]["PostToolUse"]
+            if any("dialog-words.sh" in h.get("command", "") for h in entry.get("hooks", []))
+        ]
+
+    def test_dialog_words_hook_is_registered_for_the_question_dialog(self, tmp_path: Path) -> None:
+        a = ClaudeCodeAdapter()
+        (tmp_path / "CLAUDE.md").write_text("# Example\n")
+        a.install(tmp_path)
+        assert (tmp_path / ".claude" / "hooks" / "dialog-words.sh").is_file()
+        settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+        dialog = self._dialog_registrations(settings)
+        assert [entry["matcher"] for entry in dialog] == ["AskUserQuestion"]
+        audit = [
+            entry
+            for entry in settings["hooks"]["PostToolUse"]
+            if any("decision-audit.sh" in h.get("command", "") for h in entry.get("hooks", []))
+        ]
+        assert [entry["matcher"] for entry in audit] == [f"mcp__{MCP_SERVER_KEY}__trace_end_session"]
+
+    def test_installing_twice_keeps_one_dialog_registration(self, tmp_path: Path) -> None:
+        a = ClaudeCodeAdapter()
+        (tmp_path / "CLAUDE.md").write_text("# Example\n")
+        a.install(tmp_path)
+        a.install(tmp_path)
+        settings = json.loads((tmp_path / ".claude" / "settings.json").read_text())
+        assert len(self._dialog_registrations(settings)) == 1
+
+    def test_previous_install_gains_only_the_dialog_registration(self, tmp_path: Path) -> None:
+        a = ClaudeCodeAdapter()
+        (tmp_path / "CLAUDE.md").write_text("# Example\n")
+        a.install(tmp_path)
+        settings_path = tmp_path / ".claude" / "settings.json"
+        settings = json.loads(settings_path.read_text())
+        settings["hooks"]["PostToolUse"] = [
+            entry for entry in settings["hooks"]["PostToolUse"] if entry["matcher"] != "AskUserQuestion"
+        ]
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+        previous = json.loads(settings_path.read_text())
+
+        a.install(tmp_path)
+        merged = json.loads(settings_path.read_text())
+        assert merged["hooks"]["PostToolUse"][:-1] == previous["hooks"]["PostToolUse"]
+        assert merged["hooks"]["PostToolUse"][-1]["matcher"] == "AskUserQuestion"
+        for event in ("SessionStart", "UserPromptSubmit", "PreToolUse"):
+            assert merged["hooks"][event] == previous["hooks"][event]
+        assert {k: v for k, v in merged.items() if k != "hooks"} == {k: v for k, v in previous.items() if k != "hooks"}
 
     def test_validate_reports_missing_hooks(self, tmp_path: Path) -> None:
         a = ClaudeCodeAdapter()
