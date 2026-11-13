@@ -143,6 +143,7 @@ hook_input_file = sys.argv[7] if len(sys.argv) > 7 else ""
 _NOTICE_PREFIXES = ("<task-notification", "<system-reminder")
 
 
+# --- trace-words-capture v0.1 begin ---
 def _make_private_dirs(path):
     """Create path and any missing parents with mode 0700."""
     missing = []
@@ -167,6 +168,7 @@ def _words_file(key, payload):
     sid = sid if isinstance(sid, str) and sid else "unknown"
     safe = re.sub(r"[^A-Za-z0-9_-]", "_", sid)
     return shadow_dir / key / "words" / (safe + ".jsonl"), sid
+# --- trace-words-capture v0.1 end ---
 
 
 def capture_words(key):

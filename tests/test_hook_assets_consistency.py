@@ -74,6 +74,32 @@ def test_detection_block_byte_identical_across_hooks() -> None:
         )
 
 
+CAPTURE_BEGIN = "# --- trace-words-capture v0.1 begin ---"
+CAPTURE_END = "# --- trace-words-capture v0.1 end ---"
+CAPTURE_HOOKS = ["prompt-reminder.sh", "dialog-words.sh"]
+
+
+def test_words_capture_block_byte_identical_across_hooks() -> None:
+    """The helpers that decide whether and where the person's words are saved are one text in both hooks.
+
+    Each hook is a single self-contained file, so the helpers are copied. If one
+    copy changed alone, the two hooks could disagree about whether the period is
+    running, which project is excluded, or which file a host session writes to.
+    """
+    blocks = {}
+    for name in CAPTURE_HOOKS:
+        text = _hook_text(name)
+        start, end = text.find(CAPTURE_BEGIN), text.find(CAPTURE_END)
+        assert start != -1 and end != -1 and start < end, f"{name} has no words-capture block delimiters"
+        blocks[name] = text[start : end + len(CAPTURE_END)]
+    reference = blocks[CAPTURE_HOOKS[0]]
+    assert "def _words_file(" in reference and "def _make_private_dirs(" in reference
+    assert blocks[CAPTURE_HOOKS[1]] == reference, "the words-capture helpers differ between the two hooks"
+    for name in HOOK_NAMES:
+        if name not in CAPTURE_HOOKS:
+            assert "def _words_file(" not in _hook_text(name), f"{name} carries capture helpers outside the guard"
+
+
 def test_all_hooks_emit_version_stamp() -> None:
     """Every emitted message carries the stamp, so a stale fleet copy self-identifies."""
     for name in HOOK_NAMES:
