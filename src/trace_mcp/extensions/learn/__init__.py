@@ -10,6 +10,7 @@ Registers 5 MCP tools on the existing TRACE server:
 
 from __future__ import annotations
 
+import dataclasses
 import json
 import logging
 from typing import TYPE_CHECKING, Any, cast, get_args
@@ -31,7 +32,7 @@ from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, Learning
 from trace_mcp.extensions.learn.shadow import recall as shadow_recall
 from trace_mcp.extensions.learn.shadow import state as shadow_state
 from trace_mcp.extensions.learn.shadow.words import load_words
-from trace_mcp.provenance_marks import get_mark_legend
+from trace_mcp.provenance_marks import SOURCE_MARKS_LEAD, get_mark_legend
 
 if TYPE_CHECKING:
     from trace_mcp.extensions.learn.config import LearnConfig
@@ -114,8 +115,10 @@ def recall_notice(summary: matching.RecallSummary, *, original_query: str) -> st
     """One sentence on what recall did when the result alone would mislead; None otherwise.
 
     Pure function. A notice is produced when the store was too small for a
-    floor, when nothing cleared the floor, or when the query was cleaned before
-    scoring. It is what makes an empty recall distinguishable from an empty store.
+    floor, when nothing cleared the floor, when the query was cleaned before
+    scoring, or when learnings were left out because a person rejected or
+    replaced their source. It is what makes an empty recall distinguishable
+    from an empty store.
     """
     parts: list[str] = []
     if summary.degraded:
@@ -139,7 +142,26 @@ def recall_notice(summary: matching.RecallSummary, *, original_query: str) -> st
         )
     if summary.query != original_query:
         parts.append(f"query cleaned to '{summary.query}'")
+    if summary.stepped_back:
+        parts.append(
+            "left out " + ", ".join(_stepped_back_text(sb) for sb in summary.stepped_back) + "; all kept in the store"
+        )
     return "; ".join(parts) or None
+
+
+def _source_marks_legend(rows: list[dict[str, Any]]) -> str:
+    """The legend line for the source marks in ``rows``; empty when there are none. Pure."""
+    shown = [row["source_marks"] for row in rows if isinstance(row.get("source_marks"), list)]
+    return get_mark_legend(
+        [tag for marks in shown for tag in marks], any_unmarked=any(not m for m in shown), lead=SOURCE_MARKS_LEAD
+    )
+
+
+def _stepped_back_text(sb: matching.SteppedBack) -> str:
+    if sb.reason == "rejected":
+        return f"{sb.id} (a person rejected its source)"
+    shown = f"shown as {sb.replacement}" if sb.replacement else "which has no learning"
+    return f"{sb.id} (a person replaced its source with {sb.replaced_by}, {shown})"
 
 
 def register(mcp: MCPServer, storage: TraceStorage) -> None:
@@ -393,6 +415,8 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
         # Lock the load→merge→rank→save read-modify-write span. This is the
         # highest-frequency knowledge-store mutator (core auto-recall); leaving it
         # unlocked allowed a concurrent locked add to be clobbered (a lost update).
+        # Source events are read while ranking (step back, evergreen floor) and after it (marks).
+        reader = learning_marks.SourceReader(project=project, storage=storage)
         with store.project_lock(project), egress_project(pident.key_for_label(project) or None):
             ks = store.load_store(project)
             # An empty store takes the same ranking and notice path as any other, so the
@@ -410,6 +434,8 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                 backend=backend,
                 decay_config=_decay_params,
                 gate=_eff.recall_gate,
+                step_back=reader.get_step_back,
+                floor_eligible=reader.is_floor_eligible,
             )
             if any(r["matched"] for r in outcome.results) or embedded:
                 _persist_recall_bookkeeping(ks, project)
@@ -417,9 +443,8 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                 results=outcome.results,
                 notice=recall_notice(outcome.summary, original_query=context),
             )
-        # After the lock: each learning's marks, read from its source event (ADR 008 D1).
-        marks = await learning_marks.get_results_marks(result.results, project=project, storage=storage)
-        learning_marks.set_display_marks(result.results, marks)
+        # After the lock: each learning's source marks and corrections (ADR 008 D1, D10).
+        marks = await reader.set_results_marks(result.results)
         await shadow_recall.record_recall(
             project=project, results=list(result), storage=storage, limit=limit, context=context, tags=marks
         )
@@ -522,6 +547,7 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
             # Lazy-embed OUTSIDE the lock, then lock the load→merge→rank→save span
             # (recall backfills embeddings and bookkeeping — a read-modify-write).
             fresh = await _embed_stale_unlocked(project, provider)
+            reader = learning_marks.SourceReader(project=project, storage=storage)
             with store.project_lock(project), egress_project(pident.key_for_label(project) or None):
                 ks = store.load_store(project)
                 # Anything added or edited since the snapshot ranks on the BM25 stand-in now
@@ -537,6 +563,8 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                     backend=backend,
                     decay_config=_decay_params,
                     gate=_eff.recall_gate,
+                    step_back=reader.get_step_back,
+                    floor_eligible=reader.is_floor_eligible,
                 )
                 results = outcome.results
                 bookkeeping_notice: str | None = None
@@ -557,18 +585,17 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                 # ``warnings`` stays reserved for configuration problems.
                 if (notice := recall_notice(outcome.summary, original_query=context or "")) is not None:
                     payload["notice"] = notice
+                if outcome.summary.stepped_back:
+                    payload["stepped_back"] = [dataclasses.asdict(sb) for sb in outcome.summary.stepped_back]
                 notices = _key_notices(_eff)
                 if bookkeeping_notice:
                     notices.append(bookkeeping_notice)
                 if notices:
                     payload["warnings"] = notices
-            # After the lock: each learning's marks, read from its source event (ADR 008 D1).
-            marks = await learning_marks.get_results_marks(results, project=project, storage=storage)
-            learning_marks.set_display_marks(results, marks)
-            shown = [r["marks"] for r in results]
-            legend = get_mark_legend([t for row in shown for t in row], any_unmarked=any(not row for row in shown))
-            if legend:
-                payload["marks_legend"] = legend
+            # After the lock: each learning's source marks and corrections (ADR 008 D1, D10).
+            marks = await reader.set_results_marks(results)
+            if legend := _source_marks_legend(results):
+                payload["source_marks_legend"] = legend
             await shadow_recall.record_recall(
                 project=project, results=results, storage=storage, limit=limit, context=context or "", tags=marks
             )
@@ -712,7 +739,18 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                 return _err
             ks = store.load_store(project)
             results = store.list_learnings(ks, category=category)
-            return json.dumps({"project": project, "learnings": results, "total": len(results)})
+            # Each learning's source marks, as at recall (ADR 008 D10): the list reaches sessions too.
+            reader = learning_marks.SourceReader(project=project, storage=storage)
+            rows = [{"learning": lrn} for lrn in results]
+            await reader.set_results_marks(rows)
+            for lrn, row in zip(results, rows, strict=True):
+                lrn["source_marks"] = row["source_marks"]
+                if "source_corrected_by" in row:
+                    lrn["source_corrected_by"] = row["source_corrected_by"]
+            payload: dict[str, Any] = {"project": project, "learnings": results, "total": len(results)}
+            if legend := _source_marks_legend(rows):
+                payload["source_marks_legend"] = legend
+            return json.dumps(payload)
         except Exception:
             logger.exception("Error listing learnings")
             return json.dumps({"error": "Failed to list learnings", "project": project})

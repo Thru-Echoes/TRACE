@@ -2,8 +2,9 @@
 
 While a comparison period runs for the project, ``record_recall`` appends one
 line to ``<shadow root>/<key>/recall.jsonl``: the recalled ids, every tag of
-each item's source event, and the rendered length of the items without marks
-and as shown, with the mark a session sees plus the one-line legend (D9).
+each item's source event, and the rendered length of the items as bare text
+and as shown, with each item's id, its source and the source's mark plus the
+one-line legend (D9, D10), as the decision block renders them.
 
 Exports: RecallItem, RecallRecord, get_rendered_chars, record_recall
 
@@ -20,6 +21,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from trace_mcp.extension_hooks import get_learning_lines
 from trace_mcp.extensions.learn.learning_marks import get_display_marks, get_results_marks
 from trace_mcp.extensions.learn.shadow.state import (
     append_record,
@@ -28,7 +30,6 @@ from trace_mcp.extensions.learn.shadow.state import (
     is_active,
     record_error,
 )
-from trace_mcp.provenance_marks import get_mark_legend
 from trace_mcp.storage.base import TraceStorage
 
 RECORD_TIMEOUT_SECONDS = 90.0
@@ -56,18 +57,24 @@ class RecallRecord(BaseModel):
     chars_with: int = Field(..., description="Rendered length with marks and the legend line.")
 
 
-def get_rendered_chars(items: Sequence[RecallItem], contents: Sequence[str]) -> tuple[int, int]:
-    """Return ``(chars without marks, chars as shown)`` for the rendered recall items.
+def get_rendered_chars(results: Sequence[dict[str, Any]], tags: Sequence[Sequence[str]]) -> tuple[int, int]:
+    """Return ``(chars as bare text, chars as shown)`` of the rendered recall items, each line with its newline.
 
-    An item renders as ``"  - [<category>] <content>"``. As shown, the mark a
-    session sees precedes the category, and one legend line explains the marks
-    in use.
+    Bare, an item is ``"  - [<category>] <content>"``. As shown, it is the decision
+    block's line (``get_learning_lines``): the text, then the learning's id and its
+    source with the source's mark, plus one legend line for the marks in use. Pure.
     """
-    without = sum(len(f"  - [{item.category}] {content}") for item, content in zip(items, contents, strict=True))
-    shown = [get_display_marks(item.tags) for item in items]
-    extra = sum(len(" ".join(marks) + " ") for marks in shown if marks)
-    legend = get_mark_legend([tag for marks in shown for tag in marks], any_unmarked=any(not m for m in shown))
-    return without, without + extra + (len(legend) + 3 if items and legend else 0)
+    bare = [{"learning": {k: (r.get("learning") or {}).get(k) for k in ("category", "content")}} for r in results]
+    shown = [
+        {
+            **{k: r[k] for k in ("learning", "replaces", "source_corrected_by") if k in r},
+            "source_marks": get_display_marks(t),
+        }
+        for r, t in zip(results, tags, strict=True)
+    ]
+    without = get_learning_lines(bare, relevance=False)
+    as_shown = get_learning_lines(shown, relevance=False)
+    return sum(len(line) + 1 for line in without), sum(len(line) + 1 for line in as_shown)
 
 
 async def _record(
@@ -83,7 +90,6 @@ async def _record(
     if tags is None:
         tags = await get_results_marks(results, project=project, storage=storage)
     items: list[RecallItem] = []
-    contents: list[str] = []
     for result, item_tags in zip(results, tags, strict=True):
         learning = result.get("learning") or {}
         content = str(learning.get("content", ""))
@@ -96,8 +102,7 @@ async def _record(
                 content_chars=len(content),
             )
         )
-        contents.append(content)
-    without, with_marks = get_rendered_chars(items, contents)
+    without, with_marks = get_rendered_chars(results, tags)
     record = RecallRecord(
         ts=datetime.now(UTC),
         project_key=key,

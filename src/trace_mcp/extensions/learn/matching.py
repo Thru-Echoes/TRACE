@@ -23,9 +23,10 @@ import logging
 import math
 import re
 from collections import Counter
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Literal, Protocol, runtime_checkable
 
 from trace_mcp.extensions.learn.egress import attest_egress
 from trace_mcp.extensions.learn.models import Learning
@@ -761,6 +762,37 @@ def compute_decay(
     return multiplier
 
 
+async def get_decays(
+    learnings: list[Learning],
+    decay_config: DecayParams | None,
+    *,
+    now: datetime,
+    floor_eligible: FloorFn | None = None,
+) -> list[float]:
+    """Return each learning's decay multiplier; the evergreen floor holds only where ``floor_eligible`` allows.
+
+    With no ``floor_eligible``, every learning recalled ``evergreen_recall_threshold`` times or
+    more is floored, as before. Otherwise ``floor_eligible`` is asked only about a learning the
+    floor would actually lift, so a recall reads no more records than it must.
+    """
+    if decay_config is None or not decay_config.enabled:
+        return [1.0] * len(learnings)
+    out: list[float] = []
+    for lrn in learnings:
+        bare = compute_decay(
+            lrn,
+            half_life_days=decay_config.half_life_days,
+            evergreen_recall_threshold=decay_config.evergreen_recall_threshold,
+            evergreen_floor=0.0,
+            now=now,
+        )
+        lifts = lrn.recall_count >= decay_config.evergreen_recall_threshold and bare < decay_config.evergreen_floor
+        if lifts and (floor_eligible is None or await floor_eligible(lrn)):
+            bare = decay_config.evergreen_floor
+        out.append(bare)
+    return out
+
+
 # ── Hybrid ranking ───────────────────────────────────────────────────────
 
 RRF_K = 60  # reciprocal-rank-fusion constant; the published default
@@ -815,6 +847,35 @@ class RecallSummary:
     # Set when the query embedding failed and the ranking fell back to keywords (permissive
     # mode): the reason, so the response can say what happened instead of passing it off.
     degraded: str | None = None
+    # Learnings left out because a person rejected or replaced their source, in rank order.
+    stepped_back: tuple[SteppedBack, ...] = ()
+
+
+@dataclass(frozen=True)
+class StepBack:
+    """Why a learning steps back from recall: a person rejected its source, or replaced it.
+
+    ``replaced_by`` is the ``<session>#<event>`` of the decision a person accepted in its place.
+    """
+
+    reason: Literal["rejected", "replaced"]
+    replaced_by: str | None = None
+
+
+@dataclass(frozen=True)
+class SteppedBack:
+    """A learning recall left out, and the learning it returned instead when there is one."""
+
+    id: str
+    reason: Literal["rejected", "replaced"]
+    replaced_by: str | None = None
+    replacement: str | None = None
+
+
+# learning -> why it steps back from recall, or None. May read session records.
+StepBackFn = Callable[[Learning], Awaitable["StepBack | None"]]
+# learning -> whether the evergreen floor may hold it up.
+FloorFn = Callable[[Learning], Awaitable[bool]]
 
 
 def resolve_gate(backend: MatchingBackend | None, setting: str | float | None = "auto") -> float | None:
@@ -915,6 +976,70 @@ async def _legacy_scores(
     return pairs, dict(enumerate(text))
 
 
+class _Selector:
+    """Chooses learnings in rank order, leaving out those ``step_back`` answers for.
+
+    State: the indices already chosen, the learnings left out, and which chosen learning
+    replaces which. One selector serves one recall, across its matched and weak passes.
+    """
+
+    def __init__(self, learnings: list[Learning], step_back: StepBackFn | None) -> None:
+        self._learnings = learnings
+        self._step_back = step_back
+        self._chosen: set[int] = set()
+        self._left_out: set[int] = set()
+        self.stepped_back: list[SteppedBack] = []
+        self.replaces: dict[int, str] = {}
+        self._by_source = {
+            (lrn.source_session, lrn.source_event): i
+            for i, lrn in reversed(list(enumerate(learnings)))
+            if lrn.source_session and lrn.source_event
+        }
+
+    async def _why(self, i: int) -> StepBack | None:
+        if self._step_back is None or i in self._chosen:
+            return None
+        return await self._step_back(self._learnings[i])
+
+    async def take(self, candidates: list[int], k: int) -> list[int]:
+        """Return up to ``k`` of ``candidates``, in order, after stepping back and replacing."""
+        out: list[int] = []
+        for i in candidates:
+            if len(out) >= k:
+                break
+            if i in self._chosen or i in self._left_out:
+                continue
+            why = await self._why(i)
+            if why is None:
+                self._chosen.add(i)
+                out.append(i)
+                continue
+            self._left_out.add(i)
+            replacement = self._replacement(why)
+            if replacement is not None and replacement not in self._left_out and await self._why(replacement) is None:
+                if replacement not in self._chosen:
+                    self._chosen.add(replacement)
+                    out.append(replacement)
+                self.replaces[replacement] = self._learnings[i].id
+            else:
+                replacement = None
+            self.stepped_back.append(
+                SteppedBack(
+                    id=self._learnings[i].id,
+                    reason=why.reason,
+                    replaced_by=why.replaced_by,
+                    replacement=self._learnings[replacement].id if replacement is not None else None,
+                )
+            )
+        return out
+
+    def _replacement(self, why: StepBack) -> int | None:
+        if why.replaced_by is None or "#" not in why.replaced_by:
+            return None
+        session_id, event_id = why.replaced_by.split("#", 1)
+        return self._by_source.get((session_id, event_id))
+
+
 async def recall_ranked(
     learnings: list[Learning],
     context: str,
@@ -926,8 +1051,17 @@ async def recall_ranked(
     decay_config: DecayParams | None = None,
     now: datetime | None = None,
     gate: str | float | None = "auto",
+    step_back: StepBackFn | None = None,
+    floor_eligible: FloorFn | None = None,
 ) -> RecallOutcome:
     """Rank *learnings* for *context* and say what happened.
+
+    ``step_back`` is asked about each candidate in rank order until ``limit`` are chosen; a
+    learning it answers for is left out (it stays in the store and gains no exposure) and
+    listed in the summary's ``stepped_back``. When a person replaced its source and a stored
+    learning comes from the replacement, that learning takes its place, with ``replaces`` set
+    to the old id. ``floor_eligible`` decides which learnings the evergreen floor may hold up
+    (see ``get_decays``).
 
     ``gate`` is the ``TRACE_RECALL_GATE`` setting (see ``resolve_gate``): when the best raw
     similarity of the whole store falls under the backend's absolute gate and no learning
@@ -971,20 +1105,9 @@ async def recall_ranked(
 
     n = len(learnings)
     now = now or datetime.now(UTC)
-    if decay_config is not None and decay_config.enabled:
-        decay = [
-            compute_decay(
-                lrn,
-                half_life_days=decay_config.half_life_days,
-                evergreen_recall_threshold=decay_config.evergreen_recall_threshold,
-                evergreen_floor=decay_config.evergreen_floor,
-                now=now,
-            )
-            for lrn in learnings
-        ]
-    else:
-        decay = [1.0] * n
+    decay = await get_decays(learnings, decay_config, now=now, floor_eligible=floor_eligible)
     tag_overlap = [_tag_overlap(lrn.tags, context_tags) for lrn in learnings]
+    selector = _Selector(learnings, step_back)
     bm25: list[float] | None = None
     small = False
     gated = False
@@ -1012,7 +1135,7 @@ async def recall_ranked(
         floor = f"score>={threshold:g}"
         kept = [i for i in scored_idx if matched[i]]  # backend order ...
         kept.sort(key=lambda i: score[i], reverse=True)  # ... kept for equal scores (stable sort)
-        surfaced = kept[:limit]
+        surfaced = await selector.take(kept, limit)
         scored_count = len(pairs)
     else:
         sims = await backend.text_scores(learnings, context)
@@ -1084,12 +1207,12 @@ async def recall_ranked(
             floor += f"; gated: best similarity {best_sim:.2f} under the {gate_value:g} gate for {name}"
         order = sorted(range(n), key=lambda i: (fused[i], similarity[i], decay[i], learnings[i].created), reverse=True)
         if small:
-            surfaced = order[:limit]
+            surfaced = await selector.take(order, limit)
         else:
-            surfaced = [i for i in order if matched[i]][:limit]
+            surfaced = await selector.take([i for i in order if matched[i]], limit)
             if len(surfaced) < limit:
                 weak = [i for i in order if not matched[i]]
-                surfaced += weak[: min(UNMATCHED_CAP, limit - len(surfaced))]
+                surfaced += await selector.take(weak, min(UNMATCHED_CAP, limit - len(surfaced)))
         scored_count = n
 
     results: list[dict] = []
@@ -1114,6 +1237,8 @@ async def recall_ranked(
                 },
             }
         )
+        if i in selector.replaces:
+            results[-1]["replaces"] = selector.replaces[i]
     summary = RecallSummary(
         backend=name,
         store_size=n,
@@ -1128,6 +1253,7 @@ async def recall_ranked(
         gated=gated,
         gate=gate_value,
         degraded=fallback,
+        stepped_back=tuple(selector.stepped_back),
     )
     return RecallOutcome(results, summary)
 

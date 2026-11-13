@@ -121,12 +121,16 @@ async def test_the_shadow_period_end_to_end(tmp_path: Path, monkeypatch: pytest.
     # 9. A recall, on the local ranker, shows each learning with the mark of its source.
     learn_env(tmp_path, monkeypatch, llm=False)
     recalled = await extension_hooks.recall_if_available(PROJECT, "upload retries", None, 5)
-    assert {r["learning"]["source_event"]: r["marks"] for r in recalled} == {
+    assert {r["learning"]["source_event"]: r["source_marks"] for r in recalled} == {
         "evt_001": ["[accepted]"],
         "evt_002": ["[proposed]"],
     }
     block = extension_hooks.format_recalled_learnings(list(recalled))
-    assert "[proposed] [learning] It was proposed that retries use exponential backoff." in block
+    evt_002 = next(r for r in recalled if r["learning"]["source_event"] == "evt_002")
+    assert (
+        "  - [learning] It was proposed that retries use exponential backoff."
+        f" ({evt_002['learning']['id']}; source [proposed] {evt_002['learning']['source_session']}#evt_002;"
+    ) in block
     assert "[proposed] an AI proposal no person resolved (a suggestion, not a rule)" in block
 
     # 10. What the report says.

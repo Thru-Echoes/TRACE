@@ -14,7 +14,8 @@ an invented quote.
 This module is core and imports nothing from ``trace_mcp.extensions`` (ADR 003).
 
 Exports:
-    MIN_FRAGMENT_CHARS, SOURCE_UNKNOWN_TAG, MARK_MEANINGS, QUOTE_TAG_MEANINGS, NO_MARK_MEANING, MARK_LEGEND
+    MIN_FRAGMENT_CHARS, SOURCE_UNKNOWN_TAG, MARK_MEANINGS, QUOTE_TAG_MEANINGS, NO_MARK_MEANING, MARK_LEGEND,
+    SOURCE_MARKS_LEAD
     BaseMark, QuoteStatus, ResolutionQuote, ResolutionTiming, WordsKind, QuotePosition
     WordsEntry, EventMarks
     normalize_quote, get_snippet_fragments, get_base_mark, get_turn_entries,
@@ -60,6 +61,11 @@ QUOTE_TAG_MEANINGS: dict[str, str] = {
     "[resolution-unquoted]": "a person resolved it and no words were recorded",
 }
 NO_MARK_MEANING = "No mark: a record that is neither a decision nor an AI's note."
+# How a recalled learning's marks are introduced: they describe its source event. The learning's
+# text is the extractor's wording, which no person approved as such (ADR 008 D10).
+SOURCE_MARKS_LEAD = (
+    "Source marks describe the event each learning was drawn from, not its wording, which is the extractor's:"
+)
 MARK_LEGEND = "Marks: " + "; ".join(f"{tag} {meaning}" for tag, meaning in MARK_MEANINGS.items()) + "."
 
 BaseMark = Literal["accepted", "proposed", "rejected", "ai-resolved", "ai-note"]
@@ -122,16 +128,17 @@ class EventMarks(BaseModel):
         return out
 
 
-def get_mark_legend(tags: Iterable[str], *, any_unmarked: bool = False) -> str:
+def get_mark_legend(tags: Iterable[str], *, any_unmarked: bool = False, lead: str = "Marks:") -> str:
     """Return one line giving the meaning of the tags present, in table order; empty when there is nothing to say.
 
     Tags in ``MARK_MEANINGS`` and ``QUOTE_TAG_MEANINGS`` are explained.
-    ``any_unmarked`` adds what an item shown with no mark is.
+    ``any_unmarked`` adds what an item shown with no mark is. ``lead`` opens the
+    line: ``SOURCE_MARKS_LEAD`` where the marks belong to a learning's source.
     """
     present = set(tags)
     meanings = {**MARK_MEANINGS, **QUOTE_TAG_MEANINGS}
     parts = [f"{tag} {meaning}" for tag, meaning in meanings.items() if tag in present]
-    pieces = (["Marks: " + "; ".join(parts) + "."] if parts else []) + ([NO_MARK_MEANING] if any_unmarked else [])
+    pieces = ([f"{lead} " + "; ".join(parts) + "."] if parts else []) + ([NO_MARK_MEANING] if any_unmarked else [])
     return " ".join(pieces)
 
 
