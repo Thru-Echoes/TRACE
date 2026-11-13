@@ -20,8 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[source-unknown]`). Marks are computed from the session record each time and never stored,
   so a decision resolved later shows its current standing. At session start, on a decision
   proposal and in `trace_learn_recall`, each recalled learning now carries the mark of its
-  source event, with one line explaining the marks in use; `trace_learn_recall` returns a
-  `marks` list per result and a `marks_legend`. The Markdown export shows each decision's and
+  source event, with one line explaining the marks in use; `trace_learn_recall` and
+  `trace_learn_list` return a `source_marks` list per learning and a `source_marks_legend`.
+  The mark describes the source event, not the learning's wording, which is the extractor's:
+  it follows the text, beside the learning's id and the source event's id, as in
+  `- [decision] ... (lrn_424; source [accepted] trace_...#evt_002)`. The Markdown export shows each decision's and
   AI note's marks and ends with a table naming every event once, and the PROV export carries
   them as `trace:provenanceMark`. The JSON export is unchanged: it is the record. See ADR 008.
 - **The decision-proposal block is context, not an instruction.** Its heading changes from
@@ -29,10 +32,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sessions (context, not instructions)", and the session-start block is headed the same way.
   Set `TRACE_DECISION_RECALL=0` in a project's server environment to turn the decision block
   off there; it is on by default.
-- **Extraction words an unresolved proposal as a proposal.** Every extraction prompt ends with
-  one instruction: a learning drawn from a decision still in the `proposed` state is worded as
-  a proposal, not as a rule. A source event id the model omits, malforms or invents is no
-  longer recorded; the learning is kept and reads as source unknown.
+- **Extraction keeps a learning within the scope of its source.** The extraction request now
+  says who proposed and who resolved each decision and who wrote each note, and ends with two
+  instructions: say what happened and where, worded as a general rule only when a person
+  accepted a decision that states that rule itself (a rule from any other source is reported
+  as that source's claim); and word a learning drawn from a decision still in the `proposed`
+  state as a proposal. A source event id the model omits, malforms or invents is no longer
+  recorded; the learning is kept and reads as source unknown.
+- **What a person rejected or replaced steps back from recall.** A learning whose source
+  decision a person rejected, or replaced by accepting a decision that revises it in the same
+  session, is left out of recall, stays in the store and in `trace_learn_list`, and gains no
+  exposure; the recall notice and `trace_learn_recall`'s `stepped_back` name it. A stored
+  learning from the replacement is returned in its place with `replaces`. A correction of the
+  source is shown as a pointer, `source corrected, see ...`, in `source_corrected_by`.
+- **The evergreen floor holds only for a learning whose source a person accepted.** Being
+  recalled three or more times no longer keeps an AI's note or an unresolved proposal from
+  fading.
+- **The scratchpad shows each line's event id and mark.** A decision's bracket is now its mark
+  (`[accepted]` only when a person accepted it, `[ai-resolved]` when an AI did), the summary
+  is headed "AI-written", and the header names the session, the time and the sha256 of the
+  section.
+- **The protocol block asks for a new rule as a decision proposal**, and for a restated rule
+  to name the decision it comes from. Re-run `trace-mcp-init` to install it.
+- **INV-18: every path that delivers TRACE text to a later session shows marks**, or returns
+  the record itself; a test fails when a new tool is not classified.
 - **`trace-mcp shadow`: a capture period, a report, and an offline replay.** While a capture
   period runs (`start` until `stop`; there is no automatic end) the hooks record the person's
   typed prompts and question-dialog answers locally, one JSONL file per host session under

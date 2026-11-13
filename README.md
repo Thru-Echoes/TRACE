@@ -392,7 +392,13 @@ Marks are computed from the session record each time and never stored:
 | `[ai-note]` | an AI's own note |
 | `[source-unknown]` | a learning whose source event cannot be found |
 
-A recalled learning is context for the session that reads it, not an instruction. Set
+A recalled learning is context for the session that reads it, not an instruction. Its mark
+describes the event it was drawn from, not its wording, which is the extractor's, so it is shown
+after the text with both ids: `- [decision] ... (lrn_424; source [accepted] trace_...#evt_002)`.
+A learning whose source decision a person rejected, or replaced by accepting a revision, is left
+out of recall and stays in the store; when the replacement has a learning, that one is shown
+instead. A correction of the source is shown as a pointer ("source corrected, see ..."). The
+scratchpad written at session end shows each line's event id and mark too. Set
 `TRACE_DECISION_RECALL=0` in a project's server environment to turn off the block of related
 learnings on decision proposals for that project.
 
@@ -447,7 +453,7 @@ knowledge store. Everything lives under `TRACE_SHADOW_DIR`.
 | `TRACE_DECAY_ENABLED` | `true` | Enable time-based decay for learning scores |
 | `TRACE_DECAY_HALF_LIFE_DAYS` | `365.0` | Half-life for exponential decay (days) |
 | `TRACE_EVERGREEN_RECALL_THRESHOLD` | `3` | Recalls needed for evergreen floor protection |
-| `TRACE_EVERGREEN_FLOOR` | `0.8` | Minimum decay multiplier for evergreen learnings |
+| `TRACE_EVERGREEN_FLOOR` | `0.8` | Minimum decay multiplier for evergreen learnings; held only when a person accepted the learning's source |
 | `TRACE_DEDUP_ENABLED` | `true` | Enable content deduplication on add |
 | `TRACE_DEDUP_THRESHOLD` | `0.85` | Jaccard similarity threshold for dedup |
 

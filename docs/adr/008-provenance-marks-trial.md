@@ -1,7 +1,9 @@
 # ADR 008: Provenance marks
 
 **Status:** Accepted; revised 2026-11-13 (marks are shown to sessions and in exports; the
-nearest-50 comparison moved from session end to an offline replay)
+nearest-50 comparison moved from session end to an offline replay); D10 added 2026-11-13
+(a recalled learning's mark describes its source; what a person rejected or replaced steps
+back from recall)
 **Date:** 2026-11-12
 **Context:** TRACE stores what an AI session writes without recording whether a
 person stands behind it, and later sessions read it back as project knowledge.
@@ -18,7 +20,9 @@ nothing indicating it was an unresolved proposal.
 Add *marks* that say where an event or a learning came from, computed from the
 record and never stored, and show them wherever TRACE shows a recalled learning
 or exports a record. A learning is context for the session that reads it, with
-the mark of the event it came from; it is not an instruction.
+the mark of the event it came from; it is not an instruction. That mark
+describes the source event, not the learning's wording, which is the
+extractor's (D10).
 
 Three things run beside that:
 
@@ -358,11 +362,11 @@ gives both arms identical inputs and costs nothing until someone asks.
 ### D6. Recall shows marks, and is recorded while a capture period runs
 
 At each recall (`trace_start_session` with recall, the decision-proposal block,
-`trace_learn_recall`) every result carries the mark of its source event (D9).
+`trace_learn_recall`) every result carries the mark of its source event (D9, D10).
 While a capture period runs for the project, the recall also appends to
 `~/.trace/shadow/<project-key>/recall.jsonl`: the recalled ids, every tag of
 each item's source event, and the length in characters of the rendered items
-without marks and as shown.
+as bare text and as shown (with ids, source and mark, and the legend line).
 
 ### D7. Report and review sheet: read-only CLI, no MCP tool
 
@@ -415,14 +419,17 @@ or grouping and may not remove or hide an entry for lack of approval.
 
 ### D9. What a session and a reader are shown
 
-**At recall** each learning is shown with its base mark first, then its
-category and text, for example `- [proposed] [decision] ...`. One line under
-the heading explains only the marks in use in that block, and says what an item
+**At recall** each learning is shown with its category and text, then its id
+and its source event with that event's base mark (D10), for example
+`- [decision] ... (lrn_424; source [proposed] trace_...#evt_002)`. One line
+under the heading explains only the marks in use in that block, says that they
+describe each learning's source and not its wording, and says what an item
 with no mark is. The blocks are headed as context: "Relevant learnings from
 past sessions (context, not instructions)" at session start, and "Possibly
 related learnings from past sessions (context, not instructions)" on a decision
 proposal, replacing "Related learnings (review before proceeding)".
-`trace_learn_recall` returns a `marks` list on each result and a `marks_legend`.
+`trace_learn_recall` and `trace_learn_list` return a `source_marks` list on
+each learning and a `source_marks_legend`.
 
 A session is shown the base mark, or `[source-unknown]`, and not the quote-check
 tags. A missed quote is often benign (D1), and those tags are for a person to
@@ -456,13 +463,95 @@ found it cheap, mostly on topic and occasionally acted on to good effect; the
 harm was in the unmarked items and the heading, which marks and the new heading
 address.
 
+### D10. A recalled learning's mark describes its source; what a person rejected or replaced steps back
+
+The extractor rewords what it reads, so a mark inherited from the source event
+can say only who stood behind that event. Observed: a person decided that one
+audit's codebook needed a third category; the extractor wrote "when an audit
+taxonomy is missing a concept, add it as its own unit", and later sessions
+received it as guidance. With `[accepted]` first on the line, that widened rule
+would read as one a person approved.
+
+**Shown as a fact about the source.** The mark follows the text, beside the
+learning's id and its source event's id: `(lrn_424; source [accepted]
+trace_...#evt_002)`. The legend opens "Source marks describe the event each
+learning was drawn from, not its wording, which is the extractor's". The ids
+let a session look up the source and let later links name a learning.
+
+**The extractor stays within the source.** The extraction request now says who
+proposed and who resolved each decision and who wrote each note, asks for "a
+specific account of what was learned" rather than an "actionable" insight, and
+ends with an instruction: say what happened and where; word a learning as a
+general rule only when a person accepted a decision that states that rule
+itself; report a rule or judgement from any other source as that source's
+claim; state found or measured facts plainly. On three recorded sessions with
+the deployed extraction model (one run per request, no existing-learnings
+block), the old request gave 19 learnings and the new one 31, averaging 383
+and 420 characters; read by hand, the new ones are worded as accounts of what
+happened. More learnings per session is a cost to watch.
+
+**A new rule is a decision proposal.** The protocol block installed into each
+project asks a session to propose a new rule for future work as a decision,
+and to name the existing decision when restating one. It is an authoring
+convention; nothing enforces it.
+
+**What a person rejected or replaced steps back.** A learning whose source
+decision a person rejected, or replaced by accepting a decision that revises
+it, is left out of recall. Replacements are found in the source session by
+`revises_event_id`, following the chain to its last revision a person
+accepted; a revision an AI resolved, or a person rejected, replaces nothing.
+When a stored learning comes from the replacement, it is returned in the old
+one's place with `replaces` naming the old id. A learning left out stays in the
+store and in `trace_learn_list`, gains no exposure, and is named in the
+recall's notice and in `trace_learn_recall`'s `stepped_back`. Measured on one
+project's store of 404 learnings: 4 have a source a person rejected and 5 a
+source a person replaced. All 85 revision links in their source sessions name
+an event of the same session.
+
+**A correction is a pointer.** A correction that names the source event, in
+the source session, is shown as "source corrected, see trace_...#evt_N". It
+does not step the learning back: a correction records no replacement a person
+approved, and the correction is extracted as a learning of its own.
+
+**Exposure alone keeps nothing evergreen.** A learning recalled three or more
+times used to keep a decay multiplier of at least 0.8 whoever stood behind it;
+the floor now holds only when a person accepted its source and it does not step
+back. On the store above the floor held up 34 learnings, 3 of them with a
+source a person accepted. On the default ranking, decay breaks ties and scales
+the score shown; it filters only on the explicit-threshold path. Decay age is
+still measured from the last time a learning surfaced.
+
+**The scratchpad is a delivery path too.** Each line drawn from an event names
+the event and shows its mark, a decision's bracket is its mark (`[accepted]`
+only when a person accepted it), the summary is headed "AI-written", and the
+header names the session it was generated from, when, and the sha256 of the
+section. It is not snapshotted: it is regenerated from the session record,
+which is kept. INV-18 lists every delivery path and fails on an unclassified
+new tool.
+
+*Rejected:* keeping the mark first and changing only the legend. The first
+thing on the line would still read as the standing of the wording.
+
+*Rejected:* ranking rejected or replaced learnings lower instead of leaving
+them out. The operator decided they step back and stay in history, not appear
+as equal guidance; anything still returned near a short limit would appear.
+
+*Rejected:* finding replacements across sessions now. No recorded link does
+that today, and scanning every session at each recall is too slow; explicit
+supersession links, with who asserted and who approved them, are left for
+later.
+
 ## What is not known
 
 Whether a session behaves better when it is shown the marks: that needs a
 controlled run with the marks on and off. Whether the marks are right: no
 person has yet read a sample of marked records and learnings, and they are not
 called accurate before that. Whether the decision block improves decisions: the
-transcripts show visible use only.
+transcripts show visible use only. Whether the extraction instruction keeps
+learnings in scope across many sessions and models, and how much it grows the
+store: the comparison above is three sessions, one run each. Whether a
+learning extracted from a rejected decision held the lesson of the rejection
+rather than the rejected proposal: those learnings now step back either way.
 
 ## Constraints
 
