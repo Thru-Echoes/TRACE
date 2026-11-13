@@ -1,9 +1,10 @@
-"""The read-only comparison report and review sheet (ADR 008 D7).
+"""The read-only report and review sheet (ADR 008 D7).
 
-The input is built by running the real steps: the trial is started, two of the
-person's words are recorded, a session is extracted by both arms with scripted
-replies (the live arm names evt_002 and evt_003, the shadow arm evt_002 only),
-and one recall runs.
+The input is built by running the real steps: the period is started, two of the
+person's words are recorded, a session is extracted (its learnings come from
+evt_002, still proposed, and evt_003, accepted), the session is replayed with
+scripted replies (the whole arm names evt_002 and evt_003, the nearest arm
+evt_002 only), and one recall runs.
 """
 
 from __future__ import annotations
@@ -20,7 +21,7 @@ from _shadow_helpers import ScriptedClient, learn_env, make_session, reply
 
 from trace_mcp import extension_hooks
 from trace_mcp.extensions.learn import extraction
-from trace_mcp.extensions.learn.shadow.extract import ArmRecord, ExtractionRecord, LearningAtExtraction
+from trace_mcp.extensions.learn.shadow.replay import ArmRecord, LearningAtExtraction, ReplayRecord, run_replay
 from trace_mcp.extensions.learn.shadow.report import (
     ShadowReport,
     build_report,
@@ -84,18 +85,16 @@ async def _fixture(
                 ts=began + timedelta(seconds=i), host_session_id="host-1", text=text, transcript=str(transcript)
             ),
         )
-    client = ScriptedClient(
-        [
-            reply(
-                ("Cap retries at three for uploads.", "evt_002"), ("Back off exponentially between retries.", "evt_003")
-            ),
-            reply(("It was proposed that retries are capped at three.", "evt_002")),
-        ]
+    both = reply(
+        ("Cap retries at three for uploads.", "evt_002"), ("Back off exponentially between retries.", "evt_003")
     )
+    client = ScriptedClient([both, both, reply(("It was proposed that retries are capped at three.", "evt_002"))])
     monkeypatch.setattr(extraction, "AsyncOpenAI", lambda **_kw: client)
     session = await make_session(storage, resolution_quote=resolution_quote, contribution_snippet=contribution_snippet)
     result = await extension_hooks.extract_if_available(PROJECT, session.id)
-    assert result.error is None
+    assert result.error is None and len(result.new_ids) == 2
+    summary = await run_replay(project=PROJECT, limit=5)
+    assert (summary.replayed, summary.failed) == (1, 0) and len(client.requests) == 3
     # Recall on the local ranker: re-register with cloud extraction off (the LLM ranker would try a real request).
     storage = learn_env(tmp_path, monkeypatch, llm=False)
     await extension_hooks.recall_if_available(PROJECT, "upload retries", None, 5)
@@ -109,16 +108,20 @@ def _jsonl(path: Path) -> list[dict]:
 # ── measures from the real fixture ────────────────────────────────────────
 
 
-async def test_the_report_of_one_session_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_the_report_of_one_session(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     await _fixture(tmp_path, monkeypatch)
     total = build_report().total
 
-    assert total.session_ends == 1
-    assert total.cost["live"].calls == 1
-    assert total.cost["shadow"].prompt_tokens == 120
-    assert total.learnings_by_mark["shadow"] == {"[proposed]": 1}
-    assert total.learnings_by_mark["live"] == {"[proposed]": 1, "[accepted]": 1}
-    assert (total.paired, total.live_only, total.shadow_only) == (1, 1, 0)
+    assert total.stored_learnings == 2
+    assert total.stored_by_mark == {"[proposed]": 1, "[accepted]": 1}
+    assert (total.stored_proposed_when_written, total.stored_resolved_since) == (1, 0)
+
+    assert total.replayed_sessions == 1
+    assert total.cost["whole"].calls == 1
+    assert total.cost["nearest"].prompt_tokens == 120
+    assert total.learnings_by_mark["nearest"] == {"[proposed]": 1}
+    assert total.learnings_by_mark["whole"] == {"[proposed]": 1, "[accepted]": 1}
+    assert (total.paired, total.whole_only, total.nearest_only) == (1, 1, 0)
 
     (recall,) = _jsonl(get_project_dir(PROJECT) / "recall.jsonl")
     assert total.recall_calls == 1
@@ -133,12 +136,10 @@ async def test_the_report_of_one_session_end(tmp_path: Path, monkeypatch: pytest
     assert total.quote_miss_share == {}
     assert total.quote_position == {}
 
-    assert set(total.similarity) == {"live", "shadow"}
-    assert total.similarity == {"live": {"no_vector": 2}, "shadow": {"no_vector": 1}}
+    assert total.similarity == {"whole": {"no_vector": 2}, "nearest": {"no_vector": 1}}
     assert total.words_by_kind == {"prompt": 2}
     assert total.words_entries == 2
     assert total.suspect_entries == 0
-    assert total.resolved_since_extraction == {"live": 0, "shadow": 0}
     assert total.errors_by_step == {}
     assert total.unreadable_sessions == 0
     assert build_report().projects_without_words == []
@@ -172,34 +173,32 @@ def test_similarity_bands_from_hand_written_records(tmp_path: Path, monkeypatch:
     monkeypatch.setenv("TRACE_KNOWLEDGE_DIR", str(tmp_path / "knowledge"))
     start_trial()
     cosines = [0.97, 0.95, 0.91, 0.85, 0.4, None]
-    shadow = ArmRecord(
-        path="llm",
+    nearest = ArmRecord(
         learnings=[
             LearningAtExtraction(
-                id=f"slrn_{i:03d}", category="learning", tags=["[accepted]"], nearest_existing_cosine=c
+                id=f"nearest-{i}", content="x", category="learning", tags=["[accepted]"], nearest_existing_cosine=c
             )
             for i, c in enumerate(cosines, start=1)
         ],
     )
     append_record(
-        get_project_dir(PROJECT) / "extraction.jsonl",
-        ExtractionRecord(
+        get_project_dir(PROJECT) / "replay.jsonl",
+        ReplayRecord(
             ts=datetime.now(UTC),
             project_key=PROJECT,
             session_id="trace_20261112_aaaaaa",
-            live=ArmRecord(path="skipped"),
-            shadow=shadow,
+            whole=ArmRecord(),
+            nearest=nearest,
             nearest_n=50,
             store_size=0,
             selection="all",
             query_chars=0,
             query_truncated=False,
-            seeded_now=True,
         ),
     )
     similarity = build_report().total.similarity
-    assert similarity["shadow"] == {"0.95+": 2, "0.90-0.95": 1, "0.85-0.90": 1, "<0.85": 1, "no_vector": 1}
-    assert similarity["live"] == {}
+    assert similarity["nearest"] == {"0.95+": 2, "0.90-0.95": 1, "0.85-0.90": 1, "<0.85": 1, "no_vector": 1}
+    assert similarity["whole"] == {}
 
 
 async def test_words_kinds_and_suspect_entries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -232,17 +231,21 @@ async def test_capture_against_the_host_transcript(tmp_path: Path, monkeypatch: 
     assert (capture.dialog_answers_in_transcript, capture.dialog_answers_recorded) == (0, 0)
 
 
-async def test_a_decision_resolved_after_extraction(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_a_decision_resolved_after_its_learning_was_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     storage, session = await _fixture(tmp_path, monkeypatch)
     before = build_report().total
-    assert before.resolved_since_extraction == {"live": 0, "shadow": 0}
+    assert (before.stored_proposed_when_written, before.stored_resolved_since) == (1, 0)
 
     stored = await storage.get_session(session.id)
     await decision_tools.resolve_decision(
         storage, stored, event_id="evt_002", disposition="accepted", resolved_by_type="human", resolved_by_id="alice"
     )
     after = build_report().total
-    assert after.resolved_since_extraction == {"live": 1, "shadow": 1}
+    assert (after.stored_proposed_when_written, after.stored_resolved_since) == (1, 1)
+    assert after.stored_by_mark == {"[accepted]": 2}
+    # The replay recorded the marks as they stood when the session ended; they do not move.
     assert after.learnings_by_mark == before.learnings_by_mark
 
 
@@ -265,14 +268,17 @@ async def test_review_rows_and_csv(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     await _fixture(tmp_path, monkeypatch)
     rows = get_review_rows()
     kinds = [row.kind for row in rows]
-    unaccepted = [row for row in rows if row.kind == "unaccepted_source"]
-    assert len(unaccepted) == 2 and {row.event_id for row in unaccepted} == {"evt_002"}
-    assert {(row.live_id is not None, row.shadow_id is not None) for row in unaccepted} == {
-        (True, False),
-        (False, True),
-    }
+    (unaccepted,) = [row for row in rows if row.kind == "unaccepted_source"]
+    assert (unaccepted.learning_id, unaccepted.event_id, unaccepted.arm) == ("lrn_001", "evt_002", "")
+    assert unaccepted.text == "Cap retries at three for uploads." and unaccepted.marks == "[proposed]"
     assert [row.event_id for row in rows if row.kind == "resolution_unquoted"] == ["evt_004"]
-    assert "live_only" in kinds and "shadow_only" not in kinds
+    (whole_only,) = [row for row in rows if row.kind == "whole_only"]
+    assert (whole_only.learning_id, whole_only.arm, whole_only.text) == (
+        "whole-2",
+        "whole",
+        "Back off exponentially between retries.",
+    )
+    assert "nearest_only" not in kinds
 
     path = tmp_path / "review.csv"
     assert write_review_csv(path, rows) == len(rows)

@@ -1,10 +1,10 @@
-"""The live extraction prompt is pinned byte for byte.
+"""The extraction request is pinned byte for byte.
 
-The provenance-marks shadow arm shares the live extractor's prompt builder and
-model call. This characterization test was written against the extractor before
-that sharing existed, and its golden file records the exact messages the live
-arm sends, so a restructuring cannot change what the live arm asks the model.
-The client is the one substitution: nothing leaves the machine.
+The golden file records the exact messages the extractor sends for a fixed
+session and store, so a restructuring of the prompt builder or the model call
+cannot change what the model is asked without this test saying so. The request
+ends with the instruction to word a learning from an unresolved proposal as a
+proposal. The client is the one substitution: nothing leaves the machine.
 """
 
 from __future__ import annotations
@@ -90,7 +90,7 @@ def get_fixed_store() -> KnowledgeStore:
     return store
 
 
-async def test_the_live_extraction_prompt_is_unchanged(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_the_extraction_request_is_pinned(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _RecordingClient('{"learnings": []}')
     monkeypatch.setattr(extraction, "AsyncOpenAI", lambda **_kw: client)
 

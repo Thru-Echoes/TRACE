@@ -1,11 +1,12 @@
-"""The provenance-marks shadow period end to end.
+"""Provenance marks end to end.
 
 One story, real functions and the real hook scripts (run as subprocesses); the
 model client is the only substitution. The person types two prompts and answers
 one question dialog; a session proposes and resolves four decisions on those
-words; both arms extract; a recall runs; the report and review sheet then say
-what was verified, where, and what no person accepted. After ``stop``, nothing
-is captured and no second model call is made.
+words; the session end extracts with one model call; a recall shows each
+learning with the mark of its source; the session is replayed offline with
+both arms; the report and review sheet then say what was verified, where, and
+what no person accepted. After ``stop``, nothing more is captured.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from _shadow_helpers import ScriptedClient, learn_env, reply
 from trace_mcp import extension_hooks
 from trace_mcp.extensions.learn import extraction
 from trace_mcp.extensions.learn.shadow import cli
+from trace_mcp.extensions.learn.shadow.replay import run_replay
 from trace_mcp.extensions.learn.shadow.report import build_report, get_review_rows
 from trace_mcp.extensions.learn.shadow.state import get_project_dir
 from trace_mcp.schema import Session
@@ -81,16 +83,11 @@ async def _accept(storage, session: Session, event_id: str, quote: str | None) -
 
 async def test_the_shadow_period_end_to_end(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys) -> None:
     storage = learn_env(tmp_path, monkeypatch)
-    client = ScriptedClient(
-        [
-            reply(("Cap upload retries at three.", "evt_001"), ("Use exponential backoff between retries.", "evt_002")),
-            reply(
-                ("Upload retries are capped at three.", "evt_001"),
-                ("It was proposed that retries use exponential backoff.", "evt_002"),
-            ),
-            reply(("A learning from the second session.", "evt_001")),
-        ]
+    two = reply(
+        ("Upload retries are capped at three.", "evt_001"),
+        ("It was proposed that retries use exponential backoff.", "evt_002"),
     )
+    client = ScriptedClient([two, two, two, reply(("A learning from the second session.", "evt_001"))])
     monkeypatch.setattr(extraction, "AsyncOpenAI", lambda **_kw: client)
 
     # 1-2. The period starts; the person types a first prompt.
@@ -111,19 +108,30 @@ async def test_the_shadow_period_end_to_end(tmp_path: Path, monkeypatch: pytest.
     await _propose(storage, session, "Log every retry.")
     await _accept(storage, session, "evt_004", None)
 
-    # 7. The session ends and both arms extract.
+    # 7. The session ends and is extracted with one model call.
     await session_tools.end_session(storage, active, session_id=session.id)
     result = await extension_hooks.extract_if_available(PROJECT, session.id)
     assert result.error is None and result.new_ids == ["lrn_001", "lrn_002"]
-    assert len(client.requests) == 2
+    assert len(client.requests) == 1
 
-    # 8. A recall, on the local ranker.
+    # 8. Later, offline: the session is replayed with both arms. Nothing is stored.
+    summary = await run_replay(project=PROJECT, limit=5)
+    assert (summary.replayed, summary.failed) == (1, 0) and len(client.requests) == 3
+
+    # 9. A recall, on the local ranker, shows each learning with the mark of its source.
     learn_env(tmp_path, monkeypatch, llm=False)
-    await extension_hooks.recall_if_available(PROJECT, "upload retries", None, 5)
+    recalled = await extension_hooks.recall_if_available(PROJECT, "upload retries", None, 5)
+    assert {r["learning"]["source_event"]: r["marks"] for r in recalled} == {
+        "evt_001": ["[accepted]"],
+        "evt_002": ["[proposed]"],
+    }
+    block = extension_hooks.format_recalled_learnings(list(recalled))
+    assert "[proposed] [learning] It was proposed that retries use exponential backoff." in block
+    assert "[proposed] an AI proposal no person resolved (a suggestion, not a rule)" in block
 
-    # 9. What the report says.
-    (record,) = [json.loads(x) for x in (get_project_dir(PROJECT) / "extraction.jsonl").read_text().splitlines()]
-    for arm in ("live", "shadow"):
+    # 10. What the report says.
+    (record,) = [json.loads(x) for x in (get_project_dir(PROJECT) / "replay.jsonl").read_text().splitlines()]
+    for arm in ("whole", "nearest"):
         tags = {x["source_event"]: x["tags"] for x in record[arm]["learnings"]}
         assert tags == {
             "evt_001": ["[accepted]", "[quote-verified]", "[resolution-verified]"],
@@ -138,11 +146,12 @@ async def test_the_shadow_period_end_to_end(tmp_path: Path, monkeypatch: pytest.
     assert total.paired == 2
     assert total.recall_calls == 1
     rows = get_review_rows()
+    assert total.stored_by_mark == {"[accepted]": 1, "[proposed]": 1}
     unaccepted = [row for row in rows if row.kind == "unaccepted_source"]
-    assert {(row.event_id, row.live_id is not None) for row in unaccepted} == {("evt_002", True), ("evt_002", False)}
+    assert [(row.event_id, row.learning_id) for row in unaccepted] == [("evt_002", "lrn_002")]
     assert [row.event_id for row in rows if row.kind == "resolution_unquoted"] == ["evt_004"]
 
-    # 10. After stop: nothing is captured, and a second session end makes one model call only.
+    # 11. After stop: nothing more is captured. A session end still makes one model call.
     capsys.readouterr()
     assert cli.main(["stop"]) == 0
     words = get_project_dir(PROJECT) / "words" / "host-1.jsonl"
@@ -156,5 +165,5 @@ async def test_the_shadow_period_end_to_end(tmp_path: Path, monkeypatch: pytest.
     await _propose(storage, second, "Something for the second session.")
     await session_tools.end_session(storage, active, session_id=second.id)
     await extension_hooks.extract_if_available(PROJECT, second.id)
-    assert len(client.requests) == 3
-    assert len((get_project_dir(PROJECT) / "extraction.jsonl").read_text().splitlines()) == 1
+    assert len(client.requests) == 4
+    assert len((get_project_dir(PROJECT) / "replay.jsonl").read_text().splitlines()) == 1

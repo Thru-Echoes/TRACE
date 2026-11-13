@@ -17,8 +17,8 @@ appears, so a human annotation logged beside one still extracts.
 
 The LLM path builds its prompt with ``build_extraction_prompt`` and calls the
 model through ``_call_extraction_model``, the one attested egress site for
-extraction. The provenance-marks shadow arm (``shadow/extract.py``) uses the
-same two functions with its own purpose, so the arms cannot drift apart.
+extraction. The offline replay (``shadow/replay.py``) uses the same two
+functions under its own purposes, so its arms cannot drift from the extractor.
 """
 
 from __future__ import annotations
@@ -363,13 +363,15 @@ class ExtractionUsage(BaseModel):
     existing_chars: int | None = Field(default=None, description="Length of the existing-learnings block sent.")
 
 
-def build_extraction_prompt(session: Session, existing_text: str, *, proposal_wording: bool = False) -> str:
+def build_extraction_prompt(session: Session, existing_text: str) -> str:
     """Return the user message of an extraction request.
+
+    It ends with ``PROPOSAL_WORDING_INSTRUCTION``: a learning drawn from a
+    decision nobody has resolved is worded as a proposal, not as a rule.
 
     Args:
         session: the session whose events are sent.
         existing_text: the existing-learnings block (``_format_learnings``).
-        proposal_wording: append ``PROPOSAL_WORDING_INSTRUCTION`` (the shadow arm only).
     """
     events_text = _format_events_for_llm(session)
     prompt = (
@@ -386,9 +388,19 @@ def build_extraction_prompt(session: Session, existing_text: str, *, proposal_wo
         'Return a JSON object with key "learnings" containing an array of objects.\n'
         'If no new learnings exist, return {"learnings": []}.'
     )
-    if proposal_wording:
-        prompt += "\n\n" + PROPOSAL_WORDING_INSTRUCTION
-    return prompt
+    return prompt + "\n\n" + PROPOSAL_WORDING_INSTRUCTION
+
+
+def get_known_source_event(session: Session, value: object) -> str | None:
+    """Return ``value`` when it is the id of an event of ``session``, else None.
+
+    The model names each learning's source event. An id that names no event of
+    the session (absent, malformed or invented) is not recorded: the learning
+    is kept and reads as source unknown, which is true.
+    """
+    if not isinstance(value, str) or not value:
+        return None
+    return value if any(event.id == value for event in session.events) else None
 
 
 def _report_usage(usage_sink: Callable[[ExtractionUsage], None] | None, usage: ExtractionUsage) -> None:
@@ -416,9 +428,10 @@ async def _call_extraction_model(
 ) -> tuple[list[dict], ExtractionUsage]:
     """Attest, then send one extraction request, and return the learnings it proposes with its usage.
 
-    The one egress site for extraction (INV-5). Both the live extractor
-    (``purpose="extraction"``) and the shadow arm (``"shadow-extraction"``) call
-    it, each attested under its own purpose. The request sends only ``model``,
+    The one egress site for extraction (INV-5). The extractor
+    (``purpose="extraction"``) and the offline replay's two arms
+    (``"replay-extraction-whole"``, ``"replay-extraction-nearest"``) call it,
+    each attested under its own purpose. The request sends only ``model``,
     ``messages`` and ``response_format``.
 
     Side effects: appends one row to the egress ledger; makes one network call.
@@ -526,7 +539,7 @@ async def extract_from_session_llm(
 
         new_ids: list[str] = []
         for item in extracted:
-            source_event = item.get("source_event", "")
+            source_event = get_known_source_event(session, item.get("source_event"))
             if source_event and _already_extracted(store, session.id, source_event):
                 continue
             lrn = _add_with_optional_dedup(
@@ -534,7 +547,7 @@ async def extract_from_session_llm(
                 content=item.get("content", ""),
                 category=item.get("category", "learning"),
                 source_session=session.id,
-                source_event=source_event or None,
+                source_event=source_event,
                 corrects_event_ids=item.get("corrects_event_ids"),
                 tags=item.get("tags", []),
                 dedup_threshold=dedup_threshold,

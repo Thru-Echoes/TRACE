@@ -23,9 +23,7 @@ from trace_mcp.extensions.learn.egress import egress_project
 from trace_mcp.extensions.learn.embeddings import get_embedding_provider
 from trace_mcp.extensions.learn.matching import DecayParams
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, LearningCategory
-from trace_mcp.extensions.learn.shadow import extract as shadow_extract
 from trace_mcp.extensions.learn.shadow import recall as shadow_recall
-from trace_mcp.extensions.learn.shadow import state as shadow_state
 from trace_mcp.provenance_marks import get_mark_legend
 
 if TYPE_CHECKING:
@@ -433,32 +431,15 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
             # is skipped loudly instead of running on the global config.
             logger.error("Registry unreadable — skipping extraction for %r (fail closed on egress): %s", project, exc)
             return []
-        # Provenance-marks shadow period (ADR 008): decided before the live step,
-        # run only after the live lock is released, and never able to change or
-        # fail the live result (run_shadow_step records its own errors).
-        trial_on = shadow_state.is_active(pident.key_for_label(project))
-        usage: list[extraction.ExtractionUsage] = []
         with store.project_lock(project), egress_project(pident.key_for_label(project) or None):
             ks = store.load_store(project)
             sess = await storage.get_session(session_id)
-            new_ids = await extraction.extract_from_session_auto(
-                ks, sess, eff, usage_sink=usage.append if trial_on else None
-            )
+            new_ids = await extraction.extract_from_session_auto(ks, sess, eff)
             if new_ids:
                 new_set = set(new_ids)
                 to_embed = [lrn for lrn in ks.learnings if lrn.id in new_set and lrn.embedding is None]
                 await _embed_learnings(to_embed, provider)
                 store.save_store(ks)
-        if trial_on:
-            await shadow_extract.run_shadow_step(
-                project=project,
-                session=sess,
-                config=eff,
-                provider=provider,
-                live_store=ks,
-                live_new_ids=list(new_ids),
-                live_usage=usage[-1] if usage else None,
-            )
         return new_ids
 
     register_recall_hook(_recall_hook)

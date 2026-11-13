@@ -46,8 +46,8 @@ try:
         if days >= 30 and last != today:
             since = start.astimezone(timezone.utc).date().isoformat()
             print(
-                f"TRACE shadow trial has been running since {since} (day {days}). "
-                'Tell the user: run "trace-mcp shadow report", then "trace-mcp shadow stop" to end it. '
+                f"TRACE has been saving the person's typed words for quote checks since {since} (day {days}). "
+                'Tell the user: run "trace-mcp shadow report" to review it; "trace-mcp shadow stop" ends the capture. '
                 "It does not stop by itself. [trace-hooks v0.6]"
             )
             sys.stdout.flush()

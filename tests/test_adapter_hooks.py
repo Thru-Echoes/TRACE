@@ -556,7 +556,7 @@ def _no_user_env_leak(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
 
 DIALOG_WORDS = _HOOKS / "dialog-words.sh"
 _REMINDER_TAIL = (
-    'Tell the user: run "trace-mcp shadow report", then "trace-mcp shadow stop" to end it. '
+    'Tell the user: run "trace-mcp shadow report" to review it; "trace-mcp shadow stop" ends the capture. '
     "It does not stop by itself. [trace-hooks v0.6]"
 )
 
@@ -900,20 +900,23 @@ class TestShadowReminder:
         env.state(started=started)
         result = self._run(env)
         assert result.returncode == 0
-        expected = f"TRACE shadow trial has been running since {started.date().isoformat()} (day 31). " + _REMINDER_TAIL
+        expected = (
+            "TRACE has been saving the person's typed words for quote checks since "
+            f"{started.date().isoformat()} (day 31). " + _REMINDER_TAIL
+        )
         assert expected in result.stdout
 
     def test_at_most_once_a_day(self, tmp_path: Path) -> None:
         env = _ShadowEnv(tmp_path)
         env.state(started=self._days_ago(31))
-        assert "shadow trial" in self._run(env).stdout
-        assert "shadow trial" not in self._run(env).stdout
+        assert "typed words" in self._run(env).stdout
+        assert "typed words" not in self._run(env).stdout
 
     @pytest.mark.parametrize(("days", "stopped"), [(29, False), (40, True)])
     def test_no_reminder_before_day_30_or_after_stop(self, tmp_path: Path, days: int, stopped: bool) -> None:
         env = _ShadowEnv(tmp_path)
         env.state(started=self._days_ago(days), stopped=self._days_ago(1) if stopped else None)
-        assert "shadow trial" not in self._run(env).stdout
+        assert "typed words" not in self._run(env).stdout
 
     def test_corrupt_state_prints_no_reminder(self, tmp_path: Path) -> None:
         env = _ShadowEnv(tmp_path)
@@ -921,7 +924,7 @@ class TestShadowReminder:
         (env.shadow / "STATE.json").write_text("{not json")
         result = self._run(env)
         assert result.returncode == 0
-        assert "shadow trial" not in result.stdout
+        assert "typed words" not in result.stdout
 
     def test_state_file_is_never_written(self, tmp_path: Path) -> None:
         env = _ShadowEnv(tmp_path)

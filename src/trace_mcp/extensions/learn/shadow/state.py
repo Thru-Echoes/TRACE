@@ -70,11 +70,6 @@ def get_project_dir(project_key: str) -> Path:
     return get_shadow_root() / canonical_project_key(project_key)
 
 
-def get_store_dir() -> Path:
-    """Return the directory that holds the shadow knowledge stores."""
-    return get_shadow_root() / "stores"
-
-
 def load_state() -> ShadowState:
     """Read ``STATE.json``. A missing file is a fresh state.
 

@@ -1,15 +1,15 @@
-"""The read-only comparison report and review sheet for the provenance-marks period (ADR 008 D7).
+"""The read-only report and review sheet for provenance marks (ADR 008 D7).
 
-``build_report`` reads the shadow directory (extraction, recall, error and
-words logs, the shadow stores) and the session records, and returns counts per
-project and in total. ``get_review_rows`` lists the items worth a person's
+``build_report`` reads the shadow directory (replay, recall, error and words
+logs), the live knowledge stores and the session records, and returns counts
+per project and in total. ``get_review_rows`` lists the items worth a person's
 judgment; ``write_review_csv`` writes them as a sheet with empty reviewer
 columns. Nothing here writes anything except the CSV the caller asks for.
 
-Marks computed from session records here are *current* marks; the marks a
-learning had when it was extracted come from the extraction log. A decision
-resolved after its learning was extracted shows up in
-``resolved_since_extraction``.
+Marks computed from session records here are *current* marks. A stored
+learning whose source was still proposed when the learning was written, and
+has been resolved since, is counted in ``stored_resolved_since``. The
+whole-store against nearest-50 comparison is read from the replay records.
 
 Exports:
     ArmCost, CaptureCount, ProjectReport, ShadowReport, ReviewRow
@@ -31,9 +31,9 @@ from pydantic import BaseModel, Field, ValidationError
 from trace_mcp import project_identity as pident
 from trace_mcp.extensions.learn import matching, store
 from trace_mcp.extensions.learn.models import Learning
-from trace_mcp.extensions.learn.shadow.extract import ExtractionRecord, LearningAtExtraction, load_shadow_store
 from trace_mcp.extensions.learn.shadow.host_transcript import is_plain_prompt, read_host_inputs
 from trace_mcp.extensions.learn.shadow.recall import RecallRecord
+from trace_mcp.extensions.learn.shadow.replay import ARMS, LearningAtExtraction, ReplayRecord, load_sessions
 from trace_mcp.extensions.learn.shadow.state import (
     ErrorRecord,
     ShadowState,
@@ -54,9 +54,7 @@ from trace_mcp.provenance_marks import (
     is_human_resolution,
 )
 from trace_mcp.schema import Session, TraceEvent
-from trace_mcp.storage.json_file import JsonFileStorage
 
-ARMS = ("live", "shadow")
 PAIR_OVERLAP = 0.5
 CAPTURE_SLACK = timedelta(seconds=5)
 _UNACCEPTED_FIRST_TAGS = {"[proposed]", "[ai-resolved]", "[ai-note]", SOURCE_UNKNOWN_TAG}
@@ -68,8 +66,8 @@ ReviewKind = Literal[
     "resolution_unquoted",
     "resolution_not_found",
     "resolution_older",
-    "live_only",
-    "shadow_only",
+    "whole_only",
+    "nearest_only",
 ]
 
 
@@ -78,9 +76,9 @@ def _arms_of_counts() -> dict[str, dict[str, int]]:
 
 
 class ArmCost(BaseModel):
-    """Extraction cost of one arm, summed over session ends."""
+    """Extraction cost of one replay arm, summed over replayed sessions."""
 
-    calls: int = Field(default=0, description="Session ends at which the arm called the model.")
+    calls: int = Field(default=0, description="Replayed sessions for which the arm called the model.")
     calls_with_usage: int = Field(default=0, description="Of those, calls whose provider reported token usage.")
     prompt_tokens: int = Field(default=0, description="Prompt tokens, summed.")
     completion_tokens: int = Field(default=0, description="Completion tokens, summed.")
@@ -103,15 +101,22 @@ class ProjectReport(BaseModel):
     """Every count for one project (or the total). Status/band/kind maps hold only non-zero keys."""
 
     project_key: str = Field(..., description="Canonical project key, or TOTAL.")
-    session_ends: int = Field(default=0, description="Extraction records in range.")
-    paths: dict[str, dict[str, int]] = Field(default_factory=_arms_of_counts, description="Arm -> path -> count.")
+    stored_learnings: int = Field(default=0, description="Learnings in the live store written in range.")
+    stored_by_mark: dict[str, int] = Field(
+        default_factory=dict, description="Current first mark of the source (or none) -> stored learnings."
+    )
+    stored_proposed_when_written: int = Field(
+        default=0, description="Stored learnings whose source was a still-proposed decision when they were written."
+    )
+    stored_resolved_since: int = Field(default=0, description="Of those, sources resolved since.")
+    replayed_sessions: int = Field(default=0, description="Replay records in range.")
     learnings_by_mark: dict[str, dict[str, int]] = Field(
-        default_factory=_arms_of_counts, description="Arm -> first mark at extraction (or none) -> new learnings."
+        default_factory=_arms_of_counts, description="Arm -> first mark at the session's end (or none) -> learnings."
     )
     cost: dict[str, ArmCost] = Field(default_factory=lambda: {arm: ArmCost() for arm in ARMS})
-    paired: int = Field(default=0, description="Learnings both arms made.")
-    live_only: int = Field(default=0, description="Learnings only the live arm made.")
-    shadow_only: int = Field(default=0, description="Learnings only the shadow arm made.")
+    paired: int = Field(default=0, description="Learnings both replay arms made.")
+    whole_only: int = Field(default=0, description="Learnings only the whole-store arm made.")
+    nearest_only: int = Field(default=0, description="Learnings only the nearest arm made.")
     recall_calls: int = 0
     recall_items_by_mark: dict[str, int] = Field(default_factory=dict)
     recall_chars_without: int = 0
@@ -125,7 +130,6 @@ class ProjectReport(BaseModel):
     resolution_timing: dict[str, int] = Field(default_factory=dict)
     similarity: dict[str, dict[str, int]] = Field(default_factory=_arms_of_counts)
     corrections_by_mark: dict[str, int] = Field(default_factory=dict)
-    resolved_since_extraction: dict[str, int] = Field(default_factory=lambda: {arm: 0 for arm in ARMS})
     errors_by_step: dict[str, int] = Field(default_factory=dict)
     words_entries: int = 0
     words_by_kind: dict[str, int] = Field(default_factory=dict)
@@ -149,18 +153,19 @@ class ShadowReport(BaseModel):
 class ReviewRow(BaseModel):
     """One row of the review sheet; the last four columns are for the reviewer.
 
-    For quote and resolution rows, ``live_text`` holds the quoted words.
+    ``text`` holds the learning's text, or for quote and resolution rows the
+    quoted words. ``learning_id`` is a stored learning's id, or for a replay
+    row the arm's own ordinal; ``arm`` is set on replay rows only.
     """
 
     project: str
     kind: ReviewKind
     session_id: str
     event_id: str | None = None
-    live_id: str | None = None
-    shadow_id: str | None = None
+    learning_id: str | None = None
+    arm: str = ""
     marks: str = ""
-    live_text: str = ""
-    shadow_text: str = ""
+    text: str = ""
     reviewer: str = ""
     mark_correct: str = ""
     useful: str = ""
@@ -204,39 +209,20 @@ def _in_range(ts: datetime, date_from: date, date_to: date) -> bool:
     return date_from <= day <= date_to
 
 
-def _load_sessions() -> tuple[list[Session], int]:
-    """Every readable session record, and how many files could not be read."""
-    directory = Path(JsonFileStorage().location())
-    sessions: list[Session] = []
-    unreadable = 0
-    for path in sorted(directory.glob("trace_*.json")) if directory.is_dir() else []:
-        try:
-            sessions.append(Session.model_validate_json(path.read_bytes()))
-        except Exception:
-            unreadable += 1
-    return sessions, unreadable
-
-
 def _list_projects(project_key: str | None) -> list[str]:
     root = get_shadow_root()
-    names = sorted(p.name for p in root.iterdir() if p.is_dir() and p.name != "stores") if root.is_dir() else []
+    names = sorted(p.name for p in root.iterdir() if p.is_dir()) if root.is_dir() else []
     if project_key is not None:
         wanted = pident.canonical_project_key(project_key)
         names = [name for name in names if name == wanted]
     return names
 
 
-def _learnings_by_id(key: str) -> tuple[dict[str, Learning], dict[str, Learning]]:
+def _stored_learnings(key: str) -> dict[str, Learning]:
     try:
-        live = {lrn.id: lrn for lrn in store.load_store(key).learnings}
+        return {lrn.id: lrn for lrn in store.load_store(key).learnings}
     except Exception:
-        live = {}
-    try:
-        shadow_store = load_shadow_store(key)
-        shadow = {lrn.id: lrn for lrn in shadow_store.learnings} if shadow_store else {}
-    except Exception:
-        shadow = {}
-    return live, shadow
+        return {}
 
 
 def _find_event(session: Session | None, event_id: str | None) -> TraceEvent | None:
@@ -283,115 +269,111 @@ class _Context(BaseModel):
 
 
 def _pair(
-    live: Sequence[LearningAtExtraction],
-    shadow: Sequence[LearningAtExtraction],
-    live_text: dict[str, str],
-    shadow_text: dict[str, str],
+    whole: Sequence[LearningAtExtraction], nearest: Sequence[LearningAtExtraction]
 ) -> tuple[int, list[LearningAtExtraction], list[LearningAtExtraction]]:
-    """Pair a session end's live and shadow learnings: same source event first, then token overlap >= 0.5."""
-    free = list(shadow)
-    unpaired_live: list[LearningAtExtraction] = []
+    """Pair one replay's whole and nearest learnings: same source event first, then token overlap >= 0.5."""
+    free = list(nearest)
+    unpaired: list[LearningAtExtraction] = []
     paired = 0
-    for lrn in live:
-        match = next((s for s in free if lrn.source_event and s.source_event == lrn.source_event), None)
+    for lrn in whole:
+        match = next((n for n in free if lrn.source_event and n.source_event == lrn.source_event), None)
         if match is None:
-            unpaired_live.append(lrn)
+            unpaired.append(lrn)
             continue
         free.remove(match)
         paired += 1
-    still_live: list[LearningAtExtraction] = []
-    for lrn in unpaired_live:
-        text = live_text.get(lrn.id, "")
+    whole_only: list[LearningAtExtraction] = []
+    for lrn in unpaired:
         match = next(
             (
-                s
-                for s in free
-                if text
-                and shadow_text.get(s.id)
-                and matching.jaccard_similarity(text, shadow_text[s.id]) >= PAIR_OVERLAP
+                n
+                for n in free
+                if lrn.content and n.content and matching.jaccard_similarity(lrn.content, n.content) >= PAIR_OVERLAP
             ),
             None,
         )
         if match is None:
-            still_live.append(lrn)
+            whole_only.append(lrn)
             continue
         free.remove(match)
         paired += 1
-    return paired, still_live, free
+    return paired, whole_only, free
 
 
-def _extraction_part(key: str, report: ProjectReport, rows: list[ReviewRow], ctx: _Context) -> None:
-    live_by_id, shadow_by_id = _learnings_by_id(key)
-    live_text = {i: lrn.content for i, lrn in live_by_id.items()}
-    shadow_text = {i: lrn.content for i, lrn in shadow_by_id.items()}
-    records = _read_jsonl(get_project_dir(key) / "extraction.jsonl", ExtractionRecord)
-    for rec in records:
+def _stored_part(
+    key: str, report: ProjectReport, rows: list[ReviewRow], ctx: _Context, words: Sequence[WordsEntry]
+) -> None:
+    """Stored learnings written in range: by the current mark of their source, and the ones no person accepted."""
+    for lrn in _stored_learnings(key).values():
+        if not _in_range(lrn.created, ctx.date_from, ctx.date_to):
+            continue
+        report.stored_learnings += 1
+        session = ctx.sessions_by_id.get(lrn.source_session) if lrn.source_session else None
+        event = _find_event(session, lrn.source_event)
+        if session is None or event is None:
+            tags = [SOURCE_UNKNOWN_TAG]
+        else:
+            tags = get_event_marks(event, words, session_created=session.created).tags()
+            if get_base_mark(event, as_of=lrn.created)[0] == "proposed":
+                report.stored_proposed_when_written += 1
+                if get_base_mark(event)[0] != "proposed":
+                    report.stored_resolved_since += 1
+        first = _first_tag(tags)
+        _bump(report.stored_by_mark, first)
+        if first in _UNACCEPTED_FIRST_TAGS:
+            rows.append(
+                ReviewRow(
+                    project=key,
+                    kind="unaccepted_source",
+                    session_id=lrn.source_session or "",
+                    event_id=lrn.source_event,
+                    learning_id=lrn.id,
+                    marks=" ".join(tags),
+                    text=lrn.content,
+                )
+            )
+
+
+def _replay_part(key: str, report: ProjectReport, rows: list[ReviewRow], ctx: _Context) -> None:
+    """The whole-store against nearest-50 comparison, from the replay records."""
+    for rec in _read_jsonl(get_project_dir(key) / "replay.jsonl", ReplayRecord):
         if not _in_range(rec.ts, ctx.date_from, ctx.date_to):
             continue
-        report.session_ends += 1
-        session_now = ctx.sessions_by_id.get(rec.session_id)
+        report.replayed_sessions += 1
         for arm in ARMS:
             arm_record = getattr(rec, arm)
-            _bump(report.paths[arm], arm_record.path)
             cost = report.cost[arm]
-            if arm_record.path == "llm":
-                cost.calls += 1
-                if arm_record.prompt_tokens is not None or arm_record.completion_tokens is not None:
-                    cost.calls_with_usage += 1
-                cost.prompt_tokens += arm_record.prompt_tokens or 0
-                cost.completion_tokens += arm_record.completion_tokens or 0
-                cost.seconds += arm_record.seconds or 0.0
-            texts = live_text if arm == "live" else shadow_text
+            cost.calls += 1
+            if arm_record.prompt_tokens is not None or arm_record.completion_tokens is not None:
+                cost.calls_with_usage += 1
+            cost.prompt_tokens += arm_record.prompt_tokens or 0
+            cost.completion_tokens += arm_record.completion_tokens or 0
+            cost.seconds += arm_record.seconds or 0.0
             for lrn in arm_record.learnings:
-                first = _first_tag(lrn.tags)
-                _bump(report.learnings_by_mark[arm], first)
+                _bump(report.learnings_by_mark[arm], _first_tag(lrn.tags))
                 _bump(report.similarity[arm], _similarity_band(lrn.nearest_existing_cosine))
-                if first == "[proposed]":
-                    event = _find_event(session_now, lrn.source_event)
-                    if event is not None and get_base_mark(event)[0] != "proposed":
-                        report.resolved_since_extraction[arm] += 1
-                if first in _UNACCEPTED_FIRST_TAGS:
-                    rows.append(
-                        ReviewRow(
-                            project=key,
-                            kind="unaccepted_source",
-                            session_id=rec.session_id,
-                            event_id=lrn.source_event,
-                            live_id=lrn.id if arm == "live" else None,
-                            shadow_id=lrn.id if arm == "shadow" else None,
-                            marks=" ".join(lrn.tags),
-                            live_text=texts.get(lrn.id, "") if arm == "live" else "",
-                            shadow_text=texts.get(lrn.id, "") if arm == "shadow" else "",
-                        )
-                    )
-        paired, live_only, shadow_only = _pair(rec.live.learnings, rec.shadow.learnings, live_text, shadow_text)
+        paired, whole_only, nearest_only = _pair(rec.whole.learnings, rec.nearest.learnings)
         report.paired += paired
-        report.live_only += len(live_only)
-        report.shadow_only += len(shadow_only)
-        for lrn in live_only:
-            rows.append(
-                ReviewRow(
-                    project=key,
-                    kind="live_only",
-                    session_id=rec.session_id,
-                    event_id=lrn.source_event,
-                    live_id=lrn.id,
-                    marks=" ".join(lrn.tags),
-                    live_text=live_text.get(lrn.id, ""),
+        report.whole_only += len(whole_only)
+        report.nearest_only += len(nearest_only)
+        one_arm: tuple[tuple[str, ReviewKind, list[LearningAtExtraction]], ...] = (
+            ("whole", "whole_only", whole_only),
+            ("nearest", "nearest_only", nearest_only),
+        )
+        for arm, kind, only in one_arm:
+            for lrn in only:
+                rows.append(
+                    ReviewRow(
+                        project=key,
+                        kind=kind,
+                        session_id=rec.session_id,
+                        event_id=lrn.source_event,
+                        learning_id=lrn.id,
+                        arm=arm,
+                        marks=" ".join(lrn.tags),
+                        text=lrn.content,
+                    )
                 )
-            )
-        for lrn in shadow_only:
-            rows.append(
-                ReviewRow(
-                    project=key,
-                    kind="shadow_only",
-                    session_id=rec.session_id,
-                    event_id=lrn.source_event,
-                    shadow_id=lrn.id,
-                    marks=" ".join(lrn.tags),
-                    shadow_text=shadow_text.get(lrn.id, ""),
-                )
-            )
 
 
 def _recall_and_errors_part(key: str, report: ProjectReport, ctx: _Context) -> None:
@@ -414,7 +396,7 @@ def _correction_target_tag(
     event = _find_event(session, target)
     if event is not None:
         return _first_tag(get_event_marks(event, words, session_created=session.created).tags())
-    if target.startswith(("lrn_", "slrn_")):
+    if target.startswith("lrn_"):
         lrn = learnings.get(target)
         source_session = ctx.sessions_by_id.get(lrn.source_session) if lrn and lrn.source_session else None
         source = _find_event(source_session, lrn.source_event if lrn else None)
@@ -427,8 +409,7 @@ def _correction_target_tag(
 def _session_part(
     key: str, report: ProjectReport, rows: list[ReviewRow], ctx: _Context, words: Sequence[WordsEntry]
 ) -> None:
-    live_by_id, shadow_by_id = _learnings_by_id(key)
-    learnings = {**live_by_id, **shadow_by_id}
+    learnings = _stored_learnings(key)
     for session in ctx.sessions:
         if not pident.session_matches_project(session.metadata, key):
             continue
@@ -452,7 +433,7 @@ def _session_part(
                         session_id=session.id,
                         event_id=event.id,
                         marks=" ".join(marks.tags()),
-                        live_text=snippet,
+                        text=snippet,
                     )
                 )
             if is_human_resolution(event) and event.decision is not None:
@@ -478,7 +459,7 @@ def _session_part(
                             session_id=session.id,
                             event_id=event.id,
                             marks=" ".join(marks.tags()),
-                            live_text=quote,
+                            text=quote,
                         )
                     )
             annotation = event.annotation
@@ -521,7 +502,8 @@ def _project(key: str, ctx: _Context) -> tuple[ProjectReport, list[ReviewRow]]:
     report = ProjectReport(project_key=key, unreadable_sessions=ctx.unreadable_sessions)
     rows: list[ReviewRow] = []
     words = load_words(key)
-    _extraction_part(key, report, rows, ctx)
+    _stored_part(key, report, rows, ctx, words)
+    _replay_part(key, report, rows, ctx)
     _recall_and_errors_part(key, report, ctx)
     _session_part(key, report, rows, ctx, words)
     _words_part(key, report, ctx, words)
@@ -559,7 +541,7 @@ def _gather(
     except ShadowStateError:
         state = ShadowState()
     start, end = _get_range(state, date_from, date_to)
-    sessions, unreadable = _load_sessions()
+    sessions, unreadable = load_sessions()
     ctx = _Context(
         date_from=start,
         date_to=end,
@@ -623,27 +605,33 @@ def _dist(counts: dict[str, int], denominator: int | None = None) -> str:
 
 
 def _project_block(p: ProjectReport) -> list[str]:
-    lines = [p.project_key, f"  session ends: {p.session_ends}"]
+    lines = [
+        p.project_key,
+        f"  stored learnings written in range, by current mark of the source: "
+        f"{_dist(p.stored_by_mark, p.stored_learnings)}",
+        f"  source still proposed when written, and resolved since: "
+        f"{p.stored_resolved_since}/{p.stored_proposed_when_written}",
+        f"  replayed sessions: {p.replayed_sessions}",
+    ]
     for arm in ARMS:
-        lines.append(f"  extraction path, {arm}: {_dist(p.paths[arm], p.session_ends)}")
-    for arm in ARMS:
-        lines.append(f"  new learnings by mark as of extraction, {arm}: {_dist(p.learnings_by_mark[arm])}")
+        lines.append(f"  replay, learnings by mark at the session's end, {arm}: {_dist(p.learnings_by_mark[arm])}")
     for arm in ARMS:
         c = p.cost[arm]
         lines.append(
-            f"  cost, {arm}: model calls {c.calls}/{p.session_ends}, usage reported {c.calls_with_usage}/{c.calls}, "
-            f"prompt tokens {c.prompt_tokens}, completion tokens {c.completion_tokens}, seconds {c.seconds:.1f}"
+            f"  replay cost, {arm}: model calls {c.calls}/{p.replayed_sessions}, usage reported "
+            f"{c.calls_with_usage}/{c.calls}, prompt tokens {c.prompt_tokens}, completion tokens "
+            f"{c.completion_tokens}, seconds {c.seconds:.1f}"
         )
-    live_n = p.paired + p.live_only
-    shadow_n = p.paired + p.shadow_only
+    whole_n = p.paired + p.whole_only
+    nearest_n = p.paired + p.nearest_only
     lines.append(
-        f"  made by one arm only: live only {p.live_only}/{live_n}, shadow only {p.shadow_only}/{shadow_n}, "
-        f"paired {p.paired}"
+        f"  replay, made by one arm only: whole only {p.whole_only}/{whole_n}, nearest only "
+        f"{p.nearest_only}/{nearest_n}, paired {p.paired}"
     )
     items = sum(p.recall_items_by_mark.values())
     lines.append(
         f"  recall: calls {p.recall_calls}, items by mark {_dist(p.recall_items_by_mark, items)}, "
-        f"rendered characters with marks/without {p.recall_chars_with}/{p.recall_chars_without}"
+        f"rendered characters as shown/without marks {p.recall_chars_with}/{p.recall_chars_without}"
     )
     events = sum(p.quote.values())
     verified = p.quote.get("verified", 0)
@@ -662,13 +650,8 @@ def _project_block(p: ProjectReport) -> list[str]:
     lines.append(f"  corrections by mark of the corrected item: {_dist(p.corrections_by_mark)}")
     for arm in ARMS:
         new = sum(p.learnings_by_mark[arm].values())
-        lines.append(f"  similarity to the closest existing learning, {arm}: {_dist(p.similarity[arm], new)}")
-    for arm in ARMS:
-        proposed = p.learnings_by_mark[arm].get("[proposed]", 0)
-        lines.append(
-            f"  [proposed] at extraction and resolved since, {arm}: {p.resolved_since_extraction[arm]}/{proposed}"
-        )
-    lines.append(f"  shadow step failures: {_dist(p.errors_by_step)}")
+        lines.append(f"  replay, similarity to the closest stored learning, {arm}: {_dist(p.similarity[arm], new)}")
+    lines.append(f"  recorded failures by step: {_dist(p.errors_by_step)}")
     c = p.capture
     lines.append(f"  words entries by kind: {_dist(p.words_by_kind, p.words_entries)}")
     lines.append(
@@ -690,7 +673,7 @@ def format_report(report: ShadowReport) -> str:
     started = report.started_at.date().isoformat() if report.started_at else "not started"
     stopped = f"stopped {report.stopped_at.date().isoformat()}" if report.stopped_at else "still running"
     lines = [
-        f"TRACE shadow trial report — {report.date_from.isoformat()} to {report.date_to.isoformat()}",
+        f"TRACE provenance-marks report — {report.date_from.isoformat()} to {report.date_to.isoformat()}",
         f"started {started}; {stopped}",
         "",
     ]

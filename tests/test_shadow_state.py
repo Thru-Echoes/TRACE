@@ -18,7 +18,6 @@ from trace_mcp.extensions.learn.shadow.state import (
     append_record,
     get_project_dir,
     get_shadow_root,
-    get_store_dir,
     is_active,
     load_state,
     record_error,
@@ -45,7 +44,6 @@ class _Line(BaseModel):
 def test_paths_follow_the_env(shadow_root: Path) -> None:
     assert get_shadow_root() == shadow_root
     assert get_project_dir("acme") == shadow_root / "acme"
-    assert get_store_dir() == shadow_root / "stores"
 
 
 def test_default_root_is_under_home(monkeypatch: pytest.MonkeyPatch) -> None:
