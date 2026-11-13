@@ -1,4 +1,4 @@
-"""Shadow recall: each recall's marks are recorded, and the recall itself never changes (ADR 008 D6).
+"""Recall record: while a period runs each recall is recorded by mark, and recording never changes it (ADR 008 D6).
 
 Recall runs on the local BM25 ranker here (cloud extraction off), so nothing
 leaves the machine and no client needs substituting.
@@ -18,7 +18,7 @@ from trace_mcp import extension_hooks
 from trace_mcp.extensions.learn import store
 from trace_mcp.extensions.learn.shadow import recall as shadow_recall
 from trace_mcp.extensions.learn.shadow.state import get_project_dir, start_trial
-from trace_mcp.provenance_marks import MARK_LEGEND
+from trace_mcp.provenance_marks import get_mark_legend
 
 PROJECT = "collab-a"
 CREATED = datetime(2026, 10, 1, tzinfo=UTC)
@@ -81,8 +81,11 @@ async def test_trial_on_records_marks_and_leaves_the_result_alone(
     categories = {r["learning"]["id"]: r["learning"]["category"] for r in result}
     contents = {r["learning"]["id"]: r["learning"]["content"] for r in result}
     without = sum(len(f"  - [{categories[i]}] {contents[i]}") for i in by_id)
-    with_marks = without + sum(len(" " + " ".join(tags)) for tags in by_id.values()) + len(MARK_LEGEND) + 1
-    assert (record["chars_without"], record["chars_with"]) == (without, with_marks)
+    shown = "".join(
+        f"\n  - {r['marks'][0]} [{categories[r['learning']['id']]}] {contents[r['learning']['id']]}" for r in result
+    )
+    legend = "\n  " + get_mark_legend(["[proposed]", "[accepted]", "[source-unknown]"])
+    assert (record["chars_without"], record["chars_with"]) == (without, len(shown) - len(result) + len(legend))
     assert record["limit"] == 5 and record["context_chars"] == len("upload retries per file")
 
 
@@ -102,9 +105,9 @@ async def test_a_failure_is_recorded_and_the_result_unchanged(tmp_path: Path, mo
     await _scenario(tmp_path / "on", monkeypatch, trial=True)
 
     def boom(*_args: object, **_kwargs: object) -> None:
-        raise RuntimeError("marks unavailable")
+        raise RuntimeError("the record could not be written")
 
-    monkeypatch.setattr(shadow_recall, "get_event_marks", boom)
+    monkeypatch.setattr(shadow_recall, "append_record", boom)
     result = await extension_hooks.recall_if_available(PROJECT, "upload retries per file", None, 5)
 
     assert _summary(result) == _summary(control)

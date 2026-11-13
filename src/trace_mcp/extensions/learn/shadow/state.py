@@ -24,6 +24,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, ValidationError
 
+from trace_mcp import project_identity as pident
 from trace_mcp.durability import ensure_durable_dir, fsync_dir
 from trace_mcp.project_identity import canonical_project_key
 
@@ -91,6 +92,14 @@ def load_state() -> ShadowState:
         return ShadowState.model_validate_json(raw)
     except ValidationError as exc:
         raise ShadowStateError(f"{path} is not a valid shadow state file: {exc.error_count()} error(s)") from exc
+
+
+def get_project_key(project: str) -> str:
+    """Return the canonical key for a project label: its registered key, else the label canonicalized."""
+    try:
+        return pident.key_for_label(project) or pident.canonical_project_key(project)
+    except Exception:
+        return pident.canonical_project_key(project)
 
 
 def is_active(project_key: str) -> bool:

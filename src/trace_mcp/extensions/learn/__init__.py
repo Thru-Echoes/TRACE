@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any, cast, get_args
 from trace_mcp import extension_status
 from trace_mcp import project_identity as pident
 from trace_mcp.extension_hooks import RecallResult, register_extract_hook, register_recall_hook
-from trace_mcp.extensions.learn import extraction, matching, store
+from trace_mcp.extensions.learn import extraction, learning_marks, matching, store
 from trace_mcp.extensions.learn.config import effective_learn_config, load_config
 from trace_mcp.extensions.learn.egress import egress_project
 from trace_mcp.extensions.learn.embeddings import get_embedding_provider
@@ -26,6 +26,7 @@ from trace_mcp.extensions.learn.models import KnowledgeStore, Learning, Learning
 from trace_mcp.extensions.learn.shadow import extract as shadow_extract
 from trace_mcp.extensions.learn.shadow import recall as shadow_recall
 from trace_mcp.extensions.learn.shadow import state as shadow_state
+from trace_mcp.provenance_marks import get_mark_legend
 
 if TYPE_CHECKING:
     from trace_mcp.extensions.learn.config import LearnConfig
@@ -411,9 +412,11 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                 results=outcome.results,
                 notice=recall_notice(outcome.summary, original_query=context),
             )
-        # Shadow period (ADR 008 D6): after the lock, never changing the result.
+        # After the lock: each learning's marks, read from its source event (ADR 008 D1).
+        marks = await learning_marks.get_results_marks(result.results, project=project, storage=storage)
+        learning_marks.set_display_marks(result.results, marks)
         await shadow_recall.record_recall(
-            project=project, results=list(result), storage=storage, limit=limit, context=context
+            project=project, results=list(result), storage=storage, limit=limit, context=context, tags=marks
         )
         return result
 
@@ -569,12 +572,17 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                     notices.append(bookkeeping_notice)
                 if notices:
                     payload["warnings"] = notices
-                response = json.dumps(payload)
-            # Shadow period (ADR 008 D6): after the lock, never changing the response.
+            # After the lock: each learning's marks, read from its source event (ADR 008 D1).
+            marks = await learning_marks.get_results_marks(results, project=project, storage=storage)
+            learning_marks.set_display_marks(results, marks)
+            shown = [r["marks"] for r in results]
+            legend = get_mark_legend([t for row in shown for t in row], any_unmarked=any(not row for row in shown))
+            if legend:
+                payload["marks_legend"] = legend
             await shadow_recall.record_recall(
-                project=project, results=results, storage=storage, limit=limit, context=context or ""
+                project=project, results=results, storage=storage, limit=limit, context=context or "", tags=marks
             )
-            return response
+            return json.dumps(payload)
         except pident.RegistryUnavailableError as exc:
             return _registry_unavailable_error(project, exc)
         except Exception as exc:

@@ -14,12 +14,13 @@ an invented quote.
 This module is core and imports nothing from ``trace_mcp.extensions`` (ADR 003).
 
 Exports:
-    MIN_FRAGMENT_CHARS, SOURCE_UNKNOWN_TAG, MARK_LEGEND
+    MIN_FRAGMENT_CHARS, SOURCE_UNKNOWN_TAG, MARK_MEANINGS, NO_MARK_MEANING, MARK_LEGEND
     BaseMark, QuoteStatus, ResolutionQuote, ResolutionTiming, WordsKind, QuotePosition
     WordsEntry, EventMarks
     normalize_quote, get_snippet_fragments, get_base_mark, get_turn_entries,
     get_quote_status, get_quote_position, get_quote_word_share,
-    get_resolution_quote, get_resolution_timing, get_event_marks, is_human_resolution
+    get_resolution_quote, get_resolution_timing, get_event_marks, is_human_resolution,
+    get_mark_legend
 
 Side effects: none. Every function is pure.
 """
@@ -28,7 +29,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -39,11 +40,18 @@ from trace_mcp.tools.session_tools import _is_explicit_absence
 
 MIN_FRAGMENT_CHARS = 8
 SOURCE_UNKNOWN_TAG = "[source-unknown]"
-MARK_LEGEND = (
-    "Marks: [accepted] a person accepted it; [proposed] an AI proposal no person resolved "
-    "(a suggestion, not a rule); [rejected] a person rejected it; [ai-resolved] resolved by an AI, "
-    "not a person; [ai-note] an AI's own note; [source-unknown] the source event could not be found."
-)
+# What each tag a session is shown means, in display order: the base marks, then the tag for a
+# learning whose source event cannot be found.
+MARK_MEANINGS: dict[str, str] = {
+    "[accepted]": "a person accepted it",
+    "[proposed]": "an AI proposal no person resolved (a suggestion, not a rule)",
+    "[rejected]": "a person rejected it",
+    "[ai-resolved]": "resolved by an AI, not a person",
+    "[ai-note]": "an AI's own note",
+    SOURCE_UNKNOWN_TAG: "the source event could not be found",
+}
+NO_MARK_MEANING = "No mark: a record that is neither a decision nor an AI's note."
+MARK_LEGEND = "Marks: " + "; ".join(f"{tag} {meaning}" for tag, meaning in MARK_MEANINGS.items()) + "."
 
 BaseMark = Literal["accepted", "proposed", "rejected", "ai-resolved", "ai-note"]
 QuoteStatus = Literal["verified", "not_found", "absent", "absence_marker", "too_short", "unchecked"]
@@ -103,6 +111,18 @@ class EventMarks(BaseModel):
         elif self.resolution == "absent":
             out.append("[resolution-unquoted]")
         return out
+
+
+def get_mark_legend(tags: Iterable[str], *, any_unmarked: bool = False) -> str:
+    """Return one line giving the meaning of the tags present, in table order; empty when there is nothing to say.
+
+    Only tags in ``MARK_MEANINGS`` are explained. ``any_unmarked`` adds what an
+    item shown with no mark is.
+    """
+    present = set(tags)
+    parts = [f"{tag} {meaning}" for tag, meaning in MARK_MEANINGS.items() if tag in present]
+    pieces = (["Marks: " + "; ".join(parts) + "."] if parts else []) + ([NO_MARK_MEANING] if any_unmarked else [])
+    return " ".join(pieces)
 
 
 def _utc(ts: datetime) -> datetime:
