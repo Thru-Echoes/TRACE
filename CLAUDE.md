@@ -22,7 +22,7 @@ uv build && uv run pytest tests/test_packaging_artifacts.py   # Verify the shipp
 trace-mcp identity check            # Report project-identity drift (non-zero exit on findings)
 trace-mcp doctor [DIR] [--live]     # Report deployed-state drift for one project (non-zero exit on findings)
 trace-mcp fleet-check [ROOTS...]    # Same check across every TRACE project under the given roots
-trace-mcp shadow status             # Provenance-marks shadow period: state and per-project counts (ADR 008)
+trace-mcp shadow status             # Provenance marks: capture-period state and per-project counts (ADR 008)
 ```
 
 Two console scripts ship with the package: `trace-mcp` (the MCP server) and

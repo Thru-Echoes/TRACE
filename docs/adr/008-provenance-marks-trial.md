@@ -1,12 +1,13 @@
-# ADR 008: Provenance marks — a shadow comparison period
+# ADR 008: Provenance marks
 
-**Status:** Accepted
+**Status:** Accepted; revised 2026-11-13 (marks are shown to sessions and in exports; the
+nearest-50 comparison moved from session end to an offline replay)
 **Date:** 2026-11-12
 **Context:** TRACE stores what an AI session writes without recording whether a
 person stands behind it, and later sessions read it back as project knowledge.
 The learn extractor sends every event of a session to the model, including
 decisions still in the `proposed` state, and the learnings it writes carry no
-trace of that disposition. Recall prints only the category. One observed
+trace of that disposition. Recall printed only the category. One observed
 failure: a learning extracted from an unresolved AI proposal, reworded by the
 extraction model as a directive, was shown to a later session under "Related
 learnings (review before proceeding)" within an hour of being written, with
@@ -14,14 +15,23 @@ nothing indicating it was an unresolved proposal.
 
 ## Summary
 
-Add *marks* that say where an event or a learning came from, and run a period
-in which today's behaviour (the **Live** arm) and the marked behaviour (the
-**Marked** arm) are computed on the same sessions and compared. No session sees
-the Marked arm during the period. A read-only report and a review sheet then
-decide, part by part, whether anything becomes live. Making a part live is a
-separate change with its own review.
+Add *marks* that say where an event or a learning came from, computed from the
+record and never stored, and show them wherever TRACE shows a recalled learning
+or exports a record. A learning is context for the session that reads it, with
+the mark of the event it came from; it is not an instruction.
 
-The period depends on one core change that ships first and stands on its own:
+Three things run beside that:
+
+- **Capture of the person's words.** While a capture period is on, two hooks
+  save the person's typed prompts and question-dialog answers on the machine, so
+  a session's quote of the person can be checked against what the person typed.
+- **A read-only report and review sheet** over the session records, the stored
+  learnings, the recall records and the captured words.
+- **An offline replay** that answers one cost question on past sessions:
+  whether sending the 50 stored learnings nearest to a session, instead of the
+  whole store, changes what extraction produces.
+
+The marks depend on one core change that shipped first and stands on its own:
 a resolved decision records when it was resolved (`resolved_at`) and, when the
 resolving session supplies them, the person's words that resolved it
 (`resolution_snippet`); specification §3.6, wire version 0.5.2.
@@ -63,8 +73,18 @@ Add-on marks:
 | Human resolution whose `resolution_snippet` is checkable and not found | `[resolution-not-found]` |
 | Human resolution recorded with no `resolution_snippet` | `[resolution-unquoted]` |
 
-A learning takes the marks of its source event. A learning whose source event
-cannot be found is marked `[source-unknown]`.
+A learning takes the marks of its source event, read from the session record
+each time the learning is recalled. A learning with no recorded source, or
+whose source session or event cannot be read, is kept and marked
+`[source-unknown]`. The extractor records a source event id only when it names
+an event of the session being extracted; an id the model omitted, malformed or
+invented is not recorded.
+
+*Known gap.* A contribution, a state change and a tool call have no base mark,
+so a learning extracted from an AI-written contribution record is shown with no
+mark. On one machine's records about a fifth of the learnings recalled on
+decision proposals came from such records. The legend says what no mark means
+(D9); whether those records need a mark of their own is open.
 
 **Quote check.** No model is used. Both sides are normalized (Unicode NFC, case
 folding, whitespace runs collapsed). A snippet is split at ellipses (`...`,
@@ -132,8 +152,8 @@ the person's own message — for a case that is rare.
 with no import from `extensions/` (ADR 003).
 
 *Rejected:* full-phrase marks ("Accepted by a person"). Longer at every recall
-and harder to count mechanically; display wording is decided after the period
-(D9).
+and harder to count mechanically. The meaning of each tag in use is given once
+per block (D9).
 
 ### D2. Marks are never stored; the record holds what they are computed from
 
@@ -146,7 +166,7 @@ A mark is not written onto an event or a learning.
   proposal time and — from wire version 0.5.2 — the resolution time and the
   resolution quote are fields of the event. A stored label would be a second
   copy that can disagree.
-- **The period changes no session record.**
+- **Showing a mark changes no session record.**
 
 `get_event_marks` is called whenever a mark is needed, against the current
 record, and takes an optional *as of* time. With both times in the record, a
@@ -157,8 +177,9 @@ now and what it was when the learning was written. A decision resolved before
 about it is answered with the current mark and flagged as unknown, and its
 resolution quote status is `unknown`. Nothing is backfilled.
 
-Where a mark is recorded in a shadow log (D5, D6), it is recorded with its
-time, as an observation of what would have been shown then.
+Where a mark is recorded in a log (the recall record, D6; a replay record,
+D5), it is recorded with its time, as an observation of what the record said
+then.
 
 *Rejected:* a `marks` field on every event (stale on resolution, changes the
 live record); a shadow append at every event write (a side effect on every
@@ -230,7 +251,11 @@ the machine, including projects that do not use TRACE.
 every kind of input, but its format is undocumented and can change without
 notice, and the host deletes transcripts on its own schedule.
 
-### D4. Started and stopped explicitly, with reminders; fails open
+### D4. The capture period: started and stopped explicitly; fails open
+
+The capture period governs the two things that are only worth their cost while
+someone is going to read the report: the words the hooks save (D3) and the
+recall record (D6). Marks at recall and in exports do not depend on it.
 
 - `trace-mcp shadow start` begins the period for every project and records the
   start time in `~/.trace/shadow/STATE.json`. `trace-mcp shadow stop` ends it.
@@ -238,59 +263,59 @@ notice, and the host deletes transcripts on its own schedule.
 - `trace-mcp shadow status` prints the start date, days elapsed and per-project
   counts. `trace-mcp shadow exclude <key>` and `include <key>` leave one project
   out or bring it back.
-- **Reminders.** From day 30 on, the `SessionStart` hook prints one line in
-  every enrolled project, at most once per day across the machine: the period's
-  start date and day count, and an instruction to tell the user to run the
-  report and then `trace-mcp shadow stop`. The hook keeps its own bookkeeping in
-  a separate file and never writes `STATE.json`, so a reminder cannot undo a
-  stop.
-- Every shadow step runs after the live step it shadows, inside its own
-  exception boundary and under a time limit. A shadow failure never changes or
-  delays-to-failure a live result; it is appended to
-  `~/.trace/shadow/<project-key>/errors.jsonl`.
+- **Reminder.** From day 30 on, the `SessionStart` hook prints one line in every
+  enrolled project, at most once per day across the machine: that the person's
+  typed words have been saved since the start date, and an instruction to tell
+  the user to run the report. The hook keeps its own bookkeeping in a separate
+  file and never writes `STATE.json`, so a reminder cannot undo a stop.
+- Recording a recall runs after the recall, inside its own exception boundary
+  and under a time limit. A failure never changes or fails a recall; it is
+  appended to `~/.trace/shadow/<project-key>/errors.jsonl`.
 - An unreadable `STATE.json` means "not running" to the server and the hooks,
   and is reported by `trace-mcp shadow status`.
-- Servers launched from a pinned or containerized TRACE build are outside the
-  period unless that build is moved on purpose.
 
-### D5. Shadow extraction at session end: nearest 50, proposals kept as proposals
+### D5. Extraction: one call at session end; nearest-50 tested by offline replay
 
-After the live extraction finishes and its lock is released, the shadow
-extractor runs on the same session with two differences:
+**At session end** the extractor makes one model call, as before, with two
+changes:
 
-1. **Nearest-50 deduplication.** Instead of the whole store, the prompt carries
-   the 50 stored learnings most similar to the session's events, ranked with
-   the store's own embedding backend (the most recent 50 when no embedding
-   backend is available; all of them when the store holds 50 or fewer). The
-   code-side duplicate check — token overlap (Jaccard) at
-   `TRACE_DEDUP_THRESHOLD`, default 0.85 — still runs against the whole shadow
-   store.
-2. **Proposal wording.** One added instruction: a learning whose source is a
-   decision in the `proposed` state is worded as a proposal, not as a rule or
-   an instruction.
+1. **Proposal wording.** Every extraction prompt ends with one instruction: a
+   learning whose source is a decision in the `proposed` state is worded as a
+   proposal, not as a rule or an instruction.
+2. **Source ids.** A source event id is recorded only when it names an event of
+   the session (D1).
 
-Everything else in the prompt is shared with the live extractor through one
-prompt builder, and both arms make their model call through one function, so
-the arms cannot drift apart and there is one registered egress site. The shadow
-call is attested separately (`purpose="shadow-extraction"`). Under
-`TRACE_LOCAL_ONLY`, or with cloud extraction off, the shadow step uses the
-rule-based extractor and the record says so.
+**The nearest-50 question** is answered off-session. Extraction sends every
+stored learning with a session's events so the model can avoid restating them.
+Over 763 past session ends that block had a median of 62,365 characters (90th
+percentile 145,871), against 3,493 for the events. `trace-mcp shadow replay
+--project KEY [--limit N] [--from D] [--to D] [--session ID]` extracts each
+chosen ended session twice, on the same frozen events and the same snapshot of
+the stored learnings as they stood before that session was extracted:
 
-Shadow learnings go to a separate shadow store under `~/.trace/shadow/stores/`.
-It is seeded once per project, at the first shadow run, as a copy of the live
-store: seeded entries keep their live ids (they are the same learnings), and
-learnings the shadow arm creates take ids from the shadow store's own counter
-in a separate `slrn_` namespace. The live store's counter is never read for
-writing, so no live id is consumed or reused (INV-12). Without the seed,
-nearest-50 would deduplicate against an empty store and the comparison would
-measure the seed, not the method.
+- the **whole** arm sends every learning of the snapshot (the method in use);
+- the **nearest** arm sends the 50 learnings most similar to the session's
+  events, ranked with the store's own embedding backend (the most recent 50
+  when no embedding backend is available; all of them when the snapshot holds
+  50 or fewer).
 
-For both calls the step records prompt tokens, completion tokens and
-wall-clock seconds from the provider's usage fields, the size of the
-existing-learnings block, each new learning's marks as of extraction, and each
-new learning's similarity to the closest learning already in that arm's store.
-Recording the live call's usage reads a response the live path already
-receives; it changes nothing a session sees.
+Both arms build their prompt with the extractor's prompt builder, call the
+model through its one registered egress site under their own attested purposes
+(`replay-extraction-whole`, `replay-extraction-nearest`), and apply the
+extractor's code-side duplicate check (token overlap at `TRACE_DEDUP_THRESHOLD`,
+default 0.85) against the whole snapshot. Neither arm writes to a knowledge
+store, so no learning id is consumed. Each replay appends one record to
+`~/.trace/shadow/<project-key>/replay.jsonl`: both arms' prompt tokens,
+completion tokens and seconds, the size of the existing-learnings block, what
+each arm would have added (its text, its marks as of the session's end, its
+similarity to the closest stored learning), and how the nearest arm's learnings
+were chosen. A session is replayed once; a replay that fails is recorded in
+`errors.jsonl` and the run goes on. Replay needs cloud extraction to be on for
+the project and says so when it is not.
+
+The snapshot is the store as it is now, less the learnings that came from the
+session and those created at or after its end. A learning forgotten since then
+is not restored, so the snapshot is a close reconstruction, not an archive.
 
 **Duplicates are measured, not cut.** Token overlap at 0.85 removes only
 near-copies. Across 14 stores, 110 of 2,695 learnings had an earlier learning
@@ -301,11 +326,10 @@ different content; of five at 0.85–0.90, four were, one of them a correction
 replacing the earlier learning. The stores also hold vectors from three
 embedding models, so one cutoff would mean different things in different
 stores. Dropping on similarity would discard information no person reviewed.
-The period records the similarity instead, so the report can show per arm how
-many new learnings restate an existing one (measure 9) — the direct test of
-whether sending 50 learnings instead of the whole store lets more restatements
-through. The hand reading is five pairs per band from one store, and is
-stated as that.
+The replay records the similarity instead, so the report can show per arm how
+many new learnings restate an existing one: the direct test of whether sending
+50 learnings instead of the whole store lets more restatements through. The
+hand reading is five pairs per band from one store, and is stated as that.
 
 **Basis for N=50.** A local proxy over 14 knowledge stores (2,261 learnings
 written at past session ends) ranked each store's earlier learnings by
@@ -317,38 +341,45 @@ whether each new learning's closest earlier learning was in the top N:
 | Included | 1617 | 1874 | 1984 | 2106 | 2211 |
 | of 2261 | 72% | 83% | 88% | 93% | 98% |
 
-The existing-learnings block was the larger part of the input: over 763 past
-session ends, its median was 62,365 characters (90th percentile 145,871),
-against 3,493 for the events; at N=50 it was 17,940. N=50 removed a median 64%
-of input characters per call. The proxy is optimistic (the real ranking query
-is the events, not the session's own output). The period measures the effect
-directly (measure 3).
+At N=50 the block's median was 17,940 characters, a median 64% fewer input
+characters per call. The proxy is optimistic (the real ranking query is the
+events, not the session's own output). The replay measures the effect directly.
 
 *Rejected:* N=20. Its proxy coverage was 83%, and its earlier recommendation
 rested on round numbers rather than a measurement.
 
-### D6. Shadow recall
+*Rejected:* running the nearest-50 extraction as a second model call at every
+session end for a month, writing to a separate store. It made every session
+end wait for a call whose only purpose was a comparison, the two arms' stores
+diverged from the first session on so later sessions were not compared on
+equal inputs, and it needed a second store with its own id space. A replay
+gives both arms identical inputs and costs nothing until someone asks.
 
-At each recall (`trace_start_session` with recall, the decision-proposal
-warning, `trace_learn_recall`), the live result is returned unchanged. The step
-appends to `~/.trace/shadow/<project-key>/recall.jsonl`: the recalled ids, each
-item's marks, and the length in characters of the rendered items without marks
-and with marks plus the D9 legend.
+### D6. Recall shows marks, and is recorded while a capture period runs
+
+At each recall (`trace_start_session` with recall, the decision-proposal block,
+`trace_learn_recall`) every result carries the mark of its source event (D9).
+While a capture period runs for the project, the recall also appends to
+`~/.trace/shadow/<project-key>/recall.jsonl`: the recalled ids, every tag of
+each item's source event, and the length in characters of the rendered items
+without marks and as shown.
 
 ### D7. Report and review sheet: read-only CLI, no MCP tool
 
 `trace-mcp shadow report [--from DATE] [--to DATE] [--project KEY] [--json]
-[--csv PATH]` reads the shadow directory and the session records, writes
-nothing except the optional CSV, and adds no MCP tool. Counts are printed with
+[--csv PATH]` reads the shadow directory, the live knowledge stores and the
+session records, writes nothing except the optional CSV, and adds no MCP tool. Counts are printed with
 their denominators, per project and in total:
 
-1. Learnings by mark as of extraction, per arm.
-2. Extraction cost per session end, per arm: prompt tokens, completion tokens,
+1. Stored learnings written in the range, by the current mark of their source;
+   how many were written from a still-proposed decision, and how many of those
+   have been resolved since.
+2. Replay cost per replayed session, per arm: prompt tokens, completion tokens,
    seconds.
-3. Learnings made by one arm and not the other. Within one session end, a live
-   and a shadow learning are the same when they share a source event, or failing
-   that when their token overlap is at least 0.5.
-4. Recall: calls, items by mark, characters with and without marks.
+3. Replay: learnings made by one arm and not the other. Within one replay, a
+   whole-arm and a nearest-arm learning are the same when they share a source
+   event, or failing that when their token overlap is at least 0.5.
+4. Recall: calls, items by mark, characters as shown and without marks.
 5. Quote check: verified, not found, absent, absence marker, too short,
    unchecked; verified quotes split by where they were found (the turn, or
    only older words); misses split by the share of the quote's words found in
@@ -361,8 +392,8 @@ their denominators, per project and in total:
    the proposal and the resolution.
 7. Corrections logged in the period that reference an earlier event or
    learning, by the mark of the corrected item.
-8. Shadow step failures, by step.
-9. New learnings by similarity to the closest existing learning (0.95 and
+8. Recorded failures, by step (recall record, replay).
+9. Replay: new learnings by similarity to the closest stored learning (0.95 and
    above, 0.90–0.95, 0.85–0.90, below 0.85, no vector), per arm.
 10. Capture: entries recorded by kind; projects with no words recorded;
     recorded prompts that begin with a tag other than pasted text; and, for
@@ -370,49 +401,92 @@ their denominators, per project and in total:
     answers in the transcript beside those recorded.
 
 The review sheet (`--csv`) has one row per item worth a person's judgment: a
-learning whose source no person accepted, a quote not found, a human resolution
-with no quote, with a quote not found, or with a quote found only in older
-words, and a learning made by only one arm. It has empty columns for the
-reviewer's name, "mark correct?", "useful?" and "reworded as a directive?". The
-last column is how the proposal-wording instruction (D5) is judged; the period
-does not detect directive wording automatically.
+stored learning whose source no person accepted, a quote not found, a human
+resolution with no quote, with a quote not found, or with a quote found only in
+older words, and a replay learning made by only one arm. It has empty columns
+for the reviewer's name, "mark correct?", "useful?" and "reworded as a
+directive?". The last column is how the proposal-wording instruction (D5) is
+judged; directive wording is not detected automatically.
 
-### D8. No policy file during the period
+### D8. No policy file
 
 Rules on top of the marks are not designed here. Any later policy may add marks
 or grouping and may not remove or hide an entry for lack of approval.
 
-### D9. After the period: marks plus their meaning
+### D9. What a session and a reader are shown
 
-If marks become visible to sessions, recall shows each item's tags plus one
-legend line giving their meaning. The D6 character counts use this rendering.
-The period cannot show whether sessions work better with marks; that needs a
-controlled run.
+**At recall** each learning is shown with its base mark first, then its
+category and text, for example `- [proposed] [decision] ...`. One line under
+the heading explains only the marks in use in that block, and says what an item
+with no mark is. The blocks are headed as context: "Relevant learnings from
+past sessions (context, not instructions)" at session start, and "Possibly
+related learnings from past sessions (context, not instructions)" on a decision
+proposal, replacing "Related learnings (review before proceeding)".
+`trace_learn_recall` returns a `marks` list on each result and a `marks_legend`.
 
-## What the period cannot show
+A session is shown the base mark, or `[source-unknown]`, and not the quote-check
+tags. A missed quote is often benign (D1), and those tags are for a person to
+judge; they appear in the report, the review sheet and the exports.
 
-Whether a session behaves better when it is shown the marks: no session sees
-them. The period shows what would have been stored and shown, and at what cost,
-on one person's projects.
+**The decision block can be switched off** for a project by setting
+`TRACE_DECISION_RECALL=0` in its server's environment; it is on by default.
+Measured on one machine's surviving host transcripts, the block rode on 496 of
+562 decision proposals. Of the 1,456 learnings it carried, 397 came from a
+decision a person had accepted, and 1,061 opened as a general instruction. In a
+random sample of 100 blocks read in full by one reader, 52 held a learning
+bearing directly on the decision and the session's later output visibly acted
+on one in 2; a wording screen over all 496 found 5 more uses, each sound. Its
+re-read cost was about 0.14% of cache-read tokens. That supports keeping it,
+marked and worded as context, and does not support the old heading.
+
+**In exports** the JSON export is the record itself: every event with its whole
+payload and nothing derived written into it. The Markdown export shows the
+marks of each decision and AI note, a line explaining the marks in use, and a
+closing table naming every event once; the PROV export carries them as a
+`trace:provenanceMark` literal on each event's node. The quote checks are
+included when the person's recorded words are available to the exporter.
+Anything derived travels beside the record, never instead of it.
+
+*Rejected:* withholding marks from sessions for a month while a comparison
+ran. The failure in the Context had already happened, and a period in which no
+session sees a mark cannot show whether marks help a session.
+
+*Rejected:* turning the decision block off by default. The measurement above
+found it cheap, mostly on topic and occasionally acted on to good effect; the
+harm was in the unmarked items and the heading, which marks and the new heading
+address.
+
+## What is not known
+
+Whether a session behaves better when it is shown the marks: that needs a
+controlled run with the marks on and off. Whether the marks are right: no
+person has yet read a sample of marked records and learnings, and they are not
+called accurate before that. Whether the decision block improves decisions: the
+transcripts show visible use only.
 
 ## Constraints
 
-- Registered invariants hold: INV-1 (no new session-write path), INV-2 (no
-  shadow step modifies a session record), INV-5 (the shadow call is attested;
-  one registered call site serves both arms), INV-12 (separate `slrn_` id
-  namespace; the live counter is never consumed), INV-14 (the state file is a
-  durable publisher), INV-4/INV-9 (shadow data keyed by canonical project key),
+- Registered invariants hold: INV-1 (no new session-write path), INV-2 (nothing
+  here modifies a session record), INV-5 (each replay call is attested; one
+  registered call site serves the extractor and both replay arms), INV-12 (the
+  replay writes to no knowledge store, so no learning id is consumed), INV-14
+  (the state file is a durable publisher), INV-4/INV-9 (shadow data keyed by
+  canonical project key),
   INV-11 (a freshly initialized project carries every shipped hook, each
   registered under one host event).
-- The period adds no MCP tool, lengthens no tool description, and adds no field
-  the calling model must write. The core change that precedes it adds one
-  optional argument and one sentence to `trace_resolve_decision`.
-- Shadow records are Pydantic v2 models; the state file is written atomically
-  and the logs are single-line appends; pyright clean.
+- No MCP tool is added, no tool description is lengthened, and no field is
+  added that the calling model must write. The core change that precedes this
+  adds one optional argument and one sentence to `trace_resolve_decision`.
+- Core imports nothing from the extension: the mark functions and the legend
+  are core, the formatters read a `marks` list the recall hook supplies, and
+  the exporters get the person's words through a hook an extension registers.
+- Records are Pydantic v2 models; the state file is written atomically and the
+  logs are single-line appends; pyright clean.
 - Tests run on session fixtures with made-up project names; the model call is
   the only mock.
 
 ## Review tier
 
 Tier 3 before merge: the change touches session-end extraction, the egress
-call site, and the hooks installed in every project.
+call site, what every session is shown at recall, and the hooks installed in
+every project.
