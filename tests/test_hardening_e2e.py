@@ -1764,6 +1764,6 @@ class TestScratchpadConfidence:
         section = _build_session_section(session)
 
         suffix = "[+260.0 game_score; 90% nominal interval [-30.0, +583.75]; n=8]"
-        assert f"- **[proposed]** Keep v3 provisionally (proposed_by=ai) {suffix}" in section
+        assert f"- **[proposed]** Keep v3 provisionally (evt_001; proposed_by=ai) {suffix}" in section
         assert f"- [ ] Keep v3 provisionally (`evt_001`) {suffix}" in section
-        assert "- **[proposed]** Deprioritize 10-K (proposed_by=ai)\n" in section
+        assert "- **[proposed]** Deprioritize 10-K (evt_002; proposed_by=ai)\n" in section
