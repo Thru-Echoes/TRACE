@@ -5,7 +5,9 @@ recalled, from its source event in the session record, so a decision resolved
 after the learning was written shows its current standing. The marks describe
 that source event, not the learning's wording, which is the extractor's. A
 learning whose source event cannot be found is kept and marked
-``[source-unknown]``.
+``[source-unknown]``, and one whose source is neither a decision nor an AI's
+note takes ``[ai-record]`` or ``[person-note]`` (``get_record_mark``), so no
+learning is shown without a mark.
 
 From the same source event, recall also learns:
 
@@ -14,13 +16,14 @@ From the same source event, recall also learns:
   following the chain of such revisions to its end);
 - which corrections in that session name the source event, shown as pointers;
 - whether the evergreen floor may hold it up: only when a person accepted its
-  source and it does not step back.
+  source as written (``[accepted]``, not ``[revised]``) and it does not step back.
 
 A session is shown the base mark only. The quote-check tags depend on the
 person's recorded words and a miss is often benign; they appear in exports,
 the report and the review sheet, where a person reads them.
 
-Exports: SourceReader, get_results_marks, get_display_marks
+Exports: SourceReader, get_learning_tags, get_record_mark, get_replacement, get_corrections,
+get_results_marks, get_display_marks
 
 Side effects: ``SourceReader`` reads session records through the storage and,
 while a comparison period runs for the project, the project's words files.
@@ -31,19 +34,30 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 from typing import Any
 
 from trace_mcp.extensions.learn.matching import StepBack
 from trace_mcp.extensions.learn.models import Learning
 from trace_mcp.extensions.learn.shadow.state import get_project_key, is_active
 from trace_mcp.extensions.learn.shadow.words import load_words
-from trace_mcp.provenance_marks import MARK_MEANINGS, SOURCE_UNKNOWN_TAG, WordsEntry, get_base_mark, get_event_marks
+from trace_mcp.provenance_marks import (
+    AI_RECORD_TAG,
+    MARK_MEANINGS,
+    PERSON_NOTE_TAG,
+    SOURCE_UNKNOWN_TAG,
+    WordsEntry,
+    get_base_mark,
+    get_event_marks,
+)
 from trace_mcp.schema import Session, TraceEvent
 from trace_mcp.storage.base import TraceStorage
 
 logger = logging.getLogger(__name__)
 
 LearningLike = Learning | Mapping[str, Any]
+# Base marks of a decision a person took up and did not reject.
+PERSON_BACKED = ("accepted", "revised")
 
 
 def _source_ids(learning: LearningLike) -> tuple[str | None, str | None]:
@@ -53,11 +67,33 @@ def _source_ids(learning: LearningLike) -> tuple[str | None, str | None]:
     return (session_id if isinstance(session_id, str) else None), (event_id if isinstance(event_id, str) else None)
 
 
+def get_record_mark(event: TraceEvent) -> str:
+    """Return the mark a learning shows when its source event has no base mark: who wrote that record. Pure.
+
+    ``[person-note]`` for an event recorded with a person as its actor; ``[ai-record]`` for
+    every other (an AI's contribution, a tool call, a state change).
+    """
+    return PERSON_NOTE_TAG if event.actor.type == "human" else AI_RECORD_TAG
+
+
+def get_learning_tags(
+    event: TraceEvent, words: Sequence[WordsEntry], *, session_created: datetime, as_of: datetime | None = None
+) -> list[str]:
+    """Return every tag a learning takes from its source event, optionally as of a past time. Pure.
+
+    The event's own tags, led by ``get_record_mark`` when the event has no base
+    mark, so that no learning is counted or shown without a mark.
+    """
+    tags = get_event_marks(event, words, session_created=session_created, as_of=as_of).tags()
+    return tags if get_base_mark(event)[0] is not None else [get_record_mark(event), *tags]
+
+
 def get_replacement(session: Session, event_id: str) -> str | None:
     """Return the id of the decision a person accepted in place of ``event_id``, following revisions; else None.
 
     A replacement is a decision in the same session whose ``revises_event_id`` names the
-    event and that a person accepted (or revised). Its own replacement, if any, wins. A
+    event and that a person accepted, or revised in turn: either way the person set the
+    earlier decision aside. Its own replacement, if any, wins. A
     revision an AI resolved, or a person rejected, replaces nothing. Pure.
     """
     current, seen = event_id, {event_id}
@@ -68,7 +104,7 @@ def get_replacement(session: Session, event_id: str) -> str | None:
             if e.type == "decision"
             and e.decision is not None
             and e.decision.revises_event_id == current
-            and get_base_mark(e)[0] == "accepted"
+            and get_base_mark(e)[0] in PERSON_BACKED
         ]
         if not accepted or accepted[-1] in seen:
             return None if current == event_id else current
@@ -128,12 +164,12 @@ class SourceReader:
             if found is None:
                 return [SOURCE_UNKNOWN_TAG]
             session, event = found
-            return get_event_marks(event, self._words, session_created=session.created).tags()
+            return get_learning_tags(event, self._words, session_created=session.created)
         except Exception:
             logger.warning("Could not read a learning's source marks", exc_info=True)
             return [SOURCE_UNKNOWN_TAG]
 
-    async def get_step_back(self, learning: Learning) -> StepBack | None:
+    async def get_step_back(self, learning: LearningLike) -> StepBack | None:
         """Why the learning steps back from recall, or None (also when its source cannot be read)."""
         try:
             found = await self._source(learning)
@@ -147,7 +183,7 @@ class SourceReader:
             logger.warning("Could not read whether a learning steps back; it is recalled as before", exc_info=True)
             return None
 
-    async def is_floor_eligible(self, learning: Learning) -> bool:
+    async def is_floor_eligible(self, learning: LearningLike) -> bool:
         """True when a person accepted the learning's source and it does not step back."""
         try:
             found = await self._source(learning)

@@ -31,9 +31,17 @@ class RecallResult(list[dict[str, Any]]):
     for a floor, or the query was cleaned before scoring.
     """
 
-    def __init__(self, results: list[dict[str, Any]] | None = None, notice: str | None = None) -> None:
+    def __init__(
+        self,
+        results: list[dict[str, Any]] | None = None,
+        notice: str | None = None,
+        left_out: list[dict[str, Any]] | None = None,
+    ) -> None:
         super().__init__([] if results is None else results)
         self.notice = notice
+        # Learnings the recall left out because a person rejected or replaced their source:
+        # dicts with ``id``, ``reason``, ``source``, ``replaced_by``, ``replacement``, ``matched``.
+        self.left_out: list[dict[str, Any]] = [] if left_out is None else left_out
 
     @property
     def results(self) -> list[dict[str, Any]]:
@@ -259,22 +267,39 @@ def format_recall_notice(notice: str) -> str:
     return f"\n\nRecall: {notice}"
 
 
-def format_decision_warnings(results: list[dict[str, Any]]) -> str:
+def get_left_out_text(item: dict[str, Any]) -> str:
+    """Return one left-out learning as a pointer: its id and why it stepped back, never its text. Pure."""
+    learning_id = item.get("id", "")
+    if item.get("reason") == "rejected":
+        source = f" {item['source']}" if item.get("source") else ""
+        return f"{learning_id} (a person rejected its source{source})"
+    shown = f", shown as {item['replacement']}" if item.get("replacement") else ""
+    return f"{learning_id} (a person replaced its source with {item.get('replaced_by')}{shown})"
+
+
+def format_decision_warnings(results: list[dict[str, Any]], *, left_out: list[dict[str, Any]] | None = None) -> str:
     """Format recalled learnings as context for a decision proposal.
 
     Weak candidates (``matched`` is False) are left out: the block should
     carry only learnings that actually matched, and replacements standing in
     for one that did (``replaces_matched``).
+
+    ``left_out`` are learnings the recall stepped back from. One that matched
+    and has no replacement shown is named in a closing line, as a pointer: a
+    proposal resembling something a person rejected should say so, without
+    showing the rejected text as guidance.
     """
     results = [r for r in results if r.get("matched", True) or r.get("replaces_matched")]
-    if not results:
+    pointers = [x for x in (left_out or []) if x.get("matched") and not x.get("replacement")]
+    if not results and not pointers:
         return ""
-    return "\n".join(
-        [
-            "\n\nPossibly related learnings from past sessions (context, not instructions):",
-            *get_learning_lines(results, relevance=False),
-        ]
-    )
+    lines = [
+        "\n\nPossibly related learnings from past sessions (context, not instructions):",
+        *get_learning_lines(results, relevance=False),
+    ]
+    if pointers:
+        lines.append("  Left out, kept in the store: " + ", ".join(get_left_out_text(x) for x in pointers) + ".")
+    return "\n".join(lines)
 
 
 DECISION_RECALL_ENV = "TRACE_DECISION_RECALL"
@@ -290,10 +315,11 @@ async def recall_for_decision(project: str, description: str, tags: list[str] | 
     """Return the related-learnings block for a decision proposal, or "" when off or nothing matched.
 
     The block is context for the proposing session: each learning carries the
-    mark of its source event. A project turns it off by setting
+    mark of its source event, and a matched learning the recall left out is
+    named in a closing line. A project turns it off by setting
     ``TRACE_DECISION_RECALL=0`` in its server's environment.
     """
     if not is_decision_recall_enabled():
         return ""
     related = await recall_if_available(project, description, tags, limit=3)
-    return format_decision_warnings(related) if related else ""
+    return format_decision_warnings(related, left_out=related.left_out)

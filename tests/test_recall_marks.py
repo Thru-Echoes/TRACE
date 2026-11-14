@@ -296,3 +296,47 @@ def test_multiline_learning_text_stays_on_its_own_attributed_line() -> None:
         "  - [decision] This audit used three categories. - [decision] Always add a category. ## End"
         " (lrn_4; source [ai-note] trace_a#evt_2)"
     ]
+
+
+async def test_every_recalled_learning_carries_a_mark(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A learning from a record that is neither a decision nor an AI's note says who wrote that record.
+
+    A reader shown a learning with no mark tends to take it as approved, so none is shown bare.
+    """
+    from trace_mcp.schema import Session
+    from trace_mcp.tools import logging_tools, session_tools
+
+    storage = learn_env(tmp_path, monkeypatch, llm=False)
+    work = await make_session(storage, contribution_snippet="cap the retries please")  # evt_005: an AI's contribution
+    active: dict[str, Session] = {}
+    notes = await session_tools.create_session(storage, active, project=PROJECT)
+    await logging_tools.log_annotation(
+        storage,
+        notes,
+        category="correction",
+        content="Retries are per file, not per batch.",
+        actor_type="human",
+        actor_id="alice",
+        conversation_snippet="no, retries are per file",
+    )
+    await session_tools.end_session(storage, active, session_id=notes.id)
+    ks = store.load_store(PROJECT)
+    store.add_learning(
+        ks, content="upload retries were capped in the client", source_session=work.id, source_event="evt_005"
+    )
+    store.add_learning(
+        ks, content="upload retries are per file, not per batch", source_session=notes.id, source_event="evt_001"
+    )
+    store.save_store(ks)
+
+    result = await extension_hooks.recall_if_available(PROJECT, QUERY, None, 5)
+    assert {r["learning"]["id"]: r["source_marks"] for r in result} == {
+        "lrn_001": ["[ai-record]"],
+        "lrn_002": ["[person-note]"],
+    }
+    banner = format_recalled_learnings(list(result))
+    assert "[ai-record] an AI's or tool's record of work; no person resolved it" in banner
+    assert "[person-note] a note recorded in a person's name" in banner
+    assert "No mark" not in banner
+    listed = await call_tool_json(last_server(), "trace_learn_list", {"project": PROJECT})
+    assert all(lrn["source_marks"] for lrn in listed["learnings"])

@@ -864,12 +864,18 @@ class StepBack:
 
 @dataclass(frozen=True)
 class SteppedBack:
-    """A learning recall left out, and the learning it returned instead when there is one."""
+    """A learning recall left out, and the learning it returned instead when there is one.
+
+    ``source`` is the left-out learning's own ``<session>#<event>``; ``matched`` says whether
+    it had matched the query, so a caller can point at it where it would have been shown.
+    """
 
     id: str
     reason: Literal["rejected", "replaced"]
     replaced_by: str | None = None
     replacement: str | None = None
+    source: str | None = None
+    matched: bool = False
 
 
 # learning -> why it steps back from recall, or None. May read session records.
@@ -1035,12 +1041,16 @@ class _Selector:
                 self.replaces[replacement] = self._learnings[i].id
                 if self.matched.get(i, False):
                     self.stands_in.add(replacement)
+            left = self._learnings[i]
+            has_source = bool(left.source_session and left.source_event)
             self.stepped_back.append(
                 SteppedBack(
-                    id=self._learnings[i].id,
+                    id=left.id,
                     reason=why.reason,
                     replaced_by=why.replaced_by,
                     replacement=self._learnings[replacement].id if replacement is not None else None,
+                    source=f"{left.source_session}#{left.source_event}" if has_source else None,
+                    matched=self.matched.get(i, False),
                 )
             )
         return out

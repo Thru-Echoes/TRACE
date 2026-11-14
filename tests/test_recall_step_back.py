@@ -131,7 +131,7 @@ async def test_recall_leaves_out_what_a_person_rejected_or_replaced_and_returns_
     assert shown["lrn_004"]["source_corrected_by"] == [f"{sid}#evt_005"]
     assert "source_corrected_by" not in shown["lrn_003"]
     assert result.notice is not None
-    assert "lrn_001 (a person rejected its source)" in result.notice
+    assert f"lrn_001 (a person rejected its source {sid}#evt_001)" in result.notice
     assert f"lrn_002 (a person replaced its source with {sid}#evt_003, shown as lrn_003)" in result.notice
     assert f"lrn_005 (a person replaced its source with {sid}#evt_007)" in result.notice
     assert "kept in the store" in result.notice
@@ -156,9 +156,30 @@ async def test_the_recall_tool_reports_what_it_left_out(tmp_path: Path, monkeypa
     )
     assert {r["learning"]["id"] for r in payload["results"]}.isdisjoint({"lrn_001", "lrn_002", "lrn_005"})
     assert payload["stepped_back"] == [
-        {"id": "lrn_001", "reason": "rejected", "replaced_by": None, "replacement": None},
-        {"id": "lrn_002", "reason": "replaced", "replaced_by": f"{sid}#evt_003", "replacement": "lrn_003"},
-        {"id": "lrn_005", "reason": "replaced", "replaced_by": f"{sid}#evt_007", "replacement": None},
+        {
+            "id": "lrn_001",
+            "reason": "rejected",
+            "replaced_by": None,
+            "replacement": None,
+            "source": f"{sid}#evt_001",
+            "matched": True,
+        },
+        {
+            "id": "lrn_002",
+            "reason": "replaced",
+            "replaced_by": f"{sid}#evt_003",
+            "replacement": "lrn_003",
+            "source": f"{sid}#evt_002",
+            "matched": True,
+        },
+        {
+            "id": "lrn_005",
+            "reason": "replaced",
+            "replaced_by": f"{sid}#evt_007",
+            "replacement": None,
+            "source": f"{sid}#evt_006",
+            "matched": True,
+        },
     ]
 
 
@@ -222,7 +243,14 @@ async def test_a_replacement_the_backend_did_not_score_is_not_shown_and_recall_s
     )
     assert outcome.results == []
     assert outcome.summary.stepped_back == (
-        matching.SteppedBack(id="lrn_1", reason="replaced", replaced_by="trace_a#evt_2", replacement=None),
+        matching.SteppedBack(
+            id="lrn_1",
+            reason="replaced",
+            replaced_by="trace_a#evt_2",
+            replacement=None,
+            source="trace_a#evt_1",
+            matched=True,
+        ),
     )
 
 
@@ -287,3 +315,83 @@ async def test_the_best_ranked_eligible_learning_from_the_replacement_is_chosen(
     )
     assert [(r["learning"]["id"], r.get("replaces")) for r in outcome.results] == [("lrn_3", "lrn_1")]
     assert outcome.summary.stepped_back[0].replacement == "lrn_3"
+
+
+async def test_the_decision_block_points_at_a_matched_learning_it_left_out(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """At decision time a prior rejection is the context that matters most: it is named, its text is not shown."""
+    _storage, sid = await _store(tmp_path, monkeypatch)
+    monkeypatch.delenv("TRACE_DECISION_RECALL", raising=False)
+    block = await extension_hooks.recall_for_decision(PROJECT, "upload retries forever", None)
+    assert "Possibly related learnings from past sessions (context, not instructions):" in block
+    assert f"lrn_001 (a person rejected its source {sid}#evt_001)" in block
+    assert "  Left out, kept in the store: " in block
+    assert "upload retries forever were proposed" not in block
+    # A replacement that is shown already names what it replaces; it is not listed again.
+    assert "lrn_002 (" not in block
+
+
+async def test_a_decision_block_can_hold_only_the_pointer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _storage, sid = await _store(tmp_path, monkeypatch)
+    monkeypatch.delenv("TRACE_DECISION_RECALL", raising=False)
+    block = await extension_hooks.recall_for_decision(PROJECT, "forever", None)
+    assert block == (
+        "\n\nPossibly related learnings from past sessions (context, not instructions):"
+        f"\n  Left out, kept in the store: lrn_001 (a person rejected its source {sid}#evt_001)."
+    )
+
+
+async def test_the_list_says_which_learnings_step_back_from_recall(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _storage, sid = await _store(tmp_path, monkeypatch)
+    listed = await call_tool_json(last_server(), "trace_learn_list", {"project": PROJECT})
+    by_id = {lrn["id"]: lrn for lrn in listed["learnings"]}
+    assert by_id["lrn_001"]["stepped_back"] == {"reason": "rejected", "replaced_by": None}
+    assert by_id["lrn_002"]["stepped_back"] == {"reason": "replaced", "replaced_by": f"{sid}#evt_003"}
+    assert "stepped_back" not in by_id["lrn_003"]
+    assert "stepped_back" not in by_id["lrn_006"]
+
+
+async def _revised_history(storage: JsonFileStorage) -> Session:
+    """evt_001 accepted; evt_002 revises it and a person resolved it as revised; evt_003 a person revised, alone."""
+    active: dict[str, Session] = {}
+    session = await session_tools.create_session(storage, active, project=PROJECT)
+    await _decide(storage, session, "Cap upload retries at five.", "accepted")
+    await _decide(storage, session, "Cap upload retries at three.", "revised", revises="evt_001")
+    await _decide(storage, session, "Upload retries back off for a minute.", "revised")
+    await session_tools.end_session(storage, active, session_id=session.id)
+    return await storage.get_session(session.id)
+
+
+async def test_a_learning_from_a_decision_a_person_revised_says_so_and_earns_no_floor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = learn_env(tmp_path, monkeypatch, llm=False)
+    session = await _revised_history(storage)
+    ks = store.load_store(PROJECT)
+    two_years_ago = datetime.now(UTC) - timedelta(days=730)
+    for content, event in (
+        ("upload retries are capped at five", "evt_001"),
+        ("upload retries are capped at three", "evt_002"),
+        ("upload retries back off for a minute", "evt_003"),
+    ):
+        lrn = store.add_learning(ks, content=content, source_session=session.id, source_event=event)
+        lrn.created, lrn.last_surfaced, lrn.recall_count = two_years_ago, two_years_ago, 5
+    for content in FILLER:
+        store.add_learning(ks, content=content)
+    store.save_store(ks)
+
+    payload = await call_tool_json(
+        last_server(), "trace_learn_recall", {"project": PROJECT, "context": QUERY, "limit": 10}
+    )
+    shown = _by_id(payload["results"])
+    # A revision a person revised still replaces what it revises.
+    assert "lrn_001" not in shown
+    assert shown["lrn_002"]["replaces"] == "lrn_001"
+    assert shown["lrn_002"]["source_marks"] == ["[revised]"]
+    assert shown["lrn_003"]["source_marks"] == ["[revised]"]
+    # Only a source a person accepted as written holds the evergreen floor.
+    assert shown["lrn_003"]["signals"]["decay"] == pytest.approx(0.25, abs=0.01)
+    assert "[revised] a person changed it, so its text may not be what they approved" in payload["source_marks_legend"]

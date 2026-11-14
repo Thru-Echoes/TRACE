@@ -14,8 +14,8 @@ an invented quote.
 This module is core and imports nothing from ``trace_mcp.extensions`` (ADR 003).
 
 Exports:
-    MIN_FRAGMENT_CHARS, SOURCE_UNKNOWN_TAG, MARK_MEANINGS, QUOTE_TAG_MEANINGS, NO_MARK_MEANING, MARK_LEGEND,
-    SOURCE_MARKS_LEAD
+    MIN_FRAGMENT_CHARS, SOURCE_UNKNOWN_TAG, AI_RECORD_TAG, PERSON_NOTE_TAG, MARK_MEANINGS, QUOTE_TAG_MEANINGS,
+    NO_MARK_MEANING, MARK_LEGEND, SOURCE_MARKS_LEAD
     BaseMark, QuoteStatus, ResolutionQuote, ResolutionTiming, WordsKind, QuotePosition
     WordsEntry, EventMarks
     normalize_quote, get_snippet_fragments, get_base_mark, get_turn_entries,
@@ -41,14 +41,24 @@ from trace_mcp.tools.session_tools import _is_explicit_absence
 
 MIN_FRAGMENT_CHARS = 8
 SOURCE_UNKNOWN_TAG = "[source-unknown]"
-# What each tag a session is shown means, in display order: the base marks, then the tag for a
-# learning whose source event cannot be found.
+# Shown on a learning whose source event has no base mark (a contribution, tool call or state
+# change, or an annotation recorded in a person's name), so that no learning reaches a session
+# bare: a reader shown an unmarked learning tends to take it as approved. Events themselves
+# keep no mark of this kind; an export shows their type and actor beside them.
+AI_RECORD_TAG = "[ai-record]"
+PERSON_NOTE_TAG = "[person-note]"
+# What each tag a session is shown means, in display order: the base marks, the two marks a
+# learning takes from a source with no base mark, then the tag for a learning whose source
+# event cannot be found.
 MARK_MEANINGS: dict[str, str] = {
     "[accepted]": "a person accepted it",
+    "[revised]": "a person changed it, so its text may not be what they approved",
     "[proposed]": "an AI proposal no person resolved (a suggestion, not a rule)",
     "[rejected]": "a person rejected it",
     "[ai-resolved]": "resolved by an AI, not a person",
     "[ai-note]": "an AI's own note",
+    AI_RECORD_TAG: "an AI's or tool's record of work; no person resolved it",
+    PERSON_NOTE_TAG: "a note recorded in a person's name",
     SOURCE_UNKNOWN_TAG: "the source event could not be found",
 }
 # What the quote-check tags mean. A person reads these in exports and the report; a session is
@@ -68,7 +78,7 @@ SOURCE_MARKS_LEAD = (
 )
 MARK_LEGEND = "Marks: " + "; ".join(f"{tag} {meaning}" for tag, meaning in MARK_MEANINGS.items()) + "."
 
-BaseMark = Literal["accepted", "proposed", "rejected", "ai-resolved", "ai-note"]
+BaseMark = Literal["accepted", "revised", "proposed", "rejected", "ai-resolved", "ai-note"]
 QuoteStatus = Literal["verified", "not_found", "absent", "absence_marker", "too_short", "unchecked"]
 ResolutionQuote = Literal[
     "verified", "not_found", "absent", "absence_marker", "too_short", "unchecked", "unknown", "not_applicable"
@@ -178,8 +188,12 @@ def get_base_mark(event: TraceEvent, *, as_of: datetime | None = None) -> tuple[
         resolver = decision.resolved_by
         if resolver is None or resolver.type != "human":
             mark: BaseMark = "ai-resolved"
-        elif decision.disposition in ("accepted", "revised"):
+        elif decision.disposition == "accepted":
             mark = "accepted"
+        elif decision.disposition == "revised":
+            # The person changed it. The description may be the proposal as first written,
+            # so it is never shown as something a person accepted.
+            mark = "revised"
         else:
             mark = "rejected"
         return mark, not (as_of is not None and decision.resolved_at is None)

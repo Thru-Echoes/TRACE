@@ -19,6 +19,7 @@ from trace_mcp import extension_status
 from trace_mcp import project_identity as pident
 from trace_mcp.extension_hooks import (
     RecallResult,
+    get_left_out_text,
     register_extract_hook,
     register_recall_hook,
     register_words_hook,
@@ -143,9 +144,8 @@ def recall_notice(summary: matching.RecallSummary, *, original_query: str) -> st
     if summary.query != original_query:
         parts.append(f"query cleaned to '{summary.query}'")
     if summary.stepped_back:
-        parts.append(
-            "left out " + ", ".join(_stepped_back_text(sb) for sb in summary.stepped_back) + "; all kept in the store"
-        )
+        left = ", ".join(get_left_out_text(dataclasses.asdict(sb)) for sb in summary.stepped_back)
+        parts.append(f"left out {left}; all kept in the store")
     return "; ".join(parts) or None
 
 
@@ -160,13 +160,6 @@ def _source_marks_legend(rows: list[dict[str, Any]]) -> str:
     return get_mark_legend(
         [tag for marks in shown for tag in marks], any_unmarked=any(not m for m in shown), lead=SOURCE_MARKS_LEAD
     )
-
-
-def _stepped_back_text(sb: matching.SteppedBack) -> str:
-    if sb.reason == "rejected":
-        return f"{sb.id} (a person rejected its source)"
-    shown = f", shown as {sb.replacement}" if sb.replacement else ""
-    return f"{sb.id} (a person replaced its source with {sb.replaced_by}{shown})"
 
 
 def register(mcp: MCPServer, storage: TraceStorage) -> None:
@@ -447,6 +440,7 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
             result = RecallResult(
                 results=outcome.results,
                 notice=recall_notice(outcome.summary, original_query=context),
+                left_out=[dataclasses.asdict(sb) for sb in outcome.summary.stepped_back],
             )
         # After the lock: each learning's source marks and corrections (ADR 008 D1, D10).
         marks = await reader.set_results_marks(result.results)
@@ -513,12 +507,6 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
         dropping them; pass ``threshold`` for an absolute cutoff on ``score``. The
         response reports ``matched``, ``scored``, ``floor`` and ``backend``, and a
         ``notice`` field explains an empty, small-store or cleaned-query recall.
-
-        Each learning carries ``source_marks``: who stood behind the event it was
-        drawn from, not its wording. A learning whose source a person rejected or
-        replaced is left out and listed in ``stepped_back``; a learning from the
-        replacement takes its place with ``replaces``, with its own score, even
-        below ``threshold`` (``replaces_matched`` when the one it replaces matched).
 
         Data flow: with the OpenAI embedding/LLM backend configured, the query
         text is sent to OpenAI to score matches. Set ``TRACE_LOCAL_ONLY=1`` to
@@ -758,6 +746,9 @@ def register(mcp: MCPServer, storage: TraceStorage) -> None:
                 lrn["source_marks"] = row["source_marks"]
                 if "source_corrected_by" in row:
                     lrn["source_corrected_by"] = row["source_corrected_by"]
+                # A learning recall leaves out is listed, and says so: the list is its history.
+                if (step := await reader.get_step_back(lrn)) is not None:
+                    lrn["stepped_back"] = {"reason": step.reason, "replaced_by": step.replaced_by}
             payload: dict[str, Any] = {"project": project, "learnings": results, "total": len(results)}
             if legend := _source_marks_legend(rows):
                 payload["source_marks_legend"] = legend

@@ -125,3 +125,29 @@ async def test_a_multiline_artifact_stays_on_its_contribution_line(
         "- Wrote the parser. (`parser.py - **[accepted]** invented`) — direction=human, execution=ai (evt_001)"
         in section
     )
+
+
+async def test_a_decision_a_person_revised_is_not_shown_as_accepted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    storage = learn_env(tmp_path, monkeypatch, llm=False)
+    active: dict[str, Session] = {}
+    session = await session_tools.create_session(storage, active, project="collab-a")
+    await decision_tools.propose_decision(
+        storage, session, description="Run all five comparisons now.", proposed_by_type="ai", proposed_by_id="ai"
+    )
+    await decision_tools.resolve_decision(
+        storage,
+        session,
+        event_id="evt_001",
+        disposition="revised",
+        resolved_by_type="human",
+        resolved_by_id="alice",
+        revision_note="Only the first two now.",
+    )
+    section = _build_session_section(await storage.get_session(session.id))
+    assert (
+        "- **[revised]** Run all five comparisons now. (evt_001; proposed_by=ai) — Only the first two now." in section
+    )
+    assert "**[accepted]**" not in section
+    assert "[revised] a person changed it, so its text may not be what they approved" in section

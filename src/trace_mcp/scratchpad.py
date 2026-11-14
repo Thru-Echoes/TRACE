@@ -103,7 +103,8 @@ def _build_session_section(session: Session) -> str:
     """Build a markdown section summarizing one session.
 
     Lines drawn from events carry the event id and its mark; a decision's
-    bracket is its mark (``[accepted]`` only when a person accepted it).
+    bracket is its mark (``[accepted]`` only when a person accepted it as
+    written; ``[revised]`` when a person changed it).
     """
     lines: list[str] = []
     sid = session.id
@@ -162,8 +163,7 @@ def _build_session_section(session: Session) -> str:
             stype = f", suggestion={d.suggestion_type}" if d.suggestion_type else ""
             note = f" — {_one_line(d.revision_note)}" if d.revision_note else ""
             # The mark says who resolved it; where it does not say what was decided, the disposition does.
-            said = _mark(e) == "[ai-resolved]" or d.disposition == "revised"
-            disposition = f"disposition={d.disposition}; " if said else ""
+            disposition = f"disposition={d.disposition}; " if _mark(e) == "[ai-resolved]" else ""
             lines.append(
                 f"- **{_mark(e)}** {_one_line(d.description)} "
                 f"({e.id}; {disposition}proposed_by={d.proposed_by.type}{stype}){note}{_confidence_suffix(d)}"

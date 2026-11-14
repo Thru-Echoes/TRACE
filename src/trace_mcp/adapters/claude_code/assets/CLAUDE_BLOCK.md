@@ -49,11 +49,8 @@ of quietly returning keyword-ranked results.
   - When you record a person's resolution, pass their words as
     conversation_snippet on trace_resolve_decision: what they typed, or for a
     question dialog the option they picked or the answer they typed.
-  - **A new rule for future work is a decision proposal**, not a note: when
-    you would write "always", "never" or "from now on" about how later work
-    should go, propose it with `trace_propose_decision` and leave it for a
-    person to resolve. When you restate a rule that already exists, name the
-    decision it comes from instead of writing it again.
+  - A new rule for future work ("always", "never", "from now on") is a
+    decision proposal, not a note; a restated rule names its decision.
   - **Measured decisions (v0.5.1, spec §3.6.1)**: when a decision rests on a
     number you actually computed — a benchmark, an evaluation run, a
     statistical test whose output is in front of you — record it as

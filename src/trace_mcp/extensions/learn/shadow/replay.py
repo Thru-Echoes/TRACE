@@ -60,10 +60,11 @@ from trace_mcp.extensions.learn.extraction import (
     build_extraction_prompt,
     get_known_source_event,
 )
+from trace_mcp.extensions.learn.learning_marks import get_learning_tags
 from trace_mcp.extensions.learn.models import KnowledgeStore, Learning
 from trace_mcp.extensions.learn.shadow.state import append_record, get_project_dir, get_project_key, record_error
 from trace_mcp.extensions.learn.shadow.words import load_words
-from trace_mcp.provenance_marks import SOURCE_UNKNOWN_TAG, WordsEntry, get_event_marks
+from trace_mcp.provenance_marks import SOURCE_UNKNOWN_TAG, WordsEntry
 from trace_mcp.schema import Session
 from trace_mcp.storage.json_file import JsonFileStorage
 
@@ -299,7 +300,7 @@ async def _run_arm(
         if event is None:
             tags = [SOURCE_UNKNOWN_TAG]
         else:
-            tags = get_event_marks(event, words, session_created=session.created, as_of=session.ended).tags()
+            tags = get_learning_tags(event, words, session_created=session.created, as_of=session.ended)
         nearest_id, cosine = get_nearest_existing(lrn, snapshot)
         entries.append(
             LearningAtExtraction(

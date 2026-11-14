@@ -9,26 +9,32 @@ registered tool:
   computed from (disposition, resolver, actor);
 - ``none``: returns no learning or event text written by someone else.
 
-A tool added without a classification fails ``test_every_tool_is_classified``,
-so a new path cannot reach sessions unmarked unnoticed.
+Every extension's tools are enumerated the way the server loads them, so a tool
+added to any extension, or a new extension, without a classification fails
+``test_every_tool_is_classified``: a new path cannot reach sessions unmarked
+unnoticed.
 """
 
 from __future__ import annotations
 
 import asyncio
+import importlib
 import inspect
 import json
+import pkgutil
 from pathlib import Path
 
 import pytest
 from _mcp_helpers import call_tool_json
 from _shadow_helpers import last_server, learn_env, make_session
+from mcp.server.mcpserver import MCPServer
 
-from trace_mcp import extension_hooks, server
+from trace_mcp import extension_hooks, extensions, server
 from trace_mcp.exporters.markdown_export import export_markdown
 from trace_mcp.exporters.prov_jsonld import export_prov_jsonld
 from trace_mcp.extensions.learn import store
 from trace_mcp.scratchpad import _build_session_section
+from trace_mcp.storage.json_file import JsonFileStorage
 
 DELIVERY_PATHS: dict[str, str] = {
     # marks
@@ -44,7 +50,6 @@ DELIVERY_PATHS: dict[str, str] = {
     "trace_get_decisions": "record",
     "trace_get_decision_chain": "record",
     "trace_search": "record",
-    "trace_jev_assess_candidate": "record",  # an advisory about one event the caller names by id
     # no learning or event text from anyone else
     "trace_log_tool_call": "none",
     "trace_log_annotation": "none",
@@ -57,14 +62,27 @@ DELIVERY_PATHS: dict[str, str] = {
     "trace_learn_add": "none",  # echoes the caller's own new learning
     "trace_learn_forget": "none",
     "trace_learn_extract": "none",  # new learning ids and counts
+    "trace_jev_assess_candidate": "none",  # an outside model's advisory on one event the caller names, labelled as such
 }
 
 
+def get_registered_tool_names(storage: JsonFileStorage) -> set[str]:
+    """Every tool a running server offers: the core tools plus each extension's, loaded as the server loads them."""
+    names = {tool.name for tool in asyncio.run(server.mcp.list_tools())}
+    for _finder, name, _is_pkg in pkgutil.iter_modules(extensions.__path__):
+        module = importlib.import_module(f"trace_mcp.extensions.{name}")
+        if hasattr(module, "register"):
+            fresh = MCPServer(f"inv18-{name}")
+            module.register(fresh, storage)
+            names |= {tool.name for tool in asyncio.run(fresh.list_tools())}
+    return names
+
+
 def test_every_tool_is_classified(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    learn_env(tmp_path, monkeypatch, llm=False)
-    core = {tool.name for tool in asyncio.run(server.mcp.list_tools())}
-    learn = {tool.name for tool in asyncio.run(last_server().list_tools())}
-    assert core | learn | {"trace_jev_assess_candidate"} == set(DELIVERY_PATHS)
+    storage = learn_env(tmp_path, monkeypatch, llm=False)
+    names = get_registered_tool_names(storage)
+    assert {"trace_start_session", "trace_learn_recall", "trace_jev_assess_candidate"} <= names
+    assert names == set(DELIVERY_PATHS)
     assert set(DELIVERY_PATHS.values()) == {"marks", "record", "none"}
 
 
