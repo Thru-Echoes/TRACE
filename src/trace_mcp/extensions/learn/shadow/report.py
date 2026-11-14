@@ -30,6 +30,7 @@ from pydantic import BaseModel, Field, ValidationError
 
 from trace_mcp import project_identity as pident
 from trace_mcp.extensions.learn import matching, store
+from trace_mcp.extensions.learn.learning_marks import get_learning_tags
 from trace_mcp.extensions.learn.models import Learning
 from trace_mcp.extensions.learn.shadow.host_transcript import is_plain_prompt, read_host_inputs
 from trace_mcp.extensions.learn.shadow.recall import RecallRecord
@@ -44,6 +45,7 @@ from trace_mcp.extensions.learn.shadow.state import (
 )
 from trace_mcp.extensions.learn.shadow.words import load_words
 from trace_mcp.provenance_marks import (
+    AI_RECORD_TAG,
     SOURCE_UNKNOWN_TAG,
     WordsEntry,
     get_base_mark,
@@ -57,7 +59,8 @@ from trace_mcp.schema import Session, TraceEvent
 
 PAIR_OVERLAP = 0.5
 CAPTURE_SLACK = timedelta(seconds=5)
-_UNACCEPTED_FIRST_TAGS = {"[proposed]", "[ai-resolved]", "[ai-note]", SOURCE_UNKNOWN_TAG}
+# First tags of a learning whose source no person accepted as written.
+_UNACCEPTED_FIRST_TAGS = {"[revised]", "[proposed]", "[ai-resolved]", "[ai-note]", AI_RECORD_TAG, SOURCE_UNKNOWN_TAG}
 _NOT_CAPTURED_LINE = "not captured by any hook: text typed when declining a tool call"
 
 ReviewKind = Literal[
@@ -313,7 +316,7 @@ def _stored_part(
         if session is None or event is None:
             tags = [SOURCE_UNKNOWN_TAG]
         else:
-            tags = get_event_marks(event, words, session_created=session.created).tags()
+            tags = get_learning_tags(event, words, session_created=session.created)
             if get_base_mark(event, as_of=lrn.created)[0] == "proposed":
                 report.stored_proposed_when_written += 1
                 if get_base_mark(event)[0] != "proposed":
@@ -631,7 +634,7 @@ def _project_block(p: ProjectReport) -> list[str]:
     items = sum(p.recall_items_by_mark.values())
     lines.append(
         f"  recall: calls {p.recall_calls}, items by mark {_dist(p.recall_items_by_mark, items)}, "
-        f"rendered characters as shown/without marks {p.recall_chars_with}/{p.recall_chars_without}"
+        f"rendered characters as shown (with ids and source marks)/as bare text {p.recall_chars_with}/{p.recall_chars_without}"
     )
     events = sum(p.quote.values())
     verified = p.quote.get("verified", 0)

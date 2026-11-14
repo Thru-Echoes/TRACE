@@ -8,16 +8,25 @@ happened, what was decided, and what's left to do.
 Unlike trace-learn (cross-session knowledge), SCRATCHPAD captures
 **session-specific state**: what was accomplished, open items, and
 immediate next steps.
+
+A later session reads it as context, so each line drawn from an event names
+that event and shows its provenance mark (ADR 008 D9); the summary, which the
+AI writes at session end, is labelled as AI-written; and the header names the
+session it was generated from, when, and the digest of the section, so one
+generation can be told from the next.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import os
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 
-from trace_mcp.schema import DecisionData, Session
+from trace_mcp.provenance_marks import get_base_mark, get_mark_legend
+from trace_mcp.schema import DecisionData, Session, TraceEvent
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +83,29 @@ def _confidence_suffix(d: DecisionData) -> str:
     )
 
 
+def _mark(event: TraceEvent) -> str:
+    """The event's base mark as shown, or empty when it has none. Pure."""
+    mark = get_base_mark(event)[0]
+    return f"[{mark}]" if mark else ""
+
+
+def _one_line(text: str) -> str:
+    """``text`` on one line, so a line break in it cannot start a peer entry or heading. Pure."""
+    return " ".join(text.split())
+
+
+def _trailer(event: TraceEvent, *extra: str) -> str:
+    """`` (evt_003; [ai-note])``: the event id, any extra parts, then the event's mark. Pure."""
+    return " (" + "; ".join(part for part in (event.id, *extra, _mark(event)) if part) + ")"
+
+
 def _build_session_section(session: Session) -> str:
-    """Build a markdown section summarizing one session."""
+    """Build a markdown section summarizing one session.
+
+    Lines drawn from events carry the event id and its mark; a decision's
+    bracket is its mark (``[accepted]`` only when a person accepted it as
+    written; ``[revised]`` when a person changed it).
+    """
     lines: list[str] = []
     sid = session.id
     project = session.metadata.project
@@ -94,10 +124,16 @@ def _build_session_section(session: Session) -> str:
     if session.metadata.tags:
         lines.append(f"- **Tags**: {', '.join(session.metadata.tags)}")
 
+    shown = [e for e in session.events if e.type in ("decision", "contribution", "annotation")]
+    marks = [m for e in shown if (m := _mark(e))]
+    if legend := get_mark_legend(marks):
+        lines.append("")
+        lines.append(f"*{legend}*")
+
     # ── Summary ──────────────────────────────────────────────────────
     if session.summary:
         lines.append("")
-        lines.append("### Summary")
+        lines.append("### Summary (AI-written)")
         lines.append("")
         lines.append(session.summary)
 
@@ -110,8 +146,10 @@ def _build_session_section(session: Session) -> str:
         for e in contributions:
             c = e.contribution
             assert c is not None
-            artifact = f" (`{c.artifact}`)" if c.artifact else ""
-            lines.append(f"- {c.description}{artifact} — direction={c.direction}, execution={c.execution}")
+            artifact = f" (`{_one_line(c.artifact)}`)" if c.artifact else ""
+            lines.append(
+                f"- {_one_line(c.description)}{artifact} — direction={c.direction}, execution={c.execution}{_trailer(e)}"
+            )
 
     # ── Decisions ────────────────────────────────────────────────────
     decisions = [e for e in session.events if e.type == "decision" and e.decision]
@@ -123,10 +161,12 @@ def _build_session_section(session: Session) -> str:
             d = e.decision
             assert d is not None
             stype = f", suggestion={d.suggestion_type}" if d.suggestion_type else ""
-            note = f" — {d.revision_note}" if d.revision_note else ""
+            note = f" — {_one_line(d.revision_note)}" if d.revision_note else ""
+            # The mark says who resolved it; where it does not say what was decided, the disposition does.
+            disposition = f"disposition={d.disposition}; " if _mark(e) == "[ai-resolved]" else ""
             lines.append(
-                f"- **[{d.disposition}]** {d.description} "
-                f"(proposed_by={d.proposed_by.type}{stype}){note}{_confidence_suffix(d)}"
+                f"- **{_mark(e)}** {_one_line(d.description)} "
+                f"({e.id}; {disposition}proposed_by={d.proposed_by.type}{stype}){note}{_confidence_suffix(d)}"
             )
 
     # ── Open items (unresolved decisions) ────────────────────────────
@@ -138,7 +178,7 @@ def _build_session_section(session: Session) -> str:
         for e in unresolved:
             d = e.decision
             assert d is not None
-            lines.append(f"- [ ] {d.description} (`{e.id}`){_confidence_suffix(d)}")
+            lines.append(f"- [ ] {_one_line(d.description)} (`{e.id}`){_confidence_suffix(d)}")
 
     # ── Gotchas & Corrections ────────────────────────────────────────
     gotchas = [
@@ -154,8 +194,8 @@ def _build_session_section(session: Session) -> str:
             a = e.annotation
             assert a is not None
             prefix = "CORRECTION" if a.category == "correction" else "GOTCHA"
-            linked = f" (corrects: {', '.join(a.corrects_event_ids)})" if a.corrects_event_ids else ""
-            lines.append(f"- **{prefix}**: {a.content}{linked}")
+            linked = f"corrects: {', '.join(a.corrects_event_ids)}" if a.corrects_event_ids else ""
+            lines.append(f"- **{prefix}**: {_one_line(a.content)}{_trailer(e, linked)}")
 
     # ── Learnings ────────────────────────────────────────────────────
     learnings = [
@@ -168,7 +208,7 @@ def _build_session_section(session: Session) -> str:
         for e in learnings:
             a = e.annotation
             assert a is not None
-            lines.append(f"- {a.content}")
+            lines.append(f"- {_one_line(a.content)}{_trailer(e)}")
 
     # ── TODOs ────────────────────────────────────────────────────────
     todos = [e for e in session.events if e.type == "annotation" and e.annotation and e.annotation.category == "todo"]
@@ -179,7 +219,7 @@ def _build_session_section(session: Session) -> str:
         for e in todos:
             a = e.annotation
             assert a is not None
-            lines.append(f"- [ ] {a.content}")
+            lines.append(f"- [ ] {_one_line(a.content)}{_trailer(e)}")
 
     # ── Event Stats ──────────────────────────────────────────────────
     counts: dict[str, int] = {}
@@ -235,9 +275,12 @@ def write_scratchpad(session: Session) -> Path:
     path = _scratchpad_path(session_project_key(session.metadata) or None)
 
     section = _build_session_section(session)
+    digest = hashlib.sha256(section.encode("utf-8")).hexdigest()
+    generated = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
     header = (
         f"# SCRATCHPAD — {session.metadata.project}\n\n"
-        f"_Auto-generated by TRACE at session end. "
+        f"_Auto-generated by TRACE from session `{session.id}` at {generated}; "
+        f"sha256 of the section below: {digest}. "
         f"Most recent session only — past sessions are in "
         f"`~/.trace/sessions/`._\n\n"
     )

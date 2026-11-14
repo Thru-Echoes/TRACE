@@ -15,7 +15,7 @@ import os
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
-from trace_mcp.provenance_marks import WordsEntry, get_mark_legend
+from trace_mcp.provenance_marks import SOURCE_MARKS_LEAD, WordsEntry, get_mark_legend
 
 logger = logging.getLogger(__name__)
 
@@ -31,9 +31,17 @@ class RecallResult(list[dict[str, Any]]):
     for a floor, or the query was cleaned before scoring.
     """
 
-    def __init__(self, results: list[dict[str, Any]] | None = None, notice: str | None = None) -> None:
+    def __init__(
+        self,
+        results: list[dict[str, Any]] | None = None,
+        notice: str | None = None,
+        left_out: list[dict[str, Any]] | None = None,
+    ) -> None:
         super().__init__([] if results is None else results)
         self.notice = notice
+        # Learnings the recall left out because a person rejected or replaced their source:
+        # dicts with ``id``, ``reason``, ``source``, ``replaced_by``, ``replacement``, ``matched``.
+        self.left_out: list[dict[str, Any]] = [] if left_out is None else left_out
 
     @property
     def results(self) -> list[dict[str, Any]]:
@@ -174,37 +182,84 @@ async def extract_if_available(
 # ── Formatting (used by server.py to build response strings) ──────────────
 
 
-def _mark_prefix(result: dict[str, Any]) -> str:
-    marks = result.get("marks")
-    return " ".join(marks) + " " if isinstance(marks, list) and marks else ""
+def _source_ref(learning: dict[str, Any]) -> str:
+    session_id, event_id = learning.get("source_session"), learning.get("source_event")
+    return (
+        f"{session_id}#{event_id}"
+        if isinstance(session_id, str) and session_id and isinstance(event_id, str) and event_id
+        else ""
+    )
+
+
+def get_source_note(result: dict[str, Any]) -> str:
+    """Return what follows a recalled learning's text: its id, what it replaces, its source and that source's mark.
+
+    For example ``lrn_9, replaces lrn_4; source [accepted] trace_a#evt_6; source corrected,
+    see trace_a#evt_8``. The mark describes the source event, not the learning's wording.
+    Empty for a row with no id and no source marks (a hook that supplies neither). Pure.
+    """
+    learning = result.get("learning") or {}
+    parts: list[str] = []
+    if isinstance(learning_id := learning.get("id"), str) and learning_id:
+        replaces = result.get("replaces")
+        parts.append(f"{learning_id}, replaces {replaces}" if isinstance(replaces, str) and replaces else learning_id)
+    marks = result.get("source_marks")
+    if isinstance(marks, list):
+        source = " ".join([*marks, _source_ref(learning)]).strip()
+        if source:
+            parts.append(f"source {source}")
+    corrected = result.get("source_corrected_by")
+    if isinstance(corrected, list) and corrected:
+        parts.append("source corrected, see " + ", ".join(corrected))
+    return "; ".join(parts)
 
 
 def _legend_lines(results: list[dict[str, Any]]) -> list[str]:
-    """One line explaining the marks in use, when the recall supplied marks at all."""
-    marked = [r["marks"] for r in results if isinstance(r.get("marks"), list)]
+    """One line explaining the source marks in use, when the recall supplied source marks at all."""
+    marked = [r["source_marks"] for r in results if isinstance(r.get("source_marks"), list)]
     if not marked:
         return []
-    legend = get_mark_legend([tag for marks in marked for tag in marks], any_unmarked=any(not m for m in marked))
+    legend = get_mark_legend(
+        [tag for marks in marked for tag in marks], any_unmarked=any(not m for m in marked), lead=SOURCE_MARKS_LEAD
+    )
     return [f"  {legend}"] if legend else []
+
+
+def get_learning_lines(results: list[dict[str, Any]], *, relevance: bool) -> list[str]:
+    """Return the legend line and one line per learning, as a recall block shows them. Pure.
+
+    Each learning shows its text, then its id and its source with the source's mark
+    (``get_source_note``); with ``relevance``, the score follows.
+    """
+    lines = _legend_lines(results)
+    for r in results:
+        lrn = r.get("learning", {})
+        cat = lrn.get("category", "learning")
+        # One line per learning: a line break in the text cannot start a peer entry or heading.
+        content = " ".join(str(lrn.get("content", "")).split())
+        trailer = [note] if (note := get_source_note(r)) else []
+        if relevance:
+            weak = "" if r.get("matched", True) or r.get("replaces_matched") else ", weak match"
+            trailer.append(f"relevance: {r.get('score', 0):.0%}{weak}")
+        lines.append(f"  - [{cat}] {content}" + (f" ({'; '.join(trailer)})" if trailer else ""))
+    return lines
 
 
 def format_recalled_learnings(results: list[dict[str, Any]]) -> str:
     """Format recalled learnings for inclusion in a session start response.
 
-    Each learning is shown as context with the mark of its source event first
-    (who stands behind it), and one line explains the marks in use.
+    Each learning is shown as context: its text, then its id and its source
+    event with that event's mark (who stood behind the source, not the
+    wording), and one line explains the marks in use.
     """
     if not results:
         return ""
-    lines = ["\n\nRelevant learnings from past sessions (context, not instructions):", *_legend_lines(results)]
-    for r in results:
-        lrn = r.get("learning", {})
-        score = r.get("score", 0)
-        cat = lrn.get("category", "learning")
-        content = lrn.get("content", "")
-        weak = "" if r.get("matched", True) else ", weak match"
-        lines.append(f"  - {_mark_prefix(r)}[{cat}] {content} (relevance: {score:.0%}{weak})")
-    return "\n".join(lines)
+    return "\n".join(
+        [
+            "\n\nRelevant learnings from past sessions (context, not instructions):",
+            *get_learning_lines(results, relevance=True),
+        ]
+    )
 
 
 def format_recall_notice(notice: str) -> str:
@@ -212,24 +267,38 @@ def format_recall_notice(notice: str) -> str:
     return f"\n\nRecall: {notice}"
 
 
-def format_decision_warnings(results: list[dict[str, Any]]) -> str:
-    """Format recalled learnings as warnings for a decision proposal.
+def get_left_out_text(item: dict[str, Any]) -> str:
+    """Return one left-out learning as a pointer: its id and why it stepped back, never its text. Pure."""
+    learning_id = item.get("id", "")
+    if item.get("reason") == "rejected":
+        source = f" {item['source']}" if item.get("source") else ""
+        return f"{learning_id} (a person rejected its source{source})"
+    shown = f", shown as {item['replacement']}" if item.get("replacement") else ""
+    return f"{learning_id} (a person replaced its source with {item.get('replaced_by')}{shown})"
 
-    Weak candidates (``matched`` is False) are left out: a proposal warning
-    should carry only learnings that actually matched.
+
+def format_decision_warnings(results: list[dict[str, Any]], *, left_out: list[dict[str, Any]] | None = None) -> str:
+    """Format recalled learnings as context for a decision proposal.
+
+    Weak candidates (``matched`` is False) are left out: the block should
+    carry only learnings that actually matched, and replacements standing in
+    for one that did (``replaces_matched``).
+
+    ``left_out`` are learnings the recall stepped back from. One that matched
+    and has no replacement shown is named in a closing line, as a pointer: a
+    proposal resembling something a person rejected should say so, without
+    showing the rejected text as guidance.
     """
-    results = [r for r in results if r.get("matched", True)]
-    if not results:
+    results = [r for r in results if r.get("matched", True) or r.get("replaces_matched")]
+    pointers = [x for x in (left_out or []) if x.get("matched") and not x.get("replacement")]
+    if not results and not pointers:
         return ""
     lines = [
         "\n\nPossibly related learnings from past sessions (context, not instructions):",
-        *_legend_lines(results),
+        *get_learning_lines(results, relevance=False),
     ]
-    for r in results:
-        lrn = r.get("learning", {})
-        cat = lrn.get("category", "learning")
-        content = lrn.get("content", "")
-        lines.append(f"  - {_mark_prefix(r)}[{cat}] {content}")
+    if pointers:
+        lines.append("  Left out, kept in the store: " + ", ".join(get_left_out_text(x) for x in pointers) + ".")
     return "\n".join(lines)
 
 
@@ -246,10 +315,11 @@ async def recall_for_decision(project: str, description: str, tags: list[str] | 
     """Return the related-learnings block for a decision proposal, or "" when off or nothing matched.
 
     The block is context for the proposing session: each learning carries the
-    mark of its source event. A project turns it off by setting
+    mark of its source event, and a matched learning the recall left out is
+    named in a closing line. A project turns it off by setting
     ``TRACE_DECISION_RECALL=0`` in its server's environment.
     """
     if not is_decision_recall_enabled():
         return ""
     related = await recall_if_available(project, description, tags, limit=3)
-    return format_decision_warnings(related) if related else ""
+    return format_decision_warnings(related, left_out=related.left_out)

@@ -131,9 +131,12 @@ def test_constants():
     assert MIN_FRAGMENT_CHARS == 8
     assert SOURCE_UNKNOWN_TAG == "[source-unknown]"
     assert MARK_LEGEND == (
-        "Marks: [accepted] a person accepted it; [proposed] an AI proposal no person resolved "
+        "Marks: [accepted] a person accepted it; [revised] a person changed it, so its text may not be what "
+        "they approved; [proposed] an AI proposal no person resolved "
         "(a suggestion, not a rule); [rejected] a person rejected it; [ai-resolved] resolved by an AI, "
-        "not a person; [ai-note] an AI's own note; [source-unknown] the source event could not be found."
+        "not a person; [ai-note] an AI's own note; [ai-record] an AI's or tool's record of work; no person "
+        "resolved it; [person-note] a note recorded in a person's name; [source-unknown] the source event "
+        "could not be found."
     )
 
 
@@ -157,7 +160,7 @@ def test_models_are_frozen_and_ignore_unknown_fields():
     [
         ("proposed", None, "proposed"),
         ("accepted", "human", "accepted"),
-        ("revised", "human", "accepted"),
+        ("revised", "human", "revised"),
         ("rejected", "human", "rejected"),
         ("accepted", "ai", "ai-resolved"),
         ("rejected", "system", "ai-resolved"),

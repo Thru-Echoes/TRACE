@@ -18,7 +18,7 @@ from trace_mcp import extension_hooks
 from trace_mcp.extensions.learn import store
 from trace_mcp.extensions.learn.shadow import recall as shadow_recall
 from trace_mcp.extensions.learn.shadow.state import get_project_dir, start_trial
-from trace_mcp.provenance_marks import get_mark_legend
+from trace_mcp.provenance_marks import SOURCE_MARKS_LEAD, get_mark_legend
 
 PROJECT = "collab-a"
 CREATED = datetime(2026, 10, 1, tzinfo=UTC)
@@ -78,14 +78,17 @@ async def test_trial_on_records_marks_and_leaves_the_result_alone(
     by_id = {item["id"]: item["tags"] for item in record["items"]}
     assert by_id == {"lrn_001": ["[proposed]"], "lrn_002": ["[accepted]"], "lrn_003": ["[source-unknown]"]}
     assert [item["id"] for item in record["items"]] == [r["learning"]["id"] for r in result]
-    categories = {r["learning"]["id"]: r["learning"]["category"] for r in result}
-    contents = {r["learning"]["id"]: r["learning"]["content"] for r in result}
-    without = sum(len(f"  - [{categories[i]}] {contents[i]}") for i in by_id)
-    shown = "".join(
-        f"\n  - {r['marks'][0]} [{categories[r['learning']['id']]}] {contents[r['learning']['id']]}" for r in result
-    )
-    legend = "\n  " + get_mark_legend(["[proposed]", "[accepted]", "[source-unknown]"])
-    assert (record["chars_without"], record["chars_with"]) == (without, len(shown) - len(result) + len(legend))
+    bare = [f"  - [{r['learning']['category']}] {r['learning']['content']}" for r in result]
+
+    def source(r: dict) -> str:
+        lrn = r["learning"]
+        ref = f" {lrn['source_session']}#{lrn['source_event']}" if lrn.get("source_event") else ""
+        return f"{lrn['id']}; source {r['source_marks'][0]}{ref}"
+
+    shown = [f"{line} ({source(r)})" for line, r in zip(bare, result, strict=True)]
+    legend = "  " + get_mark_legend(["[proposed]", "[accepted]", "[source-unknown]"], lead=SOURCE_MARKS_LEAD)
+    assert record["chars_without"] == sum(len(line) + 1 for line in bare)
+    assert record["chars_with"] == sum(len(line) + 1 for line in [legend, *shown])
     assert record["limit"] == 5 and record["context_chars"] == len("upload retries per file")
 
 

@@ -87,13 +87,14 @@ provides a `register(mcp, storage)` function.
 
 Correctness invariants are registered in [`docs/INVARIANTS.md`](docs/INVARIANTS.md)
 — one entry per invariant with its exhaustive site-set and enforcing test.
-Seventeen are registered and enforced (INV-1 … INV-17), covering session writes,
+Eighteen are registered and enforced (INV-1 … INV-18), covering session writes,
 completed-session immutability, decision validation, canonical-key project
 scoping, cloud-egress attestation, project/session coherence, registry writes,
 the knowledge-store lock, learn-tool label guarding, version-declaration
 consistency, conformance of a freshly initialized project, learning-id
 uniqueness, exclusive session creation, durable publication, one record per
-session id, pin scoping of core read tools, and guarded lock removal.
+session id, pin scoping of core read tools, guarded lock removal, and marks on
+every path that delivers TRACE text to a later session.
 `tests/test_invariants.py` runs as a dedicated CI step and **fails when a new
 site appears that is not registered** — a new `storage.update_session` caller
 outside `locked_disk_session`, a new OpenAI call site that does not

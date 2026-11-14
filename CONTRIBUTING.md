@@ -132,7 +132,7 @@ Development is organized into three tiers, implemented sequentially.
 
 ### Tier 2: production hardening (completed)
 
-- **Decay and staleness** — Exponential decay based on time since last surfaced. Frequently-surfaced learnings are protected by an evergreen floor (default 0.8 at 3+ recalls). Configurable half-life (default 365 days).
+- **Decay and staleness** — Exponential decay based on time since last surfaced. Frequently-surfaced learnings whose source a person accepted are protected by an evergreen floor (default 0.8 at 3+ recalls). Configurable half-life (default 365 days).
 - **Deduplication** — Jaccard similarity check during `add_learning` to skip near-duplicates. Default threshold 0.85.
 - **Recall tracking** — `recall_count` and `last_surfaced` fields on Learning, incremented on each recall.
 - **Knowledge store metrics** — `trace_project_summary` includes a `knowledge` section with total learnings, category breakdown, most-surfaced (top 5), never-surfaced count, and average recall count.

@@ -312,3 +312,33 @@ async def test_an_unreadable_session_file_is_counted(tmp_path: Path, monkeypatch
     await _fixture(tmp_path, monkeypatch)
     (tmp_path / "sessions" / "trace_20261112_broken.json").write_text("{not json")
     assert build_report().total.unreadable_sessions == 1
+
+
+async def test_review_rows_include_learnings_from_revised_decisions_and_ai_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Neither a decision a person changed nor an AI's record of work is a source a person accepted."""
+    from trace_mcp.extensions.learn import store
+
+    storage, session = await _fixture(tmp_path, monkeypatch, contribution_snippet="cap the retries please")
+    stored = await storage.get_session(session.id)
+    await decision_tools.resolve_decision(
+        storage,
+        stored,
+        event_id="evt_002",
+        disposition="revised",
+        resolved_by_type="human",
+        resolved_by_id="alice",
+        revision_note="Cap at two.",
+    )
+    ks = store.load_store(PROJECT)
+    added = store.add_learning(
+        ks, content="The client now caps retries.", source_session=session.id, source_event="evt_005"
+    )
+    store.save_store(ks)
+
+    report = build_report().total
+    assert report.stored_by_mark == {"[revised]": 1, "[accepted]": 1, "[ai-record]": 1}
+    unaccepted = {row.learning_id: row.marks for row in get_review_rows() if row.kind == "unaccepted_source"}
+    assert unaccepted["lrn_001"].startswith("[revised]")
+    assert unaccepted[added.id].startswith("[ai-record]")
