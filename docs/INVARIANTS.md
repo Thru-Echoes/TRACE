@@ -700,15 +700,18 @@ wrote it; an AI's paraphrase of a proposal no person resolved then passes for a 
 related-learnings block), `trace_learn_recall`, `trace_learn_list`, `trace_export`
 (Markdown and PROV; the JSON export is the record) and `trace_end_session` (writes the
 scratchpad). Tools that return the record itself: `trace_get_session`, `trace_get_events`,
-`trace_get_decisions`, `trace_get_decision_chain`, `trace_search`,
-`trace_jev_assess_candidate`. Every other tool returns no learning or event text written by
-someone else.
+`trace_get_decisions`, `trace_get_decision_chain`, `trace_search`. Every other tool returns no
+learning or event text written by someone else; `trace_jev_assess_candidate` returns an
+outside model's advisory on one event the caller names, labelled as such. No learning is
+shown without a mark: one whose source has no base mark shows `[ai-record]` or
+`[person-note]`.
 
 **Known limitations.** Files a host writes from TRACE output (a compaction summary, a
 context file written by a host skill, memory files) are outside TRACE and not covered.
 
-**Tests.** `tests/test_delivery_paths_marks.py :: test_every_tool_is_classified` fails when
-a registered tool is not classified; `:: test_each_marked_path_shows_the_source_mark` and
+**Tests.** `tests/test_delivery_paths_marks.py :: test_every_tool_is_classified` loads every
+extension the way the server does and fails when a tool of the core or of any extension is
+not classified; `:: test_each_marked_path_shows_the_source_mark` and
 `:: test_the_session_banner_and_the_decision_block_are_built_by_the_marked_formatters`
 check each marked path.
 

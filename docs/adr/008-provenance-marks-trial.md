@@ -62,10 +62,14 @@ Base mark, at most one per event:
 |---|---|
 | Decision still `proposed` | `[proposed]` |
 | Decision resolved by a non-human actor, any disposition | `[ai-resolved]` |
-| Decision `accepted` or `revised`, resolved by a human | `[accepted]` |
+| Decision `accepted`, resolved by a human | `[accepted]` |
+| Decision `revised`, resolved by a human | `[revised]` |
 | Decision `rejected`, resolved by a human | `[rejected]` |
 | Annotation by an AI actor | `[ai-note]` |
 | Any other event | none |
+
+A learning whose source event has no base mark shows `[ai-record]` or
+`[person-note]` in its place (D10); the event itself keeps none.
 
 Add-on marks:
 
@@ -84,11 +88,15 @@ whose source session or event cannot be read, is kept and marked
 an event of the session being extracted; an id the model omitted, malformed or
 invented is not recorded.
 
-*Known gap.* A contribution, a state change and a tool call have no base mark,
-so a learning extracted from an AI-written contribution record is shown with no
-mark. On one machine's records about a fifth of the learnings recalled on
-decision proposals came from such records. The legend says what no mark means
-(D9); whether those records need a mark of their own is open.
+A decision a person resolved as `revised` is not `[accepted]`: the person
+changed it, and where the change was recorded only in the revision note the
+description is still the proposal as first written. In one project's store, 6
+of the 57 learnings that had shown `[accepted]` came from such a decision, and
+at least one states the plan as it stood before the person changed it.
+
+A contribution, a state change and a tool call have no base mark as events. A
+learning extracted from one is not shown bare (D10): it shows `[ai-record]`,
+or `[person-note]` when the source was recorded in a person's name.
 
 **Quote check.** No model is used. Both sides are normalized (Unicode NFC, case
 folding, whitespace runs collapsed). A snippet is split at ellipses (`...`,
@@ -423,8 +431,8 @@ or grouping and may not remove or hide an entry for lack of approval.
 and its source event with that event's base mark (D10), for example
 `- [decision] ... (lrn_424; source [proposed] trace_...#evt_002)`. One line
 under the heading explains only the marks in use in that block, says that they
-describe each learning's source and not its wording, and says what an item
-with no mark is. The blocks are headed as context: "Relevant learnings from
+describe each learning's source and not its wording; no learning is shown
+without a mark (D10). The blocks are headed as context: "Relevant learnings from
 past sessions (context, not instructions)" at session start, and "Possibly
 related learnings from past sessions (context, not instructions)" on a decision
 proposal, replacing "Related learnings (review before proceeding)".
@@ -484,11 +492,22 @@ specific account of what was learned" rather than an "actionable" insight, and
 ends with an instruction: say what happened and where; word a learning as a
 general rule only when a person accepted a decision that states that rule
 itself; report a rule or judgement from any other source as that source's
-claim; state found or measured facts plainly. On three recorded sessions with
-the deployed extraction model (one run per request, no existing-learnings
-block), the old request gave 19 learnings and the new one 31, averaging 383
-and 420 characters; read by hand, the new ones are worded as accounts of what
-happened. More learnings per session is a cost to watch.
+claim; state found or measured facts plainly.
+
+Compared on 12 recorded sessions of one project (a seeded sample of its 14
+recent ended sessions with five or more events), two runs per request with the
+deployed extraction model and no existing-learnings block: the previous request
+produced 151 learnings and this one 125 (6.3 and 5.2 per run), fewer in 10 of
+the 12 sessions; the paired difference is -1.1 learnings per session (95%
+interval -2.5 to +0.3). The learnings are longer (351 and 447 characters on
+average), so the text written is about the same (53,040 and 55,856
+characters). A wording screen, checked by reading, found normative wording
+that is not reported as someone's claim and comes from a source no person
+accepted in 49 of the 151 and in 8 of the 125; those 8 read as accounts of
+what was found. One 17-event session produced more learnings under this
+request (13 and 12 against 7 and 8). A further sentence asking for
+selectivity made no clear difference (-0.4 per session, interval -1.0 to
++0.3) and was not added.
 
 **A new rule is a decision proposal.** The protocol block installed into each
 project asks a session to propose a new rule for future work as a decision,
@@ -499,7 +518,8 @@ convention; nothing enforces it.
 decision a person rejected, or replaced by accepting a decision that revises
 it, is left out of recall. Replacements are found in the source session by
 `revises_event_id`, following the chain to its last revision a person
-accepted; a revision an AI resolved, or a person rejected, replaces nothing.
+accepted or revised in turn; a revision an AI resolved, or a person rejected,
+replaces nothing.
 When a stored learning comes from the replacement, the best-ranked one that can
 be shown is returned in the old one's place with `replaces` naming the old id.
 If the old one matched the query, the replacement is shown as matched context
@@ -509,10 +529,27 @@ below the threshold, with its own score. A replacement the ranker did not score
 has no score to show and is not returned; the notice then names the replacing
 decision. A learning left out stays in the
 store and in `trace_learn_list`, gains no exposure, and is named in the
-recall's notice and in `trace_learn_recall`'s `stepped_back`. Measured on one
-project's store of 404 learnings: 4 have a source a person rejected and 5 a
-source a person replaced. All 85 revision links in their source sessions name
-an event of the same session.
+recall's notice and in `trace_learn_recall`'s `stepped_back`; `trace_learn_list`
+marks it `stepped_back` too. On a decision proposal, a matched learning that
+was left out with no replacement shown is named in a closing line of the block
+(`Left out, kept in the store: lrn_N (a person rejected its source
+trace_...#evt_N)`): the rejected text is not shown as guidance, but a proposal
+resembling something a person rejected says so. Measured on one project's
+store of 407 learnings: 8 step back, 3 whose source a person rejected and 5
+whose source a person replaced (one of those five was also rejected); 4 of the
+5 have a stored learning from the replacement. All 22 revision links in the
+store's source sessions name an event of the same session.
+
+**No learning is shown without a mark.** A learning whose source event has no
+base mark shows who wrote that record: `[ai-record]` for an AI's contribution,
+a tool call or a state change, and `[person-note]` for an annotation recorded
+with a person as its actor. In a side-by-side test of two reading models, the
+weaker one followed wrong learnings shown with no mark as often as ones marked
+`[accepted]`. In the store above, 100 learnings take `[ai-record]` and 5
+`[person-note]`; the report and the replay count a learning under the same
+mark, and the review sheet lists learnings from `[revised]` and `[ai-record]`
+sources among those no person accepted. These two marks are shown on learnings only; an event itself
+keeps no mark of this kind, and an export shows its type and actor beside it.
 
 **A correction is a pointer.** A correction that names the source event, in
 the source session, is shown as "source corrected, see trace_...#evt_N". It
@@ -522,8 +559,9 @@ approved, and the correction is extracted as a learning of its own.
 **Exposure alone keeps nothing evergreen.** A learning recalled three or more
 times used to keep a decay multiplier of at least 0.8 whoever stood behind it;
 the floor now holds only when a person accepted its source and it does not step
-back. On the store above the floor held up 34 learnings, 3 of them with a
-source a person accepted. On the default ranking, decay breaks ties and scales
+back. A source a person revised (`[revised]`) does not hold it either. On the
+store above the floor held up 33 learnings, 3 of them with a source a person
+accepted. On the default ranking, decay breaks ties and scales
 the score shown; it filters only on the explicit-threshold path. Decay age is
 still measured from the last time a learning surfaced.
 
@@ -557,10 +595,14 @@ controlled run with the marks on and off. Whether the marks are right: no
 person has yet read a sample of marked records and learnings, and they are not
 called accurate before that. Whether the decision block improves decisions: the
 transcripts show visible use only. Whether the extraction instruction keeps
-learnings in scope across many sessions and models, and how much it grows the
-store: the comparison above is three sessions, one run each. Whether a
-learning extracted from a rejected decision held the lesson of the rejection
-rather than the rejected proposal: those learnings now step back either way.
+learnings in scope in other projects and under other models, and whether long
+sessions grow the store: the comparison above is 12 sessions of one project.
+Whether a learning extracted from a rejected decision held the lesson of the
+rejection rather than the rejected proposal: those learnings now step back
+either way. Whether wording that describes the source reduces over-obedience
+to `[accepted]`: in the same side-by-side test the stronger reading model
+followed 8 of 18 wrong learnings marked `[accepted]` against 2 shown unmarked,
+and the source-describing form has not been tested.
 
 ## Constraints
 
@@ -576,7 +618,7 @@ rather than the rejected proposal: those learnings now step back either way.
   added that the calling model must write. The core change that precedes this
   adds one optional argument and one sentence to `trace_resolve_decision`.
 - Core imports nothing from the extension: the mark functions and the legend
-  are core, the formatters read a `marks` list the recall hook supplies, and
+  are core, the formatters read a `source_marks` list the recall hook supplies, and
   the exporters get the person's words through a hook an extension registers.
 - Records are Pydantic v2 models; the state file is written atomically and the
   logs are single-line appends; pyright clean.

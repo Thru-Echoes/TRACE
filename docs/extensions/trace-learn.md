@@ -59,7 +59,22 @@ so the session's model can judge relevance itself.
   sessions therefore always sees its own notes.
 - **Weak candidates.** When fewer than `limit` learnings are matched, up to three of the
   nearest follow with `matched: false`. They never count as recalled (no `recall_count`
-  change) and never appear in decision warnings.
+  change) and never appear in the decision block.
+- **Source marks.** Every recalled or listed learning carries `source_marks`: the provenance
+  mark of the event it was extracted from, computed from the session record each time
+  ([ADR 008](../adr/008-provenance-marks-trial.md)). The mark describes that source, not the
+  learning's wording, which is the extractor's. A rendered line reads
+  `- [decision] <text> (lrn_424; source [accepted] trace_...#evt_002)`. No learning is shown
+  without a mark: a source that is neither a decision nor an AI's note gives `[ai-record]` or
+  `[person-note]`. `source_corrected_by` points at corrections of the source.
+- **Step back.** A learning whose source decision a person rejected, or replaced by accepting
+  a decision that revises it in the same session, is left out of recall, stays in the store,
+  and gains no exposure. The response lists it in `stepped_back`, the notice names it, the
+  decision block names it in a closing line when it had matched, and `trace_learn_list`
+  marks it `stepped_back`. A stored learning from the replacing decision is returned in its
+  place with `replaces`, with its own score, even below an explicit `threshold`
+  (`replaces_matched` when the learning it replaces had matched; it is then shown in the
+  decision block too). A replacement the ranker did not score is not returned.
 - **The response says what happened.** `trace_learn_recall` reports `matched`, `scored`,
   `floor`, `backend` and the `query` actually scored; a `notice` field explains an empty,
   small-store or cleaned-query recall. The session-start banner carries the same notice.
@@ -67,8 +82,9 @@ so the session's model can judge relevance itself.
   combined score (similarity mixed with tag overlap) times decay, filtered by
   `score >= threshold` and ordered by that score, over the candidates the backend scored.
 - **Decay.** The displayed `score` is similarity × `2^(-age / half_life)` (default half-life
-  365 days, measured from the last time the learning surfaced); learnings surfaced three or
-  more times never drop below 0.8. Decay does not reorder candidates with different
+  365 days, measured from the last time the learning surfaced); a learning surfaced three or
+  more times never drops below 0.8 when a person accepted its source as written, and fades like any
+  other otherwise. Decay does not reorder candidates with different
   evidence; it only breaks ties after fused score and similarity (so an evergreen learning
   outranks a fresher one of equal evidence). Measured on the benchmark store, letting decay
   scale the fused score cost 0.17 MRR@10 for BM25 alone, because adjacent fused ranks differ
