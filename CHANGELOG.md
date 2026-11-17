@@ -99,6 +99,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The default OpenAI model for LLM relevance scoring and learning extraction is now
+  `gpt-6.1-terra`** (previously `gpt-6-luna`). It applies when neither `TRACE_LLM_MODEL` nor
+  `TRACE_LLM_EXTRACTION_MODEL` is set; an environment or `.env` setting still wins. On 12
+  real sessions extracted once by each model from identical inputs, `gpt-6.1-terra` kept
+  about as many learnings per session as `gpt-5.4-mini` (4.8 against 4.9) and wrote the
+  fewest learnings worded as a rule with no person behind the source (2 of 58, against 12 of
+  59 for `gpt-5.4-mini`, 3 of 40 for `gpt-6-luna` and 5 of 51 for `gpt-6.1-sol`). It costs
+  about nine times as much per call as `gpt-6-luna`, which kept fewer learnings (3.3 per
+  session); at the token sizes measured, either is a few dollars a month or less.
 - **Jev is labeled experimental, and accepts a decision only after a person has resolved it**,
   because seeing the advice first would sway the person resolving it.
 - **The direct Jev route now defaults to the pinned `jev-1.13.0`** instead of `jev-latest`.
@@ -106,6 +115,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The capture report no longer undercounts prompts in host transcripts.** A message the
+  person sends while the assistant is still working is stored by the host as a queued message,
+  not a user turn, so the comparison of recorded prompts with transcript prompts read more
+  prompts recorded than typed. Those messages are now counted.
+- **The capture report separates a capture gap from a missed quote.** A quote typed in a
+  directory whose hooks were installed after the capture period started was reported only as
+  "not found", which reads like an invented quote. The report now also counts the missed
+  event and resolution quotes whose words match a host-transcript prompt the hooks did not
+  record, and the review sheet marks those rows with `capture_gap`. Such a quote is still not
+  verified: the transcript is matched against, never treated as recorded words.
 - **Recovering from a crashed writer can no longer let two writers in at once.** When two
   writers both found a dead holder's lock, one could steal it and create its own, and the
   other could then delete that new lock, losing an update without any error. Releasing a

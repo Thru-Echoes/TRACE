@@ -158,7 +158,7 @@ class ApiKeyRejectedError(LLMFallbackError):
 # learning extraction (TRACE_LLM_EXTRACTION_MODEL) when the operator sets neither.
 # Single source of truth: the README configuration table and the trace-learn doc
 # restate it, and tests/test_learn_default_model_sites.py fails when they drift.
-DEFAULT_LLM_MODEL = "gpt-6-luna"
+DEFAULT_LLM_MODEL = "gpt-6.1-terra"
 
 
 @dataclass(frozen=True)
