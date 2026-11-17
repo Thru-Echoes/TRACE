@@ -410,12 +410,23 @@ their denominators, per project and in total:
 10. Capture: entries recorded by kind; projects with no words recorded;
     recorded prompts that begin with a tag other than pasted text; and, for
     host sessions whose transcript still exists, typed prompts and dialog
-    answers in the transcript beside those recorded.
+    answers in the transcript beside those recorded. A typed prompt includes
+    one sent while the assistant was still working, which the host stores as a
+    queued message rather than a user turn.
+11. Capture gaps: missed event quotes and missed resolution quotes whose words
+    match a host-transcript prompt the hooks did not record (a host session
+    with no recorded entry, or a prompt earlier than its first recorded entry,
+    in a transcript folder the project's recorded words name). A miss of this
+    kind points at a gap in capture, for example a directory whose hooks were
+    installed after the period started, not at an invented quote. The
+    transcript is only matched against, never treated as recorded words, so
+    such a quote stays "not found".
 
 The review sheet (`--csv`) has one row per item worth a person's judgment: a
 stored learning whose source no person accepted, a quote not found, a human
 resolution with no quote, with a quote not found, or with a quote found only in
-older words, and a replay learning made by only one arm. It has empty columns
+older words, and a replay learning made by only one arm. A missed-quote row
+carries `capture_gap` = `yes` when measure 11 matched it. It has empty columns
 for the reviewer's name, "mark correct?", "useful?" and "reworded as a
 directive?". The last column is how the proposal-wording instruction (D5) is
 judged; directive wording is not detected automatically.

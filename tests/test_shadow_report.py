@@ -155,6 +155,66 @@ async def test_a_quote_that_is_not_found_is_split_by_word_share(
     assert any(row.kind == "quote_not_found" and row.event_id == "evt_005" for row in get_review_rows())
 
 
+async def test_a_missed_quote_typed_before_capture_is_a_capture_gap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A second host session in the same folder, whose prompt the hooks never recorded
+    # (its hooks were not installed yet), holds the quoted words.
+    uncaptured = tmp_path / "host" / "host-0.jsonl"
+    typed = datetime.now(UTC) - timedelta(seconds=30)
+    uncaptured.parent.mkdir(parents=True, exist_ok=True)
+    uncaptured.write_text(
+        json.dumps(
+            {"type": "user", "timestamp": _iso_z(typed), "message": {"role": "user", "content": "ship it on friday"}}
+        )
+        + "\n"
+    )
+    await _fixture(tmp_path, monkeypatch, contribution_snippet="ship it on friday")
+    total = build_report().total
+    assert total.quote == {"absent": 4, "not_found": 1}
+    assert total.quote_miss_uncaptured == 1
+    (row,) = [row for row in get_review_rows() if row.kind == "quote_not_found"]
+    assert row.capture_gap == "yes"
+    text = format_report(build_report())
+    assert "missed quotes matching a host-transcript prompt the hooks did not record (a capture gap): 1/1" in text
+
+
+async def test_a_missed_quote_with_no_unrecorded_prompt_is_not_a_capture_gap(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _fixture(tmp_path, monkeypatch, contribution_snippet="keep the retry limit at four")
+    total = build_report().total
+    assert (total.quote.get("not_found"), total.quote_miss_uncaptured) == (1, 0)
+    (row,) = [row for row in get_review_rows() if row.kind == "quote_not_found"]
+    assert row.capture_gap == ""
+
+
+async def test_capture_counts_a_prompt_sent_while_the_assistant_worked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _fixture(tmp_path, monkeypatch)
+    transcript = tmp_path / "host" / "host-1.jsonl"
+    sent = datetime.now(UTC)
+    queued = {
+        "type": "attachment",
+        "timestamp": _iso_z(sent),
+        "attachment": {
+            "type": "queued_command",
+            "prompt": "and the uploads too",
+            "commandMode": "prompt",
+            "origin": {"kind": "human"},
+        },
+    }
+    with transcript.open("a") as fh:
+        fh.write(json.dumps(queued) + "\n")
+    append_record(
+        _words_file(),
+        WordsEntry(ts=sent, host_session_id="host-1", text="and the uploads too", transcript=str(transcript)),
+    )
+    capture = build_report().total.capture
+    assert (capture.prompts_in_transcript, capture.prompts_recorded) == (3, 3)
+
+
 async def test_a_quote_found_only_in_older_words(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     await _fixture(tmp_path, monkeypatch, contribution_snippet="please keep the retry limit")
     assert build_report().total.quote_position == {"older": 1}

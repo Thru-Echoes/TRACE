@@ -32,7 +32,7 @@ from trace_mcp import project_identity as pident
 from trace_mcp.extensions.learn import matching, store
 from trace_mcp.extensions.learn.learning_marks import get_learning_tags
 from trace_mcp.extensions.learn.models import Learning
-from trace_mcp.extensions.learn.shadow.host_transcript import is_plain_prompt, read_host_inputs
+from trace_mcp.extensions.learn.shadow.host_transcript import is_plain_prompt, read_host_inputs, read_host_prompts
 from trace_mcp.extensions.learn.shadow.recall import RecallRecord
 from trace_mcp.extensions.learn.shadow.replay import ARMS, LearningAtExtraction, ReplayRecord, load_sessions
 from trace_mcp.extensions.learn.shadow.state import (
@@ -51,6 +51,7 @@ from trace_mcp.provenance_marks import (
     get_base_mark,
     get_event_marks,
     get_quote_position,
+    get_quote_status,
     get_quote_word_share,
     get_resolution_timing,
     is_human_resolution,
@@ -94,7 +95,9 @@ class CaptureCount(BaseModel):
     host_sessions: int = Field(default=0, description="Host sessions with recorded entries in range.")
     transcripts_missing: int = Field(default=0, description="Host sessions whose transcript is gone or unnamed.")
     transcripts_unreadable: int = Field(default=0, description="Host sessions whose transcript could not be read.")
-    prompts_in_transcript: int = Field(default=0, description="Typed prompts the transcripts hold.")
+    prompts_in_transcript: int = Field(
+        default=0, description="Typed prompts the transcripts hold, including those sent while the assistant worked."
+    )
     prompts_recorded: int = Field(default=0, description="Plain prompts the hooks recorded for those sessions.")
     dialog_answers_in_transcript: int = Field(default=0, description="Dialog answers the transcripts hold.")
     dialog_answers_recorded: int = Field(default=0, description="Dialog answers the hooks recorded.")
@@ -127,8 +130,14 @@ class ProjectReport(BaseModel):
     quote: dict[str, int] = Field(default_factory=dict, description="Quote status -> events.")
     quote_position: dict[str, int] = Field(default_factory=dict, description="Where verified event quotes were.")
     quote_miss_share: dict[str, int] = Field(default_factory=dict, description="Word-share band -> missed quotes.")
+    quote_miss_uncaptured: int = Field(
+        default=0, description="Missed event quotes that match a host-transcript prompt the hooks did not record."
+    )
     resolution: dict[str, int] = Field(default_factory=dict, description="Resolution quote -> human resolutions.")
     resolution_position: dict[str, int] = Field(default_factory=dict)
+    resolution_miss_uncaptured: int = Field(
+        default=0, description="Missed resolution quotes that match a host-transcript prompt the hooks did not record."
+    )
     resolution_by_quote: dict[str, dict[str, int]] = Field(default_factory=dict)
     resolution_timing: dict[str, int] = Field(default_factory=dict)
     similarity: dict[str, dict[str, int]] = Field(default_factory=_arms_of_counts)
@@ -157,7 +166,8 @@ class ReviewRow(BaseModel):
     """One row of the review sheet; the last four columns are for the reviewer.
 
     ``text`` holds the learning's text, or for quote and resolution rows the
-    quoted words. ``learning_id`` is a stored learning's id, or for a replay
+    quoted words. ``capture_gap`` is ``yes`` on a missed-quote row whose words
+    match a host-transcript prompt the hooks did not record. ``learning_id`` is a stored learning's id, or for a replay
     row the arm's own ordinal; ``arm`` is set on replay rows only.
     """
 
@@ -169,6 +179,7 @@ class ReviewRow(BaseModel):
     arm: str = ""
     marks: str = ""
     text: str = ""
+    capture_gap: str = ""
     reviewer: str = ""
     mark_correct: str = ""
     useful: str = ""
@@ -409,8 +420,60 @@ def _correction_target_tag(
     return "external"
 
 
+def get_uncaptured_prompts(words: Sequence[WordsEntry], *, since: datetime) -> list[WordsEntry]:
+    """Return the host-transcript prompts the hooks did not record, as entries for matching only.
+
+    The transcripts searched are every ``*.jsonl`` file, modified at or after
+    ``since``, in a folder that holds a transcript named by one of ``words``: the
+    host keeps one folder per working directory, so this covers host sessions of
+    the same directories that started before their hooks were installed or never
+    recorded a word. A prompt counts as not recorded when its host session has no
+    recorded entry, or it is earlier than that session's first recorded entry by
+    more than the capture slack. Never a source of verified words: the report
+    uses these only to say a missed quote points at a capture gap.
+
+    Side effects: reads transcript files.
+    """
+    first_recorded: dict[str, datetime] = {}
+    folders: set[Path] = set()
+    for entry in words:
+        ts = entry.ts if entry.ts.tzinfo is not None else entry.ts.replace(tzinfo=UTC)
+        if entry.host_session_id not in first_recorded or ts < first_recorded[entry.host_session_id]:
+            first_recorded[entry.host_session_id] = ts
+        if entry.transcript:
+            folders.add(Path(entry.transcript).parent)
+    cutoff = since.timestamp()
+    out: list[WordsEntry] = []
+    for folder in sorted(folders):
+        try:
+            files = sorted(p for p in folder.glob("*.jsonl") if p.is_file() and p.stat().st_mtime >= cutoff)
+        except OSError:
+            continue
+        for path in files:
+            prompts = read_host_prompts(path)
+            if not prompts:
+                continue
+            first = first_recorded.get(path.stem)
+            for ts, text in prompts:
+                if first is None or ts < first - CAPTURE_SLACK:
+                    out.append(WordsEntry(ts=ts, host_session_id=path.stem, text=text, kind="prompt"))
+    return out
+
+
+def _in_uncaptured(snippet: str, uncaptured: Sequence[WordsEntry], not_after: datetime) -> bool:
+    """True when ``snippet`` matches a not-recorded transcript prompt no later than ``not_after``."""
+    if not snippet.strip() or not uncaptured:
+        return False
+    return get_quote_status(snippet, uncaptured, not_after=not_after, session_created=not_after) == "verified"
+
+
 def _session_part(
-    key: str, report: ProjectReport, rows: list[ReviewRow], ctx: _Context, words: Sequence[WordsEntry]
+    key: str,
+    report: ProjectReport,
+    rows: list[ReviewRow],
+    ctx: _Context,
+    words: Sequence[WordsEntry],
+    uncaptured: Sequence[WordsEntry] = (),
 ) -> None:
     learnings = _stored_learnings(key)
     for session in ctx.sessions:
@@ -429,6 +492,8 @@ def _session_part(
                     report.quote_miss_share,
                     _share_band(get_quote_word_share(snippet, words, not_after=event.timestamp)),
                 )
+                gap = _in_uncaptured(snippet, uncaptured, event.timestamp + CAPTURE_SLACK)
+                report.quote_miss_uncaptured += gap
                 rows.append(
                     ReviewRow(
                         project=key,
@@ -437,6 +502,7 @@ def _session_part(
                         event_id=event.id,
                         marks=" ".join(marks.tags()),
                         text=snippet,
+                        capture_gap="yes" if gap else "",
                     )
                 )
             if is_human_resolution(event) and event.decision is not None:
@@ -446,6 +512,7 @@ def _session_part(
                 _bump(report.resolution_timing, get_resolution_timing(event, words))
                 quote = decision.resolution_snippet or ""
                 kind: ReviewKind | None = None
+                gap = False
                 if marks.resolution == "verified" and decision.resolved_at is not None:
                     position = get_quote_position(quote, words, not_after=decision.resolved_at)
                     _bump(report.resolution_position, position)
@@ -454,6 +521,9 @@ def _session_part(
                     kind = "resolution_unquoted"
                 elif marks.resolution == "not_found":
                     kind = "resolution_not_found"
+                    resolved = decision.resolved_at or event.timestamp
+                    gap = _in_uncaptured(quote, uncaptured, resolved + CAPTURE_SLACK)
+                    report.resolution_miss_uncaptured += gap
                 if kind is not None:
                     rows.append(
                         ReviewRow(
@@ -463,6 +533,7 @@ def _session_part(
                             event_id=event.id,
                             marks=" ".join(marks.tags()),
                             text=quote,
+                            capture_gap="yes" if gap else "",
                         )
                     )
             annotation = event.annotation
@@ -508,7 +579,8 @@ def _project(key: str, ctx: _Context) -> tuple[ProjectReport, list[ReviewRow]]:
     _stored_part(key, report, rows, ctx, words)
     _replay_part(key, report, rows, ctx)
     _recall_and_errors_part(key, report, ctx)
-    _session_part(key, report, rows, ctx, words)
+    uncaptured = get_uncaptured_prompts(words, since=datetime.combine(ctx.date_from, time.min, tzinfo=UTC))
+    _session_part(key, report, rows, ctx, words, uncaptured)
     _words_part(key, report, ctx, words)
     return report, rows
 
@@ -642,12 +714,20 @@ def _project_block(p: ProjectReport) -> list[str]:
     lines.append(f"  quote check, events: {_dist(p.quote, events)}")
     lines.append(f"  verified quotes by position: {_dist(p.quote_position, verified)}")
     lines.append(f"  missed quotes by word share in one entry: {_dist(p.quote_miss_share, missed)}")
+    lines.append(
+        f"  missed quotes matching a host-transcript prompt the hooks did not record (a capture gap): "
+        f"{p.quote_miss_uncaptured}/{missed}"
+    )
     resolutions = sum(p.resolution.values())
     lines.append(f"  human resolutions by resolution quote: {_dist(p.resolution, resolutions)}")
     for status, by_quote in sorted(p.resolution_by_quote.items()):
         lines.append(f"    {status}, by the decision's quote check: {_dist(by_quote, p.resolution.get(status, 0))}")
     lines.append(
         f"  verified resolution quotes by position: {_dist(p.resolution_position, p.resolution.get('verified', 0))}"
+    )
+    lines.append(
+        f"  missed resolution quotes matching a host-transcript prompt the hooks did not record (a capture gap): "
+        f"{p.resolution_miss_uncaptured}/{p.resolution.get('not_found', 0)}"
     )
     lines.append(f"  human resolutions by timing (a count, never a mark): {_dist(p.resolution_timing, resolutions)}")
     lines.append(f"  corrections by mark of the corrected item: {_dist(p.corrections_by_mark)}")

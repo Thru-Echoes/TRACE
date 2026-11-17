@@ -184,7 +184,7 @@ An actor is any entity that performs actions within a session.
 - `ai` — An AI model or agent performing actions, proposing decisions, or generating outputs.
 - `system` — An automated system acting without direct human or AI agency (e.g., a CI pipeline, a scheduled job).
 
-**AI actor IDs** are typically the model identifier published by the client's vendor. The TRACE specification is vendor-neutral; common examples spanning multiple organizations include `"claude-opus-4.7"` (Anthropic), `"gpt-5.5"` (OpenAI), `"gemini-3-pro"` (Google), `"llama-4-405b"` (Meta), and `"deepseek-r1"` (DeepSeek). Producers SHOULD use the canonical model ID from their AI client.
+**AI actor IDs** are typically the model identifier published by the client's vendor. The TRACE specification is vendor-neutral; common examples spanning multiple organizations include `"claude-opus-4.7"` (Anthropic), `"gpt-6.1-sol"` (OpenAI), `"gemini-3-pro"` (Google), `"llama-4-405b"` (Meta), and `"deepseek-r1"` (DeepSeek). Producers SHOULD use the canonical model ID from their AI client.
 
 ### 3.4 Event
 

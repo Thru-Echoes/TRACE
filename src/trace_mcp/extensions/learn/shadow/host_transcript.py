@@ -1,14 +1,21 @@
-"""Count a host transcript's typed prompts and dialog answers, for the capture comparison only (ADR 008 D3, D7).
+"""Read a host transcript's typed prompts and dialog answers, for the capture comparison only (ADR 008 D3, D7).
 
 The report compares what the hooks recorded for a host session with what the
 host's own transcript holds, while that transcript still exists. The transcript
 format is not a documented interface: this reads the shape observed on one
 Claude Code version (one JSON object per line) and skips anything else rather
-than guessing. It is never a source of the person's words.
+than guessing. A typed prompt is either a user turn or a message the person sent
+while the assistant was still working, which the host stores as a
+``queued_command`` attachment rather than a user turn.
 
-Exports: HostInputs, is_plain_prompt, read_host_inputs
+The transcript is never a source of the person's words for a quote check: a
+quote is verified only against what the hooks recorded. The report uses
+``read_host_prompts`` only to say that a missed quote matches a prompt the hooks
+did not record, which points at a gap in capture, not at an invented quote.
 
-Side effects: ``read_host_inputs`` reads one file.
+Exports: HostInputs, is_plain_prompt, read_host_inputs, read_host_prompts
+
+Side effects: ``read_host_inputs`` and ``read_host_prompts`` read one file.
 """
 
 from __future__ import annotations
@@ -28,7 +35,9 @@ _NOTES_ONLY = "(notes only)"
 class HostInputs(BaseModel):
     """What a transcript holds in a time window."""
 
-    prompts: int = Field(default=0, description="Typed prompts (plain prompts only).")
+    prompts: int = Field(
+        default=0, description="Typed prompts (plain prompts only), including those sent while the assistant worked."
+    )
     dialog_answers: int = Field(default=0, description="Non-empty question-dialog answers.")
 
 
@@ -66,17 +75,41 @@ def _prompt_text(message: Any) -> str | None:
     return "".join(text for text in texts if isinstance(text, str))
 
 
-def read_host_inputs(path: Path, *, since: datetime, until: datetime) -> HostInputs | None:
-    """Count the typed prompts and dialog answers in ``path`` timestamped within ``[since, until]``.
+def _queued_prompt(entry: dict[str, Any]) -> str | None:
+    """The text of a prompt the person sent while the assistant was working, or None for anything else."""
+    if entry.get("type") != "attachment":
+        return None
+    attachment = entry.get("attachment")
+    if not isinstance(attachment, dict) or attachment.get("type") != "queued_command":
+        return None
+    if attachment.get("commandMode") != "prompt":
+        return None
+    origin = attachment.get("origin")
+    if not isinstance(origin, dict) or origin.get("kind") != "human":
+        return None
+    text = attachment.get("prompt")
+    return text if isinstance(text, str) else None
 
-    Returns None when the file cannot be opened or no line parses. Never raises.
-    """
+
+def _entry_prompt(entry: dict[str, Any]) -> str | None:
+    """The plain typed prompt an entry holds (a user turn or a queued prompt), or None."""
+    if entry.get("type") == "user" and entry.get("isMeta") is not True and entry.get("isCompactSummary") is not True:
+        text = _prompt_text(entry.get("message"))
+    else:
+        text = _queued_prompt(entry)
+    if text is None or text.startswith(_CONTINUATION_PREFIX) or not is_plain_prompt(text):
+        return None
+    return text
+
+
+def _read_entries(path: Path) -> list[dict[str, Any]] | None:
+    """The transcript's parsed JSON objects, skipping sidechain lines; None when unreadable or nothing parses."""
     try:
         lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
     except Exception:
         return None
+    entries: list[dict[str, Any]] = []
     parsed_any = False
-    inputs = HostInputs()
     for line in lines:
         try:
             entry = json.loads(line)
@@ -85,20 +118,48 @@ def read_host_inputs(path: Path, *, since: datetime, until: datetime) -> HostInp
         if not isinstance(entry, dict):
             continue
         parsed_any = True
+        if entry.get("isSidechain") is not True:
+            entries.append(entry)
+    return entries if parsed_any else None
+
+
+def read_host_prompts(path: Path) -> list[tuple[datetime, str]] | None:
+    """Return the transcript's plain typed prompts with their times, oldest first.
+
+    Includes prompts sent while the assistant was working. Returns None when the
+    file cannot be opened or no line parses. Never raises.
+    """
+    entries = _read_entries(path)
+    if entries is None:
+        return None
+    prompts: list[tuple[datetime, str]] = []
+    for entry in entries:
         try:
-            if entry.get("isSidechain") is True:
-                continue
+            ts = _parse_time(entry.get("timestamp"))
+            text = _entry_prompt(entry)
+        except Exception:
+            continue
+        if ts is not None and text is not None:
+            prompts.append((ts, text))
+    return sorted(prompts, key=lambda item: item[0])
+
+
+def read_host_inputs(path: Path, *, since: datetime, until: datetime) -> HostInputs | None:
+    """Count the typed prompts and dialog answers in ``path`` timestamped within ``[since, until]``.
+
+    Returns None when the file cannot be opened or no line parses. Never raises.
+    """
+    entries = _read_entries(path)
+    if entries is None:
+        return None
+    inputs = HostInputs()
+    for entry in entries:
+        try:
             ts = _parse_time(entry.get("timestamp"))
             if ts is None or not (since <= ts <= until):
                 continue
-            if (
-                entry.get("type") == "user"
-                and entry.get("isMeta") is not True
-                and entry.get("isCompactSummary") is not True
-            ):
-                text = _prompt_text(entry.get("message"))
-                if text is not None and not text.startswith(_CONTINUATION_PREFIX) and is_plain_prompt(text):
-                    inputs.prompts += 1
+            if _entry_prompt(entry) is not None:
+                inputs.prompts += 1
             result = entry.get("toolUseResult")
             if isinstance(result, dict) and isinstance(result.get("answers"), dict):
                 inputs.dialog_answers += sum(
@@ -106,4 +167,4 @@ def read_host_inputs(path: Path, *, since: datetime, until: datetime) -> HostInp
                 )
         except Exception:
             continue
-    return inputs if parsed_any else None
+    return inputs

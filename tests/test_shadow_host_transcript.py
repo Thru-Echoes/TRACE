@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from trace_mcp.extensions.learn.shadow.host_transcript import is_plain_prompt, read_host_inputs
+from trace_mcp.extensions.learn.shadow.host_transcript import is_plain_prompt, read_host_inputs, read_host_prompts
 
 SINCE = datetime(2026, 11, 12, 0, 0, tzinfo=UTC)
 UNTIL = datetime(2026, 11, 12, 23, 59, tzinfo=UTC)
@@ -100,3 +100,42 @@ def test_the_note_only_placeholder_is_not_a_dialog_answer(tmp_path: Path) -> Non
     }
     inputs = read_host_inputs(_write(tmp_path / "t.jsonl", [line]), since=SINCE, until=UNTIL)
     assert inputs is not None and inputs.dialog_answers == 1
+
+
+def _queued(prompt: str, *, mode: str = "prompt", origin: object = None, ts: str = TS) -> dict:
+    """A message sent while the assistant was working, in the shape the host stores it."""
+    return {
+        "type": "attachment",
+        "timestamp": ts,
+        "attachment": {
+            "type": "queued_command",
+            "prompt": prompt,
+            "commandMode": mode,
+            "origin": {"kind": "human"} if origin is None else origin,
+        },
+    }
+
+
+def test_a_prompt_sent_while_the_assistant_worked_is_counted(tmp_path: Path) -> None:
+    lines = [
+        _user("first, look at the uploader"),
+        _queued("also check the retry limit"),
+        _queued("<task-notification>\n<status>done</status>\n</task-notification>", mode="task-notification"),
+        _queued("a message from another session", origin={"kind": "peer"}),
+        _queued('<cross-session-message from="peer">hello</cross-session-message>'),
+    ]
+    inputs = read_host_inputs(_write(tmp_path / "t.jsonl", lines), since=SINCE, until=UNTIL)
+    assert inputs is not None and inputs.prompts == 2
+
+
+def test_read_host_prompts_returns_typed_prompts_oldest_first(tmp_path: Path) -> None:
+    lines = [
+        {**_user("the later prompt"), "timestamp": "2026-11-12T03:00:00.000Z"},
+        _queued("sent mid-turn", ts="2026-11-12T02:00:00.000Z"),
+        _user("<command-name>/deploy</command-name>"),
+        {**_user("the earliest prompt"), "timestamp": "2026-11-12T00:30:00.000Z"},
+    ]
+    prompts = read_host_prompts(_write(tmp_path / "t.jsonl", lines))
+    assert prompts is not None
+    assert [text for _, text in prompts] == ["the earliest prompt", "sent mid-turn", "the later prompt"]
+    assert read_host_prompts(tmp_path / "absent.jsonl") is None
